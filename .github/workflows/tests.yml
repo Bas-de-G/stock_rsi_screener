@@ -7,8 +7,11 @@ name: Tests
 # because TradingView had a blip or a scraped page changed shape.
 
 on:
+  # Only main here. Without the branch filter, a push to a branch that has an
+  # open pull request triggers this twice — once for the push, once for the
+  # pull_request event — burning double the minutes for the same commit.
   push:
-    branches-ignore: []
+    branches: [main]
   pull_request:
 
 permissions:
