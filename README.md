@@ -166,14 +166,18 @@ The scheduled workflow publishes the dashboard to **GitHub Pages**, so there's
 a live URL that stays current with nobody's laptop switched on. Your friend
 needs no Python, no install, and no accounts — just the link.
 
-**One-time setup:**
+**Setup:**
 
-1. Merge this branch to `main`. GitHub only runs scheduled workflows from the
-   repository's **default branch** — on a feature branch the schedule never
-   fires.
-2. **Settings → Pages → Source: GitHub Actions.**
-3. **Actions → Daily screener run → Run workflow** to publish immediately
-   rather than waiting for the next weekday close.
+1. Merge to `main`. GitHub only runs scheduled workflows from the repository's
+   **default branch** — on a feature branch the schedule never fires, and the
+   workflow deliberately won't commit data or publish from anywhere else.
+2. **Actions → Daily screener run → Run workflow** to publish straight away
+   instead of waiting for the next weekday close.
+
+The workflow enables Pages itself on that first run. If your account settings
+don't allow that, turn it on manually under **Settings → Pages → Source:
+GitHub Actions** and run it again — the run won't fail either way, it just
+skips publishing and still collects the day's data.
 
 The page then lands at:
 
@@ -419,6 +423,10 @@ in but not a subscriber session. Re-run `login`.
 ```bash
 python -m pytest tests/ -q      # 132 tests
 ```
+
+CI runs them on every push and pull request against Python 3.10, 3.11 and
+3.12 (`.github/workflows/tests.yml`), plus a check that `config.yaml` loads
+and the dashboard builds from an empty database.
 
 They cover the RSI maths (pinned against TradingView's own published value),
 the crossing and window logic including the exact boundary cases, both

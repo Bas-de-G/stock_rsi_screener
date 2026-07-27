@@ -119,6 +119,7 @@ def fetch_daily_closes(yahoo_symbol: str, range_: str = "1y") -> list[tuple[str,
 
 
 def _epoch_to_date(epoch_seconds: int) -> str:
+    # Timezone-aware rather than utcfromtimestamp, which is deprecated in 3.12.
     import datetime as _dt
 
-    return _dt.datetime.utcfromtimestamp(epoch_seconds).date().isoformat()
+    return _dt.datetime.fromtimestamp(epoch_seconds, _dt.timezone.utc).date().isoformat()
