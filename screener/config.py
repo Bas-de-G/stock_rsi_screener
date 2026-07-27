@@ -22,6 +22,16 @@ class Ticker:
     symbol: str
     tradingview: str
     morningstar: str
+    # Yahoo's symbol for backfill. Usually the same as `symbol`, but not
+    # always: Rolls-Royce is RR. on TradingView and RR.L on Yahoo.
+    yahoo: str = ""
+    # Quote currency. Rolls-Royce trades in pence, so a bare number next to a
+    # dollar price would be misleading.
+    currency: str = "USD"
+
+    def __post_init__(self):
+        if not self.yahoo:
+            object.__setattr__(self, "yahoo", self.symbol)
 
     @property
     def morningstar_url(self) -> str:
@@ -52,6 +62,7 @@ class SignalConfig:
 class StorageConfig:
     database: Path
     csv_dir: Path
+    fair_values: Path
 
 
 @dataclass(frozen=True)
@@ -115,6 +126,8 @@ def load_config(path: str | Path | None = None) -> Config:
                 symbol=str(entry["symbol"]).upper(),
                 tradingview=str(entry["tradingview"]),
                 morningstar=str(entry["morningstar"]).strip("/"),
+                yahoo=str(entry.get("yahoo", "") or ""),
+                currency=str(entry.get("currency", "USD")).upper(),
             )
         )
     if not tickers:
@@ -162,6 +175,7 @@ def load_config(path: str | Path | None = None) -> Config:
     storage = StorageConfig(
         database=_resolve(store_raw.get("database", "data/screener.db")),
         csv_dir=_resolve(store_raw.get("csv_dir", "data")),
+        fair_values=_resolve(store_raw.get("fair_values", "fair_values.yaml")),
     )
 
     ms_raw = raw.get("morningstar", {})

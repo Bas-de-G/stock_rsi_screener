@@ -86,13 +86,27 @@ def test_recording_a_fair_value_can_promote_a_pattern_to_a_signal(store):
         Signal("IBM", "2026-07-16", "2026-07-22", "2026-07-23",
                None, None, False, False, False, "now")
     )
-    store.update_signal_valuation("IBM", "2026-07-23", 217.20, 225.00, True, True)
+    store.update_signal_valuation("IBM", "2026-07-23", 217.20, 225.00, True, True, True)
 
     signals = store.all_signals("IBM")
     assert len(signals) == 1
     assert signals[0].fired is True
     assert signals[0].valuation_known is True
     assert signals[0].fair_value == 225.00
+
+
+def test_a_contradicting_valuation_can_leave_a_signal_firing(store):
+    """Fair value grades a signal; with lenient firing it doesn't cancel it."""
+    store.record_signal(
+        Signal("TSLA", "2026-07-16", "2026-07-22", "2026-07-23",
+               None, None, False, False, True, "now")
+    )
+    # known=True, confirms=False (above fair value), but still fired.
+    store.update_signal_valuation("TSLA", "2026-07-23", 307.0, 280.0, True, False, True)
+    sig = store.all_signals("TSLA")[0]
+    assert sig.fired is True
+    assert sig.valuation_known is True
+    assert sig.valuation_pass is False
 
 
 def test_manual_valuation_roundtrips_its_source(store):

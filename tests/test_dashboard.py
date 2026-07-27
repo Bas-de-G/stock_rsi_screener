@@ -1,7 +1,7 @@
 """Tests for the dashboard's state model and rendering.
 
-The state a card shows is the whole point of the page — a pattern that nobody
-has fair-value checked must never read as a confirmed buy signal.
+The state a card shows is the whole point of the page: an RSI pattern is a buy
+signal on its own, and only a fair value that agrees with it earns the rocket.
 """
 
 from __future__ import annotations
@@ -34,11 +34,13 @@ def config(tmp_path):
     return load_config(path)
 
 
-def signal(symbol="NVDA", up2="2026-07-23", known=False, fired=False):
+def signal(symbol="NVDA", up2="2026-07-23", known=False, confirms=False, fired=True):
+    """A recorded pattern. `fired` defaults True: under the configured
+    lenient mode the RSI pattern is a buy signal on its own."""
     return Signal(
         symbol=symbol, up1_date="2026-07-16", down_date="2026-07-22", up2_date=up2,
         price=200.0 if known else None, fair_value=220.0 if known else None,
-        valuation_known=known, valuation_pass=fired, fired=fired, recorded_at="now",
+        valuation_known=known, valuation_pass=confirms, fired=fired, recorded_at="now",
     )
 
 
@@ -51,6 +53,7 @@ def row(**kw):
         crosses=[],
         valuation=None,
         signals=[],
+        currency="USD",
     )
     base.update(kw)
     return Row(**base)
@@ -59,30 +62,49 @@ def row(**kw):
 # ------------------------------------------------------------- states
 
 
-def test_unchecked_pattern_is_pending_not_a_signal():
-    """The core guarantee: no fair value check means no buy signal."""
-    r = row(signals=[signal(known=False, fired=False)])
-    assert r.state == "pending"
+def test_pattern_alone_is_a_buy_signal():
+    """RSI pattern fires on its own — fair value only grades it."""
+    r = row(signals=[signal(known=False, fired=True)])
+    assert r.state == "signal"
+    assert r.fired is True
+    assert r.strong is False
+
+
+def test_confirming_fair_value_makes_it_a_strong_buy():
+    r = row(signals=[signal(known=True, confirms=True, fired=True)])
+    assert r.state == "strong"
+    assert r.strong is True
+
+
+def test_contradicting_fair_value_leaves_it_a_plain_buy_signal():
+    """Trading above fair value downgrades the signal, it doesn't cancel it."""
+    r = row(signals=[signal(known=True, confirms=False, fired=True)])
+    assert r.state == "signal_checked"
+    assert r.fired is True
+    assert r.strong is False
+
+
+def test_strict_mode_pattern_that_did_not_fire_is_rejected():
+    r = row(signals=[signal(known=True, confirms=False, fired=False)])
+    assert r.state == "rejected"
     assert r.fired is False
 
 
-def test_checked_and_passing_pattern_is_a_signal():
-    r = row(signals=[signal(known=True, fired=True)])
+def test_signal_state_outranks_current_rsi_level():
+    """A fired signal still shows even if RSI has since recovered."""
+    r = row(
+        series=[RsiPoint("NVDA", "2026-07-27", 100.0, 65.0, "live:tradingview")],
+        signals=[signal(fired=True)],
+    )
     assert r.state == "signal"
 
 
-def test_checked_but_failing_pattern_is_rejected():
-    r = row(signals=[signal(known=True, fired=False)])
-    assert r.state == "rejected"
-
-
-def test_pattern_state_outranks_current_rsi_level():
-    """A completed pattern still needs a human even if RSI has since recovered."""
-    r = row(
-        series=[RsiPoint("NVDA", "2026-07-27", 100.0, 65.0, "live:tradingview")],
-        signals=[signal(known=False)],
-    )
-    assert r.state == "pending"
+def test_a_strong_buy_wins_over_a_later_plain_signal():
+    r = row(signals=[
+        signal(up2="2026-01-05", known=True, confirms=True, fired=True),
+        signal(up2="2026-07-23", known=False, fired=True),
+    ])
+    assert r.state == "strong"
 
 
 @pytest.mark.parametrize(
@@ -97,9 +119,15 @@ def test_empty_series_is_nodata():
     assert row(series=[]).state == "nodata"
 
 
-def test_a_fired_signal_wins_over_a_later_unchecked_pattern():
-    r = row(signals=[signal(up2="2026-01-05", known=True, fired=True), signal(up2="2026-07-23")])
-    assert r.state == "signal"
+def test_any_checked_valuation_marks_the_signal_as_checked():
+    """One pattern was checked (and disagreed), a later one wasn't. The card
+    reports that a valuation exists rather than inviting a fresh check."""
+    r = row(signals=[
+        signal(up2="2026-01-05", known=True, confirms=False, fired=True),
+        signal(up2="2026-07-23", known=False, fired=True),
+    ])
+    assert r.state == "signal_checked"
+    assert r.strong is False
 
 
 # ------------------------------------------------------------ rendering
@@ -141,10 +169,23 @@ def test_morningstar_button_points_at_the_right_ticker(config):
     assert 'rel="noopener noreferrer"' in html
 
 
-def test_pending_card_says_it_is_unverified(config):
-    html = render([row(signals=[signal()])], config)
-    assert "Verify fair value" in html
-    assert "fair value not checked yet" in html
+def test_unconfirmed_signal_invites_a_fair_value_check(config):
+    html = render([row(signals=[signal(known=False, fired=True)])], config)
+    assert "Buy signal" in html
+    assert "confirm the fair value" in html.lower()
+
+
+def test_strong_buy_card_carries_the_rocket(config):
+    html = render([row(signals=[signal(known=True, confirms=True, fired=True)])], config)
+    assert "Strong buy 🚀" in html
+
+
+def test_non_usd_close_shows_its_currency(config):
+    """Rolls-Royce quotes in pence; a bare number would read as dollars."""
+    html = render([row(symbol="RR", currency="GBX")], config)
+    assert "GBX" in html
+    usd = render([row(symbol="IBM", currency="USD")], config)
+    assert 'class="ccy"' not in usd
 
 
 def test_symbols_are_html_escaped(config):

@@ -1,12 +1,17 @@
 name: Daily screener run
 
-# Runs the RSI half of the screener on GitHub's servers and commits the
-# history back to the repo, so it keeps collecting data even when nobody's
-# laptop is on.
+# Runs the screener on GitHub's servers every weekday, commits the collected
+# history back to the repo, and publishes the dashboard to GitHub Pages — so
+# there's a live URL that stays current with nobody's laptop switched on.
 #
-# Morningstar is skipped by default: fair value needs a logged-in subscriber
-# session, and a session cookie is a credential. If you want the valuation
-# half to run here too, see "Running the valuation half in CI" in the README.
+# NOTE: GitHub only runs scheduled workflows from the repository's DEFAULT
+# branch. On a feature branch this file only runs via "Run workflow"; merge it
+# to main for the daily schedule to start firing.
+#
+# Morningstar scraping is skipped by default: fair value is subscriber-only,
+# and a session cookie is a credential. Record fair values by hand in
+# fair_values.yaml instead — that file is committed, so it can be edited
+# straight from github.com and the next run picks it up.
 
 on:
   schedule:
@@ -14,6 +19,11 @@ on:
     # so the RSI reading is the settled daily bar, not an intraday value.
     - cron: "30 21 * * 1-5"
   workflow_dispatch:
+  push:
+    # Re-publish immediately when a fair value is edited on github.com.
+    paths:
+      - "fair_values.yaml"
+      - "config.yaml"
 
 permissions:
   contents: write
@@ -26,67 +36,6 @@ concurrency:
 
 jobs:
   screen:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Restore Morningstar session (optional)
-        id: session
-        env:
-          STATE_B64: ${{ secrets.MORNINGSTAR_STATE_B64 }}
-        run: |
-          if [ -n "$STATE_B64" ]; then
-            mkdir -p auth
-            echo "$STATE_B64" | base64 -d > auth/morningstar_state.json
-            python -m playwright install --with-deps chromium
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No MORNINGSTAR_STATE_B64 secret — running RSI only."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Seed RSI history on first run
-        run: |
-          if [ ! -f data/screener.db ]; then
-            python -m screener.cli backfill --range 1y
-          fi
-
-      - name: Run screener
-        run: |
-          if [ "${{ steps.session.outputs.available }}" = "true" ]; then
-            python -m screener.cli run --with-morningstar
-          else
-            python -m screener.cli run
-          fi
-
-      - name: Commit collected data
-        run: |
-          rm -rf auth debug
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # data/ is gitignored so local runs stay clean; CI force-adds it
-          # because this is where the shared history lives.
-          git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "Nothing changed."
-          else
-            git commit -m "data: screener run $(date -u +%Y-%m-%d)"
-            git push
-          fi
-
-  # Publishes the dashboard to GitHub Pages so it's always current at
-  # https://<user>.github.io/stock_rsi_screener/ with nothing to install.
-  # Requires Settings -> Pages -> Source: GitHub Actions (one-time).
-  publish:
-    needs: screen
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -102,10 +51,35 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Rebuild dashboard from the committed data
+      - name: Seed RSI history on first run
         run: |
-          git pull --rebase --autostash origin "$GITHUB_REF_NAME" || true
-          python -m screener.cli dashboard --output site/index.html
+          if [ ! -f data/screener.db ]; then
+            python -m screener.cli backfill --range 1y
+          fi
+
+      - name: Run screener
+        run: python -m screener.cli run
+
+      - name: Build dashboard
+        run: python -m screener.cli dashboard --output site/index.html
+
+      - name: Commit collected data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # data/ is gitignored so local runs stay clean; CI force-adds it
+          # because this is where the shared history lives.
+          git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "data: screener run $(date -u +%Y-%m-%d)"
+            # Another run may have pushed while this one was working.
+            git pull --rebase --autostash origin "$GITHUB_REF_NAME" || true
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:

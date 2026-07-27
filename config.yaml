@@ -52,6 +52,16 @@ tickers:
   - {symbol: XOM,   tradingview: "NYSE:XOM",     morningstar: xnys/xom}
   - {symbol: CVX,   tradingview: "NYSE:CVX",     morningstar: xnys/cvx}
 
+  # --- UK listing ------------------------------------------------------
+  # Rolls-Royce Holdings (the aero-engine maker; Rolls-Royce Motor Cars is
+  # owned by BMW and isn't listed). Every identifier differs here, which is
+  # what `yahoo` and `currency` exist for:
+  #   TradingView  LSE:RR.   (trailing dot)
+  #   Yahoo        RR.L
+  #   Morningstar  xlon/rr.
+  # Quoted in pence, not pounds -- 1413.6 means GBX 1413.6 (about GBP 14.14).
+  - {symbol: RR, tradingview: "LSE:RR.", morningstar: xlon/rr., yahoo: RR.L, currency: GBX}
+
 rsi:
   # Wilder RSI, the same definition TradingView's "RSI (14)" uses.
   # TradingView only publishes periods 14 and 7.
@@ -73,16 +83,19 @@ signal:
   # Set to the "buy it while it's cheap" reading.
   valuation_rule: price_below_fair_value
 
-  # v1 runs the RSI screener on its own, so most days there is no fair value
-  # recorded yet. Keep this false: a completed RSI pattern with no recorded
-  # fair value is shown on the dashboard as "verify fair value", never as a
-  # confirmed buy signal. It only becomes one after you click through to
-  # Morningstar and record what you saw with `screener fair-value SYM <value>`.
-  fire_without_valuation: false
+  # true  -> a completed RSI pattern is a buy signal on its own. Recording a
+  #          fair value that agrees upgrades it to a STRONG BUY (rocket on the
+  #          dashboard); one that disagrees leaves it a plain buy signal,
+  #          flagged as trading above fair value.
+  # false -> strict mode: nothing fires until a fair value confirms it.
+  fire_without_valuation: true
 
 storage:
   database: data/screener.db
   csv_dir: data
+  # Hand-checked Morningstar fair values. Committed and editable on GitHub,
+  # unlike the database — see the README.
+  fair_values: fair_values.yaml
 
 dashboard:
   # Where `screener dashboard` writes the page.

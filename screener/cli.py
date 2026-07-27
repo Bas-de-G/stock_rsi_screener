@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from .config import Config, load_config
+from .fairvalues import FairValueError, load_fair_values, save_fair_value
 from .morningstar import (
     AuthenticationError,
     MorningstarError,
@@ -24,7 +25,7 @@ from .morningstar import (
 )
 from .notify import format_signal, send_webhook
 from .rsi import wilder_rsi_series
-from .signals import find_cross_pairs, valuation_passes
+from .signals import find_cross_pairs, is_strong, signal_fires, valuation_passes
 from .storage import (
     RsiPoint,
     Signal,
@@ -74,7 +75,7 @@ def cmd_backfill(config: Config, args) -> int:
     with Store(config.storage.database) as store:
         for ticker in config.tickers:
             try:
-                closes = fetch_daily_closes(ticker.symbol, range_=args.range)
+                closes = fetch_daily_closes(ticker.yahoo, range_=args.range)
             except MarketDataError as exc:
                 print(f"  {ticker.symbol}: {exc}")
                 continue
@@ -111,6 +112,10 @@ def cmd_run(config: Config, args) -> int:
 
     exit_code = 0
     with Store(config.storage.database) as store:
+        recorded = sync_fair_values(store, config)
+        if recorded:
+            print(f"  {recorded} hand-checked fair value(s) loaded "
+                  f"from {config.storage.fair_values.name}\n")
         # --- RSI, from TradingView -------------------------------------
         for ticker in config.tickers:
             try:
@@ -176,7 +181,7 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
             valuation = store.valuation(symbol, pair.up2_date)
             price = valuation.price if valuation else None
             fair_value = valuation.fair_value if valuation else None
-            known, passed = valuation_passes(price, fair_value, config.signal)
+            known, confirms = valuation_passes(price, fair_value, config.signal)
 
             signal = Signal(
                 symbol=symbol,
@@ -186,8 +191,8 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
                 price=price,
                 fair_value=fair_value,
                 valuation_known=known,
-                valuation_pass=passed,
-                fired=passed,
+                valuation_pass=confirms,
+                fired=signal_fires(confirms, config.signal),
                 recorded_at=now,
             )
             store.record_signal(signal)
@@ -239,48 +244,90 @@ def cmd_fair_value(config: Config, args) -> int:
         if not series:
             print(f"No price history for {symbol} yet — run `backfill` or `run` first.")
             return 1
-        price = series[-1].close
 
-        store.upsert_valuation(
-            Valuation(
-                symbol=symbol,
-                date=date,
-                price=price,
-                fair_value=args.value,
-                fair_value_date=date,
-                source="manual",
-            )
+        # YAML first: that file is the committed, shareable record. The
+        # database is derived from it and rebuilt freely.
+        save_fair_value(
+            config.storage.fair_values, symbol, args.value, checked=date, note=args.note
         )
-        _, passed = valuation_passes(price, args.value, config.signal)
-        verdict = "PASSES" if passed else "does not pass"
-        print(f"{symbol}: fair value {args.value:,.2f} vs close {price:,.2f} — {verdict} the gate")
-        print(f"  ({config.signal.describe_rule()})")
+        count = sync_fair_values(store, config, quiet=True)
 
-        # A manual check is a "right now" answer, so it applies to whichever
-        # pattern is still waiting on one — not just a pattern dated today.
-        # (Automated `run --with-morningstar` is stricter: it only ever scores
-        # a pattern against a valuation from that exact date.)
+        price = series[-1].close
+        known, confirms = valuation_passes(price, args.value, config.signal)
+        verdict = "STRONG BUY — valuation confirms" if is_strong(known, confirms) else (
+            "buy signal stands, but it's trading above fair value")
+        print(f"{symbol}: fair value {args.value:,.2f} vs close {price:,.2f}")
+        print(f"  {verdict}")
+        print(f"  ({config.signal.describe_rule()})")
+        print(f"  saved to {config.storage.fair_values.name} ({count} recorded in total)")
+
         updated = _apply_valuation_to_pending_signals(store, config, symbol, price, args.value)
         if updated:
             plural = "pattern" if updated == 1 else "patterns"
             print(f"  applied to {updated} pending {plural} for {symbol}")
+        print("  commit that file and the published dashboard will pick it up.")
     return 0
+
+
+def sync_fair_values(store: Store, config: Config, quiet: bool = False) -> int:
+    """Fold the YAML file into the database so the gate can be applied.
+
+    Runs before every `run` and `dashboard`, so a value edited by hand on
+    GitHub takes effect without anyone touching the database.
+    """
+    try:
+        values = load_fair_values(config.storage.fair_values)
+    except FairValueError as exc:
+        print(f"  ! {exc}")
+        return 0
+
+    # The YAML file is authoritative: anything it no longer lists must not
+    # linger in the database showing a fair value that isn't in the file.
+    for stale in set(store.manual_valuation_symbols()) - set(values):
+        store.delete_manual_valuations(stale)
+        store.clear_signal_valuation(stale, config.signal.fire_without_valuation)
+        if not quiet:
+            print(f"  {stale} removed from {config.storage.fair_values.name} — cleared")
+
+    applied = 0
+    for symbol, entry in values.items():
+        series = store.rsi_series(symbol)
+        if not series:
+            if not quiet:
+                print(f"  ! {symbol} has a fair value but no price history — skipped")
+            continue
+        latest = series[-1]
+        store.upsert_valuation(
+            Valuation(
+                symbol=symbol,
+                date=latest.date,
+                price=latest.close,
+                fair_value=entry.fair_value,
+                fair_value_date=entry.checked,
+                source="manual",
+            )
+        )
+        known, confirms = valuation_passes(latest.close, entry.fair_value, config.signal)
+        fired = signal_fires(confirms, config.signal)
+        for signal in store.all_signals(symbol):
+            store.update_signal_valuation(
+                symbol, signal.up2_date, latest.close, entry.fair_value, known, confirms, fired
+            )
+        applied += 1
+    return applied
 
 
 def _apply_valuation_to_pending_signals(
     store: Store, config: Config, symbol: str, price: float, fair_value: float
 ) -> int:
-    """Score every not-yet-fired pattern for `symbol` against one fair value.
-
-    Once a pattern is fired it's left alone here — a later manual check
-    shouldn't silently un-fire a signal that already went out.
-    """
+    """Re-score every recorded pattern for `symbol` against one fair value."""
+    known, confirms = valuation_passes(price, fair_value, config.signal)
+    fired = signal_fires(confirms, config.signal)
     updated = 0
     for signal in store.all_signals(symbol):
-        if signal.fired:
-            continue
-        known, passed = valuation_passes(price, fair_value, config.signal)
-        store.update_signal_valuation(symbol, signal.up2_date, price, fair_value, known, passed)
+        store.update_signal_valuation(
+            symbol, signal.up2_date, price, fair_value, known, confirms, fired
+        )
         updated += 1
     return updated
 
@@ -290,6 +337,7 @@ def cmd_dashboard(config: Config, args) -> int:
 
     output = Path(args.output) if args.output else config.dashboard.output
     with Store(config.storage.database) as store:
+        sync_fair_values(store, config, quiet=True)
         path = build_dashboard(store, config, output)
 
     print(f"Dashboard written to {path}")
@@ -310,10 +358,12 @@ def cmd_signals(config: Config, args) -> int:
         for s in signals:
             price = f"{s.price:,.2f}" if s.price is not None else "-"
             fair = f"{s.fair_value:,.2f}" if s.fair_value is not None else "-"
-            if s.fired:
-                verdict = "BUY SIGNAL"
-            elif not s.valuation_known:
-                verdict = "pattern only (no valuation)"
+            if s.fired and is_strong(s.valuation_known, s.valuation_pass):
+                verdict = "STRONG BUY (valuation confirms)"
+            elif s.fired and s.valuation_known:
+                verdict = "BUY SIGNAL (above fair value)"
+            elif s.fired:
+                verdict = "BUY SIGNAL (fair value unchecked)"
             else:
                 verdict = "pattern only (valuation gate failed)"
             print(f"{s.symbol:<8}{s.up1_date:<12}{s.down_date:<12}{s.up2_date:<12}{price:>10}{fair:>10}  {verdict}")
@@ -397,6 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_fv.add_argument("symbol", help="ticker, e.g. NVDA")
     p_fv.add_argument("value", type=float, help="Morningstar fair value estimate")
     p_fv.add_argument("--date", help="date to record it against (default: today)")
+    p_fv.add_argument("--note", help="optional note, e.g. 'post-earnings cut'")
     p_fv.set_defaults(func=cmd_fair_value)
 
     p_dash = sub.add_parser("dashboard", help="build the shareable HTML dashboard")

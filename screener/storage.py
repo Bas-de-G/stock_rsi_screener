@@ -262,7 +262,8 @@ class Store:
         price: float,
         fair_value: float,
         known: bool,
-        passed: bool,
+        confirms: bool,
+        fired: bool,
     ) -> None:
         """Re-score an existing pattern once a fair value becomes available.
 
@@ -275,7 +276,39 @@ class Store:
                 """UPDATE signals
                       SET price=?, fair_value=?, valuation_known=?, valuation_pass=?, fired=?
                     WHERE symbol=? AND up2_date=?""",
-                (price, fair_value, int(known), int(passed), int(passed), symbol, up2_date),
+                (price, fair_value, int(known), int(confirms), int(fired), symbol, up2_date),
+            )
+        self._conn.commit()
+
+    def manual_valuation_symbols(self) -> list[str]:
+        with closing(self._conn.cursor()) as cur:
+            cur.execute("SELECT DISTINCT symbol FROM valuations WHERE source='manual'")
+            return [r["symbol"] for r in cur.fetchall()]
+
+    def delete_manual_valuations(self, symbol: str) -> None:
+        """Drop hand-entered valuations for a symbol.
+
+        Used when an entry disappears from the YAML file, which is the source
+        of truth for manual values — leaving a stale row would show a fair
+        value on the dashboard that isn't in the file any more. Scraped
+        (source='morningstar') rows are historical observations and are left
+        alone.
+        """
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                "DELETE FROM valuations WHERE symbol=? AND source='manual'", (symbol,)
+            )
+        self._conn.commit()
+
+    def clear_signal_valuation(self, symbol: str, fire_without_valuation: bool) -> None:
+        """Return a symbol's signals to the un-checked state."""
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """UPDATE signals
+                      SET price=NULL, fair_value=NULL, valuation_known=0,
+                          valuation_pass=?, fired=?
+                    WHERE symbol=?""",
+                (int(fire_without_valuation), int(fire_without_valuation), symbol),
             )
         self._conn.commit()
 

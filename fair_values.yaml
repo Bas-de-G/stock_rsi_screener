@@ -1,0 +1,22 @@
+# Morningstar fair value estimates, checked by hand.
+#
+# Edit this file directly on GitHub: click the pencil icon, change a number,
+# commit. The dashboard rebuilds on the next scheduled run and applies the
+# valuation gate using what's here.
+#
+# Either form works:
+#
+#   IBM: 225.00
+#
+#   TSLA:
+#     fair_value: 280.00
+#     checked: 2026-07-27
+#     note: post-earnings cut
+#
+# Written by `screener fair-value SYM <value>`, which rewrites this file --
+# so any comments you add below this header will not survive that command.
+
+IBM:
+  fair_value: 225.0
+  checked: '2026-07-27'
+  note: read off the Morningstar quote page

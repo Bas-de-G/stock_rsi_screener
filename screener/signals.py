@@ -100,13 +100,31 @@ def valuation_passes(
 ) -> tuple[bool, bool]:
     """Apply the configured valuation gate.
 
-    Returns (known, passed). `known` is False when we have no Morningstar
-    figures for that day — in that case `passed` follows
-    signal.fire_without_valuation.
+    Returns (known, confirms). `known` is False when there are no Morningstar
+    figures to compare; `confirms` is only meaningful when `known` is True.
+
+    Note this answers "does the valuation agree?", not "is this a signal?" —
+    see `signal_fires`. Keeping them apart is what lets an RSI pattern stand
+    on its own while a matching fair value upgrades it to a strong buy.
     """
     if price is None or fair_value is None:
-        return False, config.fire_without_valuation
+        return False, False
 
     if config.valuation_rule == "fair_value_below_price":
         return True, fair_value < price
     return True, price < fair_value
+
+
+def signal_fires(confirms: bool, config: SignalConfig) -> bool:
+    """Whether a completed pattern counts as a buy signal.
+
+    With fire_without_valuation set, the RSI pattern is enough on its own and
+    the valuation only decides how strong it is. Without it, the screener runs
+    strict and nothing fires until a fair value confirms it.
+    """
+    return confirms or config.fire_without_valuation
+
+
+def is_strong(known: bool, confirms: bool) -> bool:
+    """A strong buy: the pattern fired AND a real fair value backs it up."""
+    return known and confirms

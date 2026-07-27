@@ -4,8 +4,10 @@ Watches a list of stocks every day and flags a buy signal when a specific
 pattern appears:
 
 > RSI drops below 30, climbs back through 30, drops below 30 again, and climbs
-> back through 30 a second time — with both crossings inside a 14-day window —
-> **and** the stock is on the required side of Morningstar's fair value estimate.
+> back through 30 a second time — with both crossings inside a 14-day window.
+
+Morningstar's fair value then grades it: a signal trading below fair value is
+flagged a **strong buy 🚀**.
 
 Data comes from two places:
 
@@ -15,22 +17,27 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **34 large-cap market leaders** out of the box (AAPL, MSFT, NVDA, AMZN,
-IBM, JPM, XOM, LLY and more) — edit `config.yaml` to change the list. Every
-entry there was checked against both data sources, so none of them 404.
+Tracks **35 market leaders** out of the box (AAPL, MSFT, NVDA, AMZN, IBM, JPM,
+XOM, LLY, Rolls-Royce and more) — edit `config.yaml` to change the list. Every
+entry was checked against both data sources first, so none of them 404.
+
+Non-US listings work too, they just need their own identifiers. Rolls-Royce is
+the worked example: `LSE:RR.` on TradingView (trailing dot), `RR.L` on Yahoo,
+`xlon/rr.` on Morningstar, and quoted in **pence** — so it carries a `currency:
+GBX` label that the dashboard shows next to the price.
 
 ---
 
-## The valuation gate
+## Which way round is fair value read?
 
-A signal only fires when **price < fair value** — the stock is trading *below*
-what Morningstar thinks it's worth. Flip it in one line if you ever want the
-inverse:
+A signal counts as **strong** when **price < fair value** — the stock is
+trading below what Morningstar thinks it's worth. Flip it in one line if you
+ever want the inverse:
 
 ```yaml
 signal:
-  valuation_rule: price_below_fair_value   # active: fires when BELOW fair value
-  # valuation_rule: fair_value_below_price # fires when ABOVE fair value
+  valuation_rule: price_below_fair_value   # active: strong when BELOW fair value
+  # valuation_rule: fair_value_below_price # strong when ABOVE fair value
 ```
 
 Every run prints the active rule in plain English, so you can't drift into the
@@ -42,26 +49,27 @@ Valuation gate: price < fair value (stock trading BELOW Morningstar fair value)
 
 ---
 
-## v1: RSI screener + manual fair value
+## Signal strength
 
-The Morningstar scraper is **v2 and off by default**. v1 runs the RSI half
-automatically and leaves the fair value to you:
+An RSI pattern is a **buy signal on its own** — no fair value needed. Recording
+a fair value that agrees upgrades it to a **strong buy 🚀**:
 
-1. `screener run` finds the RSI pattern across all 34 stocks.
-2. A completed pattern is marked **Verify fair value** on the dashboard —
-   never a buy signal on its own.
-3. You click **Check fair value on Morningstar** on that card, read the number,
-   and record it:
+| On the dashboard | What it means |
+|---|---|
+| **Strong buy 🚀** | Pattern completed *and* the price is below Morningstar fair value |
+| **Buy signal** | Pattern completed; fair value unchecked, or checked and it disagrees |
+| **Pattern, gate failed** | Only in strict mode (below) |
+| Oversold / Near threshold / Neutral | No pattern; just where RSI sits now |
 
-   ```bash
-   python -m screener.cli fair-value IBM 225
-   ```
+So the flow is: the screener finds signals daily, you click **Check fair value
+on Morningstar** on any card you like the look of, and record what you read:
 
-4. That applies the gate and promotes the pattern to a confirmed buy signal
-   (or rules it out). Re-run `screener dashboard` to see it.
+```bash
+python -m screener.cli fair-value IBM 225
+```
 
-This is why nothing can quietly claim to be a buy signal without a human having
-looked at the valuation.
+If you'd rather nothing fired until a fair value confirms it, set
+`fire_without_valuation: false` in `config.yaml` for strict mode.
 
 ---
 
@@ -134,9 +142,10 @@ fair-value check, then whatever is most oversold right now.
 
 ## Automating the daily run
 
-### On a Mac (recommended — this is where the Morningstar login lives)
+The easiest option is **GitHub Pages** (next section) — it runs on GitHub's
+servers on a schedule, so nothing has to be switched on at home.
 
-Run every weekday at 17:35 New York time, after the close:
+To run it on a Mac instead, every weekday at 17:35 New York time:
 
 ```bash
 crontab -e
@@ -146,46 +155,77 @@ crontab -e
 35 17 * * 1-5 cd /path/to/stock_rsi_screener && .venv/bin/python -m screener.cli run >> data/cron.log 2>&1
 ```
 
-Run it **after the market closes**. TradingView's RSI moves during the session,
-so a midday reading can cross 30 and then cross back before the bell.
-
-### On GitHub Actions (optional, RSI only)
-
-`.github/workflows/daily.yml` runs on a schedule and commits the collected
-history back to the repo. By default it skips Morningstar — a session cookie is
-a credential, and it isn't in the repo.
-
-To include the valuation half there too, see below.
+Run it **after the market closes** either way. TradingView's RSI moves during
+the session, so a midday reading can cross 30 and cross back before the bell.
 
 ---
 
-## Sharing the dashboard with someone else
+## Putting it on the web
 
-`data/dashboard.html` is one self-contained file — everything (styles, charts,
-data) is inline, so it works from a `file://` path with no server and no
-network. That gives you a few options, easiest first:
+The scheduled workflow publishes the dashboard to **GitHub Pages**, so there's
+a live URL that stays current with nobody's laptop switched on. Your friend
+needs no Python, no install, and no accounts — just the link.
 
-| How | Good for | Notes |
-|---|---|---|
-| Mail / message the file | one-off | He opens it in any browser |
-| Dropbox / iCloud / Drive shared link | occasional | Re-upload after each run |
-| GitHub Pages | always-current, public | Free, auto-updates — see below |
-| Netlify Drop | always-current, private-ish | Drag the file onto netlify.com/drop |
+**One-time setup:**
 
-**Do not put it anywhere public if you ever add personal position sizes to it.**
-As built it contains only public market data, which is safe to publish.
+1. Merge this branch to `main`. GitHub only runs scheduled workflows from the
+   repository's **default branch** — on a feature branch the schedule never
+   fires.
+2. **Settings → Pages → Source: GitHub Actions.**
+3. **Actions → Daily screener run → Run workflow** to publish immediately
+   rather than waiting for the next weekday close.
 
-### GitHub Pages
+The page then lands at:
 
-Since the repo is public already, Pages is the least-effort always-on option.
-The scheduled workflow can publish the dashboard on every run:
+```
+https://bas-de-g.github.io/stock_rsi_screener/
+```
 
-1. Repo **Settings → Pages → Source: GitHub Actions**.
-2. The daily workflow builds `dashboard.html` and deploys it.
-3. Your friend bookmarks `https://bas-de-g.github.io/stock_rsi_screener/`.
+It rebuilds every weekday at 21:30 UTC (~30 min after the US close), and again
+straight away whenever `fair_values.yaml` changes.
 
-He needs no Python, no install, and no Morningstar account to read it — only to
-click through to Morningstar if he wants to check a fair value himself.
+Since the repo is public the page is public too. It carries only public market
+data, which is fine to publish — just don't add position sizes to it.
+
+If you'd rather it not be public at all, build locally and drag
+`data/dashboard.html` onto [netlify.com/drop](https://netlify.com/drop) for an
+unlisted URL. It's a single self-contained file, so that genuinely works.
+
+---
+
+## Where fair values are stored
+
+In **`fair_values.yaml`** — a committed text file, not the database:
+
+```yaml
+IBM:
+  fair_value: 225.0
+  checked: '2026-07-27'
+  note: read off the Morningstar quote page
+```
+
+Keeping it out of SQLite is deliberate. The database is binary, gitignored
+locally, and rewritten by the scheduled job — a value typed on your laptop
+would never reach the published page, and two machines editing it would
+produce a binary merge conflict nobody can resolve. A YAML file avoids all of
+that, and gives you three ways to record a value:
+
+| Who | How |
+|---|---|
+| You, locally | `python -m screener.cli fair-value IBM 225` |
+| You or your friend, from a phone | Edit `fair_values.yaml` on github.com — pencil icon, change the number, commit |
+| Nobody | Leave it; the pattern just stays "Verify fair value" |
+
+The shorthand `IBM: 225` works too, so an edit on a phone is one line. Every
+run folds this file into the database and re-applies the gate, so a hand edit
+takes effect on the next publish without touching anything else.
+
+**To give your friend edit access:** Settings → Collaborators → add him. He
+can then edit the file directly. Without it he can still fork and open a pull
+request, or just tell you the number.
+
+Delete an entry and it's removed everywhere — the file is the source of truth,
+and stale valuations are cleared from the database on the next run.
 
 ---
 
@@ -260,6 +300,9 @@ Everything lands in `data/`:
 - **`latest.csv`** — current snapshot, one row per symbol.
 - **`signals.csv`** — running log, appended whenever a pattern completes.
 - **`dashboard.html`** — the generated page (rebuilt on demand, not committed).
+
+Hand-checked fair values live outside `data/`, in `fair_values.yaml` at the
+repo root — see "Where fair values are stored".
 
 Reruns of the same day update in place rather than duplicating, and a
 backfilled RSI never overwrites a live TradingView reading.
@@ -374,14 +417,15 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 103 tests
+python -m pytest tests/ -q      # 132 tests
 ```
 
 They cover the RSI maths (pinned against TradingView's own published value),
 the crossing and window logic including the exact boundary cases, both
 directions of the valuation gate, the storage upsert and re-scoring rules,
-the Morningstar page parsing, and the dashboard's state model — including
-the guarantee that an unverified pattern never renders as a buy signal.
+the Morningstar page parsing, the fair-value file's parsing and rejection
+rules, and the dashboard's state model — including the guarantee that an
+a pattern only earns the rocket when a real fair value backs it up.
 
 The tests are all offline — no network, no browser, no credentials.
 

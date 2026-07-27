@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
-from .signals import find_upward_crosses, valuation_passes
+from .signals import find_upward_crosses, is_strong, valuation_passes
 from .storage import RsiPoint, Signal, Store, Valuation
 
 # Plot geometry, in SVG user units.
@@ -36,6 +36,7 @@ class Row:
     crosses: list[int]
     valuation: Valuation | None
     signals: list[Signal]  # this symbol's patterns, ascending by date
+    currency: str = "USD"
 
     @property
     def latest(self) -> RsiPoint | None:
@@ -50,20 +51,29 @@ class Row:
         return any(s.fired for s in self.signals)
 
     @property
+    def strong(self) -> bool:
+        """Pattern fired and a recorded fair value backs it up."""
+        return any(
+            s.fired and is_strong(s.valuation_known, s.valuation_pass) for s in self.signals
+        )
+
+    @property
     def latest_signal(self) -> Signal | None:
         return self.signals[-1] if self.signals else None
 
     @property
     def state(self) -> str:
         """Bucket used for the status pill, the card's accent, and sort order."""
+        if self.strong:
+            return "strong"
         if self.fired:
-            return "signal"
+            # A fired signal whose valuation was checked and disagreed is
+            # still a signal — the fair value only grades it.
+            checked = any(s.fired and s.valuation_known for s in self.signals)
+            return "signal_checked" if checked else "signal"
         latest = self.latest_signal
         if latest is not None:
-            # A completed pattern outranks the plain RSI level: it's the
-            # thing that needs a human to go check Morningstar, regardless
-            # of where RSI has drifted to since.
-            return "rejected" if latest.valuation_known else "pending"
+            return "rejected"
         if self.rsi is None:
             return "nodata"
         if self.rsi < 30:
@@ -104,14 +114,15 @@ def _collect(store: Store, config: Config) -> list[Row]:
                 crosses=find_upward_crosses(series, config.rsi.threshold),
                 valuation=valuations.get(ticker.symbol),
                 signals=sigs,
+                currency=ticker.currency,
             )
         )
 
     # Most actionable first: confirmed signals, then patterns awaiting a
     # fair-value check, then how oversold things currently are.
     order = {
-        "signal": 0, "pending": 1, "rejected": 2,
-        "oversold": 3, "watch": 4, "neutral": 5, "nodata": 6,
+        "strong": 0, "signal": 1, "signal_checked": 2, "rejected": 3,
+        "oversold": 4, "watch": 5, "neutral": 6, "nodata": 7,
     }
     rows.sort(key=lambda r: (order[r.state], r.rsi if r.rsi is not None else 999))
     return rows
@@ -202,10 +213,12 @@ def _card(row: Row, config: Config) -> str:
     threshold = config.rsi.threshold
     rsi_text = f"{row.rsi:.1f}" if row.rsi is not None else "—"
     close_text = f"{row.latest.close:,.2f}" if row.latest else "—"
+    ccy = "" if row.currency == "USD" else f' <span class="ccy">{html.escape(row.currency)}</span>' 
 
     pill_label = {
+        "strong": "Strong buy 🚀",
         "signal": "Buy signal",
-        "pending": "Verify fair value",
+        "signal_checked": "Buy signal",
         "rejected": "Pattern, gate failed",
         "oversold": "Oversold",
         "watch": "Near threshold",
@@ -223,17 +236,19 @@ def _card(row: Row, config: Config) -> str:
         val = row.valuation
         _, passed = _gate(val, config)
         verdict = "below fair value" if val.price < val.fair_value else "above fair value"
+        gate_class = "pass" if passed else "fail"
         origin = "checked by hand" if val.source == "manual" else "from Morningstar"
         valuation_block = f"""
-        <dl class="valuation {'pass' if passed else 'fail'}">
+        <dl class="valuation {gate_class}">
           <div><dt>Fair value</dt><dd>{val.fair_value:,.2f}</dd></div>
           <div><dt>Price</dt><dd>{val.price:,.2f}</dd></div>
           <div><dt>Verdict</dt><dd>{verdict}</dd></div>
         </dl>
         <p class="provenance">Recorded {html.escape(val.date)}, {origin}.</p>"""
-    elif row.latest_signal is not None:
+    elif row.fired:
         valuation_block = """
-        <p class="valuation pending">RSI pattern complete — fair value not checked yet.</p>"""
+        <p class="valuation pending">Buy signal on RSI alone — confirm the fair value
+        for a strong buy.</p>"""
     else:
         valuation_block = """
         <p class="valuation none">No fair value recorded yet.</p>"""
@@ -256,7 +271,7 @@ def _card(row: Row, config: Config) -> str:
     </div>
     <div class="readout">
       <div class="metric"><span class="k">RSI</span><span class="v">{rsi_text}</span></div>
-      <div class="metric"><span class="k">Close</span><span class="v">{close_text}</span></div>
+      <div class="metric"><span class="k">Close</span><span class="v">{close_text}{ccy}</span></div>
     </div>
   </header>
   {_chart_svg(row, threshold)}
@@ -284,22 +299,21 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
     tracked = len(rows)
     oversold = sum(1 for r in rows if r.rsi is not None and r.rsi < threshold)
     patterns = sum(len(r.signals) for r in rows)
-    pending = sum(1 for r in rows if r.state == "pending")
+    strong = sum(1 for r in rows if r.strong)
     fired = sum(1 for r in rows if r.fired)
     dated = [r.latest.date for r in rows if r.latest]
     as_of = max(dated) if dated else "—"
 
     cards = "\n".join(_card(r, config) for r in rows)
-    pill_pending = "Verify fair value"
 
     masthead = f"""<header class="masthead">
   <div class="title-block">
     <p class="eyebrow">Relative Strength Screener</p>
-    <h1>Oversold Recovery Watch</h1>
+    <h1>RSI Screener</h1>
     <p class="standfirst">
-      Tracking {tracked} large-cap leaders for a double crossing of RSI
-      {threshold:g} within {config.signal.window_days} days — the entry pattern —
-      then confirming against Morningstar fair value before acting.
+      Tracking {tracked} market leaders for a double crossing of RSI
+      {threshold:g} within {config.signal.window_days} days — the entry pattern.
+      A signal whose Morningstar fair value also agrees is marked a strong buy.
     </p>
   </div>
   <dl class="aggregates">
@@ -307,27 +321,10 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
     <div><dt>Tracked</dt><dd>{tracked}</dd></div>
     <div><dt>Below {threshold:g}</dt><dd class="{'hot' if oversold else ''}">{oversold}</dd></div>
     <div><dt>Patterns</dt><dd>{patterns}</dd></div>
-    <div><dt>To verify</dt><dd class="{'warn' if pending else ''}">{pending}</dd></div>
-    <div><dt>Signals</dt><dd class="{'hot' if fired else ''}">{fired}</dd></div>
+    <div><dt>Signals</dt><dd class="{'warn' if fired else ''}">{fired}</dd></div>
+    <div><dt>Strong 🚀</dt><dd class="{'good' if strong else ''}">{strong}</dd></div>
   </dl>
-</header>
-
-<section class="method">
-  <h2>Reading this sheet</h2>
-  <ol>
-    <li><span class="n">1</span><span>RSI falls below {threshold:g} and recovers through it.</span></li>
-    <li><span class="n">2</span><span>It drops back under {threshold:g}, then recovers a second
-        time within {config.signal.window_days} days. Both recoveries are ringed on the plot.</span></li>
-    <li><span class="n">3</span><span>Open Morningstar, read the fair value, and act only if the
-        price sits below it — a completed pattern is marked
-        <strong>{html.escape(pill_pending)}</strong> until you do.</span></li>
-  </ol>
-  <p class="caveat">
-    A pattern detector, not advice. Fair value is checked by hand in this
-    version — the button on each card opens the right page, and
-    <code>screener fair-value SYM &lt;value&gt;</code> records what you read there.
-  </p>
-</section>"""
+</header>"""
 
     body = f"""<div class="sheet">
 {masthead}
@@ -340,7 +337,7 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
 </footer>
 </div>"""
 
-    head = f"<title>Oversold Recovery Watch</title>\n<style>{_CSS}</style>"
+    head = f"<title>RSI Screener</title>\n<style>{_CSS}</style>"
     if not standalone:
         return head + "\n" + body
     return f"""<!doctype html>
@@ -358,7 +355,7 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
 
 _CSS = """
 :root {
-  --paper:      #FCFDFE;
+  --paper:      #FFFFFF;
   --card:       #FFFFFF;
   --grid-fine:  rgba(38, 86, 132, .075);
   --grid-major: rgba(38, 86, 132, .155);
@@ -411,7 +408,7 @@ _CSS = """
 }
 
 :root[data-theme="light"] {
-  --paper:      #FCFDFE;
+  --paper:      #FFFFFF;
   --card:       #FFFFFF;
   --grid-fine:  rgba(38, 86, 132, .075);
   --grid-major: rgba(38, 86, 132, .155);
@@ -431,14 +428,7 @@ _CSS = """
 
 body {
   margin: 0;
-  background-color: var(--paper);
-  /* Quadrille paper: 8px fine squares over a 40px major rule. */
-  background-image:
-    linear-gradient(var(--grid-major) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
-    linear-gradient(var(--grid-fine) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px);
-  background-size: 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+  background: var(--paper);
   color: var(--ink);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
@@ -449,15 +439,11 @@ body {
 .sheet {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 40px 24px 64px 40px;
-  /* The ruled margin of an analyst's pad. */
-  border-left: 1px solid var(--crimson);
-  border-right: 1px solid var(--rule);
-  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  padding: 40px 28px 64px;
 }
 
-@media (max-width: 640px) {
-  .sheet { padding: 24px 14px 48px 20px; }
+@media (max-width: 720px) {
+  .sheet { padding: 24px 14px 44px; }
 }
 
 /* ---------------------------------------------------------- masthead */
@@ -501,20 +487,39 @@ h1 {
 }
 
 .aggregates {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0;
+  /* Auto-flow by column keeps this a horizontal strip: as a flex child it
+     has no width to divide up, so auto-fit would collapse it to one track. */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(78px, auto);
+  gap: 1px;
   margin: 0;
   border: 1px solid var(--rule);
-  background: var(--card);
+  border-radius: 3px;
+  background: var(--rule);
+  overflow: hidden;
 }
 
 .aggregates > div {
-  padding: 10px 18px;
-  border-right: 1px solid var(--rule);
-  min-width: 84px;
+  padding: 10px 14px;
+  background: var(--card);
 }
-.aggregates > div:last-child { border-right: 0; }
+
+/* Six tiles: 3 and 2 columns both divide evenly, so no empty cell is left
+   over the way auto-fit would leave one. */
+@media (max-width: 720px) {
+  .aggregates {
+    width: 100%;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .aggregates > div { padding: 8px 12px; }
+  .aggregates dd { font-size: 17px; }
+}
+
+@media (max-width: 480px) {
+  .aggregates { grid-template-columns: repeat(2, 1fr); }
+}
 
 .aggregates dt {
   font-size: 10px;
@@ -528,69 +533,18 @@ h1 {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 20px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;   /* never break a date mid-value */
 }
 
 .aggregates dd.hot { color: var(--crimson); font-weight: 600; }
 .aggregates dd.warn { color: var(--accent); font-weight: 600; }
-
-/* ------------------------------------------------------------ method */
-
-.method {
-  margin: 28px 0 34px;
-  padding: 18px 22px;
-  background: var(--card);
-  border: 1px solid var(--rule);
-  border-left: 3px solid var(--accent);
-  box-shadow: var(--shadow);
-}
-
-.method h2 {
-  margin: 0 0 10px;
-  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
-  font-size: 17px;
-  font-weight: 400;
-}
-
-.method ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 8px;
-  max-width: 84ch;
-}
-
-.method li {
-  display: flex;
-  gap: 10px;
-  font-size: 14px;
-  color: var(--ink-2);
-}
-
-.method .n {
-  flex: none;
-  width: 20px; height: 20px;
-  display: grid; place-items: center;
-  border: 1px solid var(--rule);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
-  color: var(--accent);
-}
-
-.caveat {
-  margin: 14px 0 0;
-  padding-top: 12px;
-  border-top: 1px dotted var(--rule);
-  font-size: 12.5px;
-  color: var(--ink-3);
-  font-style: italic;
-}
+.aggregates dd.good { color: var(--green); font-weight: 600; }
 
 /* -------------------------------------------------------------- grid */
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 18px;
 }
 
@@ -601,11 +555,13 @@ h1 {
   padding: 16px 18px 18px;
   background: var(--card);
   border: 1px solid var(--rule);
+  border-radius: 3px;
   box-shadow: var(--shadow);
 }
 
-.card.state-signal   { border-top: 3px solid var(--green); }
-.card.state-pending  { border-top: 3px solid var(--accent); }
+.card.state-strong   { border-top: 3px solid var(--green); }
+.card.state-signal,
+.card.state-signal_checked { border-top: 3px solid var(--accent); }
 .card.state-rejected { border-top: 3px dashed var(--ink-3); }
 .card.state-oversold { border-top: 3px solid var(--crimson); }
 .card.state-watch    { border-top: 3px solid color-mix(in srgb, var(--accent) 55%, var(--ink-3)); }
@@ -639,8 +595,13 @@ h1 {
   color: var(--ink-3);
 }
 
-.state-signal   .pill { color: var(--green); }
-.state-pending  .pill { color: var(--accent); }
+.state-strong   .pill {
+  color: var(--card);
+  background: var(--green);
+  border-color: var(--green);
+}
+.state-signal   .pill,
+.state-signal_checked .pill { color: var(--accent); }
 .state-rejected .pill { color: var(--ink-3); }
 .state-oversold .pill { color: var(--crimson); }
 .state-watch    .pill { color: var(--accent); }
@@ -663,6 +624,13 @@ h1 {
 }
 
 .state-oversold .metric:first-child .v { color: var(--crimson); }
+
+.ccy {
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+  margin-left: 2px;
+}
 
 /* ------------------------------------------------------------- plot */
 

@@ -7,7 +7,13 @@ import datetime as dt
 import pytest
 
 from screener.config import SignalConfig
-from screener.signals import find_cross_pairs, find_upward_crosses, valuation_passes
+from screener.signals import (
+    find_cross_pairs,
+    find_upward_crosses,
+    is_strong,
+    signal_fires,
+    valuation_passes,
+)
 from screener.storage import RsiPoint
 
 THRESHOLD = 30.0
@@ -153,18 +159,59 @@ def test_equal_price_and_fair_value_does_not_pass_either_rule():
         assert passed is False
 
 
-def test_missing_valuation_blocks_the_signal_by_default():
-    known, passed = valuation_passes(None, None, config())
+def test_missing_valuation_is_reported_as_unknown():
+    """No figures to compare means the gate has no opinion either way."""
+    known, confirms = valuation_passes(None, None, config())
     assert known is False
-    assert passed is False
-
-
-def test_missing_valuation_can_be_configured_to_fire():
-    known, passed = valuation_passes(None, None, config(fire_without_valuation=True))
-    assert known is False
-    assert passed is True
+    assert confirms is False
 
 
 def test_partial_valuation_counts_as_missing():
     known, _ = valuation_passes(217.0, None, config())
     assert known is False
+
+
+# ------------------------------------------------ firing vs. confirming
+
+
+def test_pattern_alone_fires_when_configured_to():
+    """The RSI pattern is a buy signal on its own; fair value only grades it."""
+    known, confirms = valuation_passes(None, None, config(fire_without_valuation=True))
+    assert signal_fires(confirms, config(fire_without_valuation=True)) is True
+    assert is_strong(known, confirms) is False
+
+
+def test_pattern_alone_does_not_fire_in_strict_mode():
+    known, confirms = valuation_passes(None, None, config(fire_without_valuation=False))
+    assert signal_fires(confirms, config(fire_without_valuation=False)) is False
+    assert is_strong(known, confirms) is False
+
+
+def test_confirming_valuation_makes_it_a_strong_buy():
+    cfg = config(fire_without_valuation=True, valuation_rule="price_below_fair_value")
+    known, confirms = valuation_passes(217.24, 225.00, cfg)   # below fair value
+    assert signal_fires(confirms, cfg) is True
+    assert is_strong(known, confirms) is True
+
+
+def test_contradicting_valuation_still_fires_but_is_not_strong():
+    """Trading above fair value doesn't cancel the RSI signal, just downgrades it."""
+    cfg = config(fire_without_valuation=True, valuation_rule="price_below_fair_value")
+    known, confirms = valuation_passes(240.00, 225.00, cfg)   # above fair value
+    assert signal_fires(confirms, cfg) is True
+    assert is_strong(known, confirms) is False
+
+
+def test_contradicting_valuation_blocks_the_signal_in_strict_mode():
+    cfg = config(fire_without_valuation=False, valuation_rule="price_below_fair_value")
+    known, confirms = valuation_passes(240.00, 225.00, cfg)
+    assert signal_fires(confirms, cfg) is False
+    assert is_strong(known, confirms) is False
+
+
+def test_a_confirmed_signal_is_strong_under_either_mode():
+    for fire in (True, False):
+        cfg = config(fire_without_valuation=fire, valuation_rule="price_below_fair_value")
+        known, confirms = valuation_passes(217.24, 225.00, cfg)
+        assert signal_fires(confirms, cfg) is True
+        assert is_strong(known, confirms) is True
