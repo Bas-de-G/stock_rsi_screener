@@ -55,6 +55,12 @@ class StorageConfig:
 
 
 @dataclass(frozen=True)
+class DashboardConfig:
+    output: Path
+    chart_days: int = 90
+
+
+@dataclass(frozen=True)
 class MorningstarConfig:
     """Note there is deliberately no password field here.
 
@@ -76,6 +82,7 @@ class Config:
     signal: SignalConfig
     storage: StorageConfig
     morningstar: MorningstarConfig
+    dashboard: DashboardConfig
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -164,11 +171,20 @@ def load_config(path: str | Path | None = None) -> Config:
         debug_on_failure=bool(ms_raw.get("debug_on_failure", True)),
     )
 
+    dash_raw = raw.get("dashboard", {})
+    dashboard = DashboardConfig(
+        output=_resolve(dash_raw.get("output", "data/dashboard.html")),
+        chart_days=int(dash_raw.get("chart_days", 90)),
+    )
+    if dashboard.chart_days < 2:
+        raise ValueError("dashboard.chart_days must be at least 2")
+
     return Config(
         tickers=tickers,
         rsi=rsi,
         signal=signal,
         storage=storage,
         morningstar=morningstar,
+        dashboard=dashboard,
         source_path=config_path,
     )

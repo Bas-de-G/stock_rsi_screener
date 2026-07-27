@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS valuations (
     fair_value_date TEXT,          -- date MS itself attaches to the fair value estimate
     uncertainty    TEXT,
     moat           TEXT,
+    source         TEXT NOT NULL DEFAULT 'morningstar',  -- 'morningstar' | 'manual'
     PRIMARY KEY (symbol, date)
 );
 
@@ -73,9 +74,10 @@ class Valuation:
     date: str
     price: float
     fair_value: float
-    fair_value_date: str | None
-    uncertainty: str | None
-    moat: str | None
+    fair_value_date: str | None = None
+    uncertainty: str | None = None
+    moat: str | None = None
+    source: str = "morningstar"
 
 
 @dataclass(frozen=True)
@@ -102,7 +104,22 @@ class Store:
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring an older database up to the current schema.
+
+        Databases created before manual fair-value entry existed have no
+        `source` column; adding it in place preserves already-collected
+        history rather than forcing a rebuild.
+        """
+        with closing(self._conn.cursor()) as cur:
+            columns = {r["name"] for r in cur.execute("PRAGMA table_info(valuations)")}
+            if columns and "source" not in columns:
+                cur.execute(
+                    "ALTER TABLE valuations ADD COLUMN source TEXT NOT NULL DEFAULT 'morningstar'"
+                )
 
     def close(self) -> None:
         self._conn.close()
@@ -151,12 +168,13 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
                 """INSERT INTO valuations
-                     (symbol, date, price, fair_value, fair_value_date, uncertainty, moat)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                     (symbol, date, price, fair_value, fair_value_date, uncertainty, moat, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol, date) DO UPDATE SET
                      price=excluded.price, fair_value=excluded.fair_value,
                      fair_value_date=excluded.fair_value_date,
-                     uncertainty=excluded.uncertainty, moat=excluded.moat""",
+                     uncertainty=excluded.uncertainty, moat=excluded.moat,
+                     source=excluded.source""",
                 (
                     val.symbol,
                     val.date,
@@ -165,6 +183,7 @@ class Store:
                     val.fair_value_date,
                     val.uncertainty,
                     val.moat,
+                    val.source,
                 ),
             )
         self._conn.commit()
@@ -185,6 +204,7 @@ class Store:
             row["fair_value_date"],
             row["uncertainty"],
             row["moat"],
+            row["source"],
         )
 
     def latest_valuations(self) -> list[Valuation]:
@@ -197,7 +217,10 @@ class Store:
             )
             rows = cur.fetchall()
         return [
-            Valuation(r["symbol"], r["date"], r["price"], r["fair_value"], r["fair_value_date"], r["uncertainty"], r["moat"])
+            Valuation(
+                r["symbol"], r["date"], r["price"], r["fair_value"],
+                r["fair_value_date"], r["uncertainty"], r["moat"], r["source"],
+            )
             for r in rows
         ]
 
@@ -229,6 +252,30 @@ class Store:
                     int(sig.fired),
                     sig.recorded_at,
                 ),
+            )
+        self._conn.commit()
+
+    def update_signal_valuation(
+        self,
+        symbol: str,
+        up2_date: str,
+        price: float,
+        fair_value: float,
+        known: bool,
+        passed: bool,
+    ) -> None:
+        """Re-score an existing pattern once a fair value becomes available.
+
+        A pattern recorded before anyone checked the valuation can legitimately
+        become a fired signal later, so this updates in place rather than
+        writing a second row for the same pattern.
+        """
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """UPDATE signals
+                      SET price=?, fair_value=?, valuation_known=?, valuation_pass=?, fired=?
+                    WHERE symbol=? AND up2_date=?""",
+                (price, fair_value, int(known), int(passed), int(passed), symbol, up2_date),
             )
         self._conn.commit()
 

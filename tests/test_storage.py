@@ -79,6 +79,32 @@ def test_signals_are_recorded_once_per_pattern(store):
     assert not store.signal_exists("NVDA", "2026-01-06")
 
 
+def test_recording_a_fair_value_can_promote_a_pattern_to_a_signal(store):
+    """A pattern logged before anyone checked Morningstar must be updatable
+    in place — not duplicated into a second row for the same pattern."""
+    store.record_signal(
+        Signal("IBM", "2026-07-16", "2026-07-22", "2026-07-23",
+               None, None, False, False, False, "now")
+    )
+    store.update_signal_valuation("IBM", "2026-07-23", 217.20, 225.00, True, True)
+
+    signals = store.all_signals("IBM")
+    assert len(signals) == 1
+    assert signals[0].fired is True
+    assert signals[0].valuation_known is True
+    assert signals[0].fair_value == 225.00
+
+
+def test_manual_valuation_roundtrips_its_source(store):
+    store.upsert_valuation(Valuation("IBM", "2026-07-27", 217.2, 225.0, source="manual"))
+    assert store.valuation("IBM", "2026-07-27").source == "manual"
+
+
+def test_valuation_source_defaults_to_morningstar(store):
+    store.upsert_valuation(Valuation("IBM", "2026-07-27", 217.2, 225.0))
+    assert store.valuation("IBM", "2026-07-27").source == "morningstar"
+
+
 def test_symbols_covers_both_tables(store):
     store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-01", 100.0, 44.0, "live:tradingview"))
     store.upsert_valuation(Valuation("IBM", "2026-01-01", 210.0, 225.0, None, None, None))

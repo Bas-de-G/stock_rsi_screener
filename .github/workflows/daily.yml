@@ -17,6 +17,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: daily-screener
@@ -60,9 +62,9 @@ jobs:
       - name: Run screener
         run: |
           if [ "${{ steps.session.outputs.available }}" = "true" ]; then
-            python -m screener.cli run
+            python -m screener.cli run --with-morningstar
           else
-            python -m screener.cli run --skip-morningstar
+            python -m screener.cli run
           fi
 
       - name: Commit collected data
@@ -79,3 +81,35 @@ jobs:
             git commit -m "data: screener run $(date -u +%Y-%m-%d)"
             git push
           fi
+
+  # Publishes the dashboard to GitHub Pages so it's always current at
+  # https://<user>.github.io/stock_rsi_screener/ with nothing to install.
+  # Requires Settings -> Pages -> Source: GitHub Actions (one-time).
+  publish:
+    needs: screen
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rebuild dashboard from the committed data
+        run: |
+          git pull --rebase --autostash origin "$GITHUB_REF_NAME" || true
+          python -m screener.cli dashboard --output site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

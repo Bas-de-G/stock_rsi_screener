@@ -12,41 +12,56 @@ Data comes from two places:
 | What | Source | Login needed |
 |---|---|---|
 | RSI (14) | TradingView | no |
-| Price and fair value | Morningstar | **yes** — fair value is subscriber-only |
+| Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Default tickers are **AMZN**, **NVDA** and **IBM**; edit `config.yaml` to change them.
+Tracks **34 large-cap market leaders** out of the box (AAPL, MSFT, NVDA, AMZN,
+IBM, JPM, XOM, LLY and more) — edit `config.yaml` to change the list. Every
+entry there was checked against both data sources, so none of them 404.
 
 ---
 
-## ⚠️ Read this first: which way round is the valuation gate?
+## The valuation gate
 
-You asked for a signal only when **fair value < price**. That is what's
-configured, and it means: *only buy when the stock is trading **above** what
-Morningstar thinks it's worth.*
-
-That is the opposite of how Morningstar's fair value is normally used — the
-usual "this is cheap" reading is price **below** fair value. In your own
-screenshot IBM shows a fair value of \$225.00 against a price of \$214.19,
-i.e. trading *below* fair value, which the current setting would **not** fire on.
-
-It's one line in `config.yaml` either way, so pick deliberately:
+A signal only fires when **price < fair value** — the stock is trading *below*
+what Morningstar thinks it's worth. Flip it in one line if you ever want the
+inverse:
 
 ```yaml
 signal:
-  # currently active — fires when the stock is ABOVE fair value:
-  valuation_rule: fair_value_below_price
-
-  # the "buy it while it's cheap" reading — fires when it's BELOW fair value:
-  # valuation_rule: price_below_fair_value
+  valuation_rule: price_below_fair_value   # active: fires when BELOW fair value
+  # valuation_rule: fair_value_below_price # fires when ABOVE fair value
 ```
 
 Every run prints the active rule in plain English, so you can't drift into the
 wrong one by accident:
 
 ```
-Valuation gate: fair value < price (stock trading ABOVE Morningstar fair value)
+Valuation gate: price < fair value (stock trading BELOW Morningstar fair value)
 ```
+
+---
+
+## v1: RSI screener + manual fair value
+
+The Morningstar scraper is **v2 and off by default**. v1 runs the RSI half
+automatically and leaves the fair value to you:
+
+1. `screener run` finds the RSI pattern across all 34 stocks.
+2. A completed pattern is marked **Verify fair value** on the dashboard —
+   never a buy signal on its own.
+3. You click **Check fair value on Morningstar** on that card, read the number,
+   and record it:
+
+   ```bash
+   python -m screener.cli fair-value IBM 225
+   ```
+
+4. That applies the gate and promotes the pattern to a confirmed buy signal
+   (or rules it out). Re-run `screener dashboard` to see it.
+
+This is why nothing can quietly claim to be a buy signal without a human having
+looked at the valuation.
 
 ---
 
@@ -65,32 +80,7 @@ python -m playwright install chromium     # browser used for Morningstar
 cp .env.example .env                      # optional; see "Credentials" below
 ```
 
-### 1. Sign in to Morningstar (once)
-
-```bash
-python -m screener.cli login
-```
-
-A **real Chromium window opens** on the Morningstar sign-in page and waits.
-Sign in there by hand, including any 2-factor prompt. When you're through,
-the session cookies are saved to `auth/morningstar_state.json` and the window
-closes.
-
-That file is gitignored. It's the only thing this tool stores, and no password
-is ever typed by the code or written to disk.
-
-> **On your Safari login:** Playwright can't borrow Safari's cookies, so being
-> signed in there doesn't carry over — this command signs in once in its own
-> browser. You only do it again when the session expires (typically weeks).
-
-Check it worked:
-
-```bash
-python -m screener.cli check-auth
-# OK — price 217.24, fair value 225.00 (via network-json)
-```
-
-### 2. Build RSI history (once)
+### 1. Build RSI history (once)
 
 ```bash
 python -m screener.cli backfill --range 1y
@@ -103,7 +93,7 @@ so signals work from day one.
 The computed RSI matches TradingView's exactly — same Wilder smoothing,
 verified to the cent (see `tests/test_rsi.py`).
 
-### 3. Run it
+### 2. Run it
 
 ```bash
 python -m screener.cli run
@@ -111,18 +101,34 @@ python -m screener.cli run
 
 ```
 Run for 2026-07-27
-Valuation gate: fair value < price (stock trading ABOVE Morningstar fair value)
+Valuation gate: price < fair value (stock trading BELOW Morningstar fair value)
 Window: two upward RSI crosses of 30 within 14 calendar days
 
-  AMZN: RSI  37.30   close 231.86
-  NVDA: RSI  42.61   close 196.75
-  IBM: RSI  36.57   close 216.96
+  AAPL: RSI  66.32   close 335.03
+  NVDA: RSI  42.22   close 196.18
+  IBM: RSI  36.51   close 216.84
+  ... 31 more
 
-  AMZN: price 231.86  fair value 200.00  (+15.9% vs FV)
-  ...
+  (RSI only — check fair value from the dashboard button,
+   then record it with: python -m screener.cli fair-value SYM <value>)
 
 No buy signals today.
 ```
+
+### 3. Build the dashboard
+
+```bash
+python -m screener.cli dashboard --open
+```
+
+Writes a single self-contained `data/dashboard.html` — no JavaScript, no CDN,
+no fonts to fetch. Open it locally, mail it, drop it in Dropbox, or publish it
+(see below). Each stock gets a 90-day RSI plot with the 30 line marked, every
+upward crossing ringed and counted, and a button through to its Morningstar
+page.
+
+Cards sort by what needs attention: confirmed signals, then patterns awaiting a
+fair-value check, then whatever is most oversold right now.
 
 ---
 
@@ -150,6 +156,59 @@ history back to the repo. By default it skips Morningstar — a session cookie i
 a credential, and it isn't in the repo.
 
 To include the valuation half there too, see below.
+
+---
+
+## Sharing the dashboard with someone else
+
+`data/dashboard.html` is one self-contained file — everything (styles, charts,
+data) is inline, so it works from a `file://` path with no server and no
+network. That gives you a few options, easiest first:
+
+| How | Good for | Notes |
+|---|---|---|
+| Mail / message the file | one-off | He opens it in any browser |
+| Dropbox / iCloud / Drive shared link | occasional | Re-upload after each run |
+| GitHub Pages | always-current, public | Free, auto-updates — see below |
+| Netlify Drop | always-current, private-ish | Drag the file onto netlify.com/drop |
+
+**Do not put it anywhere public if you ever add personal position sizes to it.**
+As built it contains only public market data, which is safe to publish.
+
+### GitHub Pages
+
+Since the repo is public already, Pages is the least-effort always-on option.
+The scheduled workflow can publish the dashboard on every run:
+
+1. Repo **Settings → Pages → Source: GitHub Actions**.
+2. The daily workflow builds `dashboard.html` and deploys it.
+3. Your friend bookmarks `https://bas-de-g.github.io/stock_rsi_screener/`.
+
+He needs no Python, no install, and no Morningstar account to read it — only to
+click through to Morningstar if he wants to check a fair value himself.
+
+---
+
+## v2: automating the Morningstar half
+
+Everything for this is already in the repo, just switched off. When you want it:
+
+```bash
+python -m playwright install chromium
+python -m screener.cli login          # opens a browser; sign in by hand
+python -m screener.cli check-auth     # confirms the session works
+python -m screener.cli run --with-morningstar
+```
+
+A **real Chromium window opens** on the Morningstar sign-in page and waits. Sign
+in there yourself, including any 2-factor prompt. The session cookies are saved
+to `auth/morningstar_state.json` (gitignored) and reused for weeks.
+
+> **On the Safari login:** Playwright can't borrow Safari's cookies, so being
+> signed in there doesn't carry over — this signs in once in its own browser.
+
+Then set `fire_without_valuation: false` stays as-is and every pattern gets
+scored automatically instead of waiting on a manual check.
 
 ---
 
@@ -200,6 +259,7 @@ Everything lands in `data/`:
   and fair value per day), `signals` (every completed pattern, fired or not).
 - **`latest.csv`** — current snapshot, one row per symbol.
 - **`signals.csv`** — running log, appended whenever a pattern completes.
+- **`dashboard.html`** — the generated page (rebuilt on demand, not committed).
 
 Reruns of the same day update in place rather than duplicating, and a
 backfilled RSI never overwrites a live TradingView reading.
@@ -216,8 +276,13 @@ recorded — just marked as not fired. You keep the history either way:
 
 ```
 SYMBOL  CROSS 1     DIP         CROSS 2       PRICE  FAIR VAL  RESULT
-IBM     2026-07-16  2026-07-22  2026-07-23        -         -  pattern only (no valuation)
+IBM     2026-07-16  2026-07-22  2026-07-23   217.20    225.00  BUY SIGNAL
+ORCL    2026-07-15  2026-07-21  2026-07-27        -         -  pattern only (no valuation)
 ```
+
+Recording a fair value by hand applies it to every pattern for that symbol
+still waiting on one, so a backfilled pattern from months ago can be resolved
+today. It never un-fires a signal that already went out.
 
 ---
 
@@ -309,12 +374,14 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 40 tests
+python -m pytest tests/ -q      # 103 tests
 ```
 
 They cover the RSI maths (pinned against TradingView's own published value),
 the crossing and window logic including the exact boundary cases, both
-directions of the valuation gate, and the storage upsert rules.
+directions of the valuation gate, the storage upsert and re-scoring rules,
+the Morningstar page parsing, and the dashboard's state model — including
+the guarantee that an unverified pattern never renders as a buy signal.
 
 The tests are all offline — no network, no browser, no credentials.
 
@@ -329,3 +396,5 @@ The tests are all offline — no network, no browser, no credentials.
 - **RSI moves intraday.** Run after the close, or a cross may reverse by the bell.
 - **Scraping is fragile by nature** — see the section above.
 - **One TradingView interval at a time**, set by `rsi.interval` (daily by default).
+- **RSI period is 14 or 7** — the only two TradingView publishes. Config
+  rejects anything else rather than mixing two different indicators in one series.

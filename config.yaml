@@ -1,22 +1,62 @@
 # Stock RSI screener configuration.
 # Safe to commit — contains no credentials.
 
+# 34 large-cap market leaders. Every entry below was checked against both
+# TradingView and Yahoo before being added, so none of them 404 on a run.
+# `tradingview` must carry the right exchange prefix (WMT is NASDAQ, not NYSE);
+# `morningstar` is the URL slug: xnas = Nasdaq, xnys = NYSE.
 tickers:
-  - symbol: AMZN
-    tradingview: NASDAQ:AMZN
-    morningstar: xnas/amzn
-  - symbol: NVDA
-    tradingview: NASDAQ:NVDA
-    morningstar: xnas/nvda
-  - symbol: IBM
-    tradingview: NYSE:IBM
-    morningstar: xnys/ibm
+  # --- Mega-cap tech -------------------------------------------------
+  - {symbol: AAPL,  tradingview: "NASDAQ:AAPL",  morningstar: xnas/aapl}
+  - {symbol: MSFT,  tradingview: "NASDAQ:MSFT",  morningstar: xnas/msft}
+  - {symbol: GOOGL, tradingview: "NASDAQ:GOOGL", morningstar: xnas/googl}
+  - {symbol: AMZN,  tradingview: "NASDAQ:AMZN",  morningstar: xnas/amzn}
+  - {symbol: NVDA,  tradingview: "NASDAQ:NVDA",  morningstar: xnas/nvda}
+  - {symbol: META,  tradingview: "NASDAQ:META",  morningstar: xnas/meta}
+  - {symbol: TSLA,  tradingview: "NASDAQ:TSLA",  morningstar: xnas/tsla}
+  - {symbol: NFLX,  tradingview: "NASDAQ:NFLX",  morningstar: xnas/nflx}
+  - {symbol: ADBE,  tradingview: "NASDAQ:ADBE",  morningstar: xnas/adbe}
+  - {symbol: CRM,   tradingview: "NYSE:CRM",     morningstar: xnys/crm}
+  - {symbol: ORCL,  tradingview: "NYSE:ORCL",    morningstar: xnys/orcl}
+  - {symbol: IBM,   tradingview: "NYSE:IBM",     morningstar: xnys/ibm}
+
+  # --- Semiconductors ------------------------------------------------
+  - {symbol: AVGO,  tradingview: "NASDAQ:AVGO",  morningstar: xnas/avgo}
+  - {symbol: AMD,   tradingview: "NASDAQ:AMD",   morningstar: xnas/amd}
+  - {symbol: INTC,  tradingview: "NASDAQ:INTC",  morningstar: xnas/intc}
+  - {symbol: QCOM,  tradingview: "NASDAQ:QCOM",  morningstar: xnas/qcom}
+  - {symbol: TXN,   tradingview: "NASDAQ:TXN",   morningstar: xnas/txn}
+  - {symbol: AMAT,  tradingview: "NASDAQ:AMAT",  morningstar: xnas/amat}
+  - {symbol: CSCO,  tradingview: "NASDAQ:CSCO",  morningstar: xnas/csco}
+
+  # --- Financials ----------------------------------------------------
+  - {symbol: JPM,   tradingview: "NYSE:JPM",     morningstar: xnys/jpm}
+  - {symbol: V,     tradingview: "NYSE:V",       morningstar: xnys/v}
+  - {symbol: MA,    tradingview: "NYSE:MA",      morningstar: xnys/ma}
+
+  # --- Healthcare ----------------------------------------------------
+  - {symbol: JNJ,   tradingview: "NYSE:JNJ",     morningstar: xnys/jnj}
+  - {symbol: UNH,   tradingview: "NYSE:UNH",     morningstar: xnys/unh}
+  - {symbol: LLY,   tradingview: "NYSE:LLY",     morningstar: xnys/lly}
+
+  # --- Consumer & industrial ------------------------------------------
+  - {symbol: WMT,   tradingview: "NASDAQ:WMT",   morningstar: xnas/wmt}
+  - {symbol: COST,  tradingview: "NASDAQ:COST",  morningstar: xnas/cost}
+  - {symbol: PEP,   tradingview: "NASDAQ:PEP",   morningstar: xnas/pep}
+  - {symbol: PG,    tradingview: "NYSE:PG",      morningstar: xnys/pg}
+  - {symbol: KO,    tradingview: "NYSE:KO",      morningstar: xnys/ko}
+  - {symbol: HD,    tradingview: "NYSE:HD",      morningstar: xnys/hd}
+  - {symbol: DIS,   tradingview: "NYSE:DIS",     morningstar: xnys/dis}
+
+  # --- Energy ---------------------------------------------------------
+  - {symbol: XOM,   tradingview: "NYSE:XOM",     morningstar: xnys/xom}
+  - {symbol: CVX,   tradingview: "NYSE:CVX",     morningstar: xnys/cvx}
 
 rsi:
   # Wilder RSI, the same definition TradingView's "RSI (14)" uses.
+  # TradingView only publishes periods 14 and 7.
   period: 14
   threshold: 30
-  # TradingView interval for the live reading: 1D is the daily bar.
   interval: "1D"
 
 signal:
@@ -27,26 +67,33 @@ signal:
 
   # Which side of fair value allows a signal to fire.
   #
-  #   fair_value_below_price  -> fires when fair value < price   (stock is ABOVE fair value)
-  #   price_below_fair_value  -> fires when price < fair value   (stock is BELOW fair value)
+  #   price_below_fair_value  -> fires when price < fair value  (trading BELOW fair value)
+  #   fair_value_below_price  -> fires when fair value < price  (trading ABOVE fair value)
   #
-  # Set to the rule exactly as requested (fair value < price).
-  # Change this one line to flip it — see "The valuation gate" in the README.
-  valuation_rule: fair_value_below_price
+  # Set to the "buy it while it's cheap" reading.
+  valuation_rule: price_below_fair_value
 
-  # If Morningstar data is missing for a day, should the signal still fire?
-  # false = no fair value means no buy signal (recorded, but not fired).
+  # v1 runs the RSI screener on its own, so most days there is no fair value
+  # recorded yet. Keep this false: a completed RSI pattern with no recorded
+  # fair value is shown on the dashboard as "verify fair value", never as a
+  # confirmed buy signal. It only becomes one after you click through to
+  # Morningstar and record what you saw with `screener fair-value SYM <value>`.
   fire_without_valuation: false
 
 storage:
   database: data/screener.db
   csv_dir: data
 
+dashboard:
+  # Where `screener dashboard` writes the page.
+  output: data/dashboard.html
+  # Trading days of RSI history to plot per stock.
+  chart_days: 90
+
 morningstar:
-  # Saved browser session, created by `python -m screener.cli login`.
-  # Gitignored — never commit it, it is equivalent to a password.
+  # v2 — the automated scraper. Not used unless you pass --with-morningstar.
+  # Until then, use the "Check fair value" button on the dashboard and record
+  # what you see with:  python -m screener.cli fair-value NVDA 225
   state_file: auth/morningstar_state.json
-  # Seconds to wait for the quote page's data to load.
   page_timeout: 45
-  # Save page HTML + screenshot to debug/ when extraction fails.
   debug_on_failure: true

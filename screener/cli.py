@@ -29,6 +29,7 @@ from .storage import (
     RsiPoint,
     Signal,
     Store,
+    Valuation,
     append_signal_csv,
     export_csv_snapshot,
 )
@@ -127,9 +128,10 @@ def cmd_run(config: Config, args) -> int:
             )
             print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}")
 
-        # --- Price + fair value, from Morningstar -----------------------
-        if args.skip_morningstar:
-            print("\n  (skipping Morningstar — RSI history still recorded)")
+        # --- Price + fair value, from Morningstar (v2, opt-in) ----------
+        if not args.with_morningstar:
+            print("\n  (RSI only — check fair value from the dashboard button,")
+            print("   then record it with: python -m screener.cli fair-value SYM <value>)")
         else:
             print()
             for ticker in config.tickers:
@@ -216,6 +218,88 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
     return new_signals
 
 
+def cmd_fair_value(config: Config, args) -> int:
+    """Record a fair value read by hand off the Morningstar page.
+
+    This is the v1 path: rather than scraping, you click through from the
+    dashboard, read the number, and record it here. The price is taken from
+    the latest stored close so the valuation gate has both sides to compare.
+    """
+    symbol = args.symbol.upper()
+    try:
+        config.ticker(symbol)
+    except KeyError as exc:
+        print(f"{exc}")
+        return 1
+
+    date = args.date or dt.date.today().isoformat()
+
+    with Store(config.storage.database) as store:
+        series = store.rsi_series(symbol)
+        if not series:
+            print(f"No price history for {symbol} yet — run `backfill` or `run` first.")
+            return 1
+        price = series[-1].close
+
+        store.upsert_valuation(
+            Valuation(
+                symbol=symbol,
+                date=date,
+                price=price,
+                fair_value=args.value,
+                fair_value_date=date,
+                source="manual",
+            )
+        )
+        _, passed = valuation_passes(price, args.value, config.signal)
+        verdict = "PASSES" if passed else "does not pass"
+        print(f"{symbol}: fair value {args.value:,.2f} vs close {price:,.2f} — {verdict} the gate")
+        print(f"  ({config.signal.describe_rule()})")
+
+        # A manual check is a "right now" answer, so it applies to whichever
+        # pattern is still waiting on one — not just a pattern dated today.
+        # (Automated `run --with-morningstar` is stricter: it only ever scores
+        # a pattern against a valuation from that exact date.)
+        updated = _apply_valuation_to_pending_signals(store, config, symbol, price, args.value)
+        if updated:
+            plural = "pattern" if updated == 1 else "patterns"
+            print(f"  applied to {updated} pending {plural} for {symbol}")
+    return 0
+
+
+def _apply_valuation_to_pending_signals(
+    store: Store, config: Config, symbol: str, price: float, fair_value: float
+) -> int:
+    """Score every not-yet-fired pattern for `symbol` against one fair value.
+
+    Once a pattern is fired it's left alone here — a later manual check
+    shouldn't silently un-fire a signal that already went out.
+    """
+    updated = 0
+    for signal in store.all_signals(symbol):
+        if signal.fired:
+            continue
+        known, passed = valuation_passes(price, fair_value, config.signal)
+        store.update_signal_valuation(symbol, signal.up2_date, price, fair_value, known, passed)
+        updated += 1
+    return updated
+
+
+def cmd_dashboard(config: Config, args) -> int:
+    from .dashboard import build_dashboard
+
+    output = Path(args.output) if args.output else config.dashboard.output
+    with Store(config.storage.database) as store:
+        path = build_dashboard(store, config, output)
+
+    print(f"Dashboard written to {path}")
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(path.as_uri())
+    return 0
+
+
 def cmd_signals(config: Config, args) -> int:
     with Store(config.storage.database) as store:
         signals = store.all_signals(args.symbol)
@@ -300,10 +384,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_backfill.add_argument("--range", default="1y", help="history range (e.g. 6mo, 1y, 2y)")
     p_backfill.set_defaults(func=cmd_backfill)
 
-    p_run = sub.add_parser("run", help="the daily job")
-    p_run.add_argument("--skip-morningstar", action="store_true", help="RSI only, no browser")
+    p_run = sub.add_parser("run", help="the daily job (RSI only by default)")
+    p_run.add_argument(
+        "--with-morningstar",
+        action="store_true",
+        help="also scrape price + fair value (v2; needs `login` first)",
+    )
     p_run.add_argument("--date", help="override the run date (ISO), for testing")
     p_run.set_defaults(func=cmd_run)
+
+    p_fv = sub.add_parser("fair-value", help="record a fair value you checked by hand")
+    p_fv.add_argument("symbol", help="ticker, e.g. NVDA")
+    p_fv.add_argument("value", type=float, help="Morningstar fair value estimate")
+    p_fv.add_argument("--date", help="date to record it against (default: today)")
+    p_fv.set_defaults(func=cmd_fair_value)
+
+    p_dash = sub.add_parser("dashboard", help="build the shareable HTML dashboard")
+    p_dash.add_argument("--output", help="override the output path")
+    p_dash.add_argument("--open", action="store_true", help="open it in a browser when done")
+    p_dash.set_defaults(func=cmd_dashboard)
 
     p_signals = sub.add_parser("signals", help="list recorded patterns and signals")
     p_signals.add_argument("--symbol", help="limit to one symbol")

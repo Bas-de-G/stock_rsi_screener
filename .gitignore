@@ -8,7 +8,10 @@ storage_state*.json
 data/*.db
 data/*.db-journal
 data/*.csv
+data/*.html
+data/*.log
 debug/
+site/
 
 # --- Python ---
 __pycache__/
