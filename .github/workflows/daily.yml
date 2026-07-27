@@ -1,0 +1,81 @@
+name: Daily screener run
+
+# Runs the RSI half of the screener on GitHub's servers and commits the
+# history back to the repo, so it keeps collecting data even when nobody's
+# laptop is on.
+#
+# Morningstar is skipped by default: fair value needs a logged-in subscriber
+# session, and a session cookie is a credential. If you want the valuation
+# half to run here too, see "Running the valuation half in CI" in the README.
+
+on:
+  schedule:
+    # 21:30 UTC on weekdays — about 30 minutes after the US market close,
+    # so the RSI reading is the settled daily bar, not an intraday value.
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-screener
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Morningstar session (optional)
+        id: session
+        env:
+          STATE_B64: ${{ secrets.MORNINGSTAR_STATE_B64 }}
+        run: |
+          if [ -n "$STATE_B64" ]; then
+            mkdir -p auth
+            echo "$STATE_B64" | base64 -d > auth/morningstar_state.json
+            python -m playwright install --with-deps chromium
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No MORNINGSTAR_STATE_B64 secret — running RSI only."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Seed RSI history on first run
+        run: |
+          if [ ! -f data/screener.db ]; then
+            python -m screener.cli backfill --range 1y
+          fi
+
+      - name: Run screener
+        run: |
+          if [ "${{ steps.session.outputs.available }}" = "true" ]; then
+            python -m screener.cli run
+          else
+            python -m screener.cli run --skip-morningstar
+          fi
+
+      - name: Commit collected data
+        run: |
+          rm -rf auth debug
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # data/ is gitignored so local runs stay clean; CI force-adds it
+          # because this is where the shared history lives.
+          git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "data: screener run $(date -u +%Y-%m-%d)"
+            git push
+          fi

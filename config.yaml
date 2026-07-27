@@ -1,0 +1,52 @@
+# Stock RSI screener configuration.
+# Safe to commit — contains no credentials.
+
+tickers:
+  - symbol: AMZN
+    tradingview: NASDAQ:AMZN
+    morningstar: xnas/amzn
+  - symbol: NVDA
+    tradingview: NASDAQ:NVDA
+    morningstar: xnas/nvda
+  - symbol: IBM
+    tradingview: NYSE:IBM
+    morningstar: xnys/ibm
+
+rsi:
+  # Wilder RSI, the same definition TradingView's "RSI (14)" uses.
+  period: 14
+  threshold: 30
+  # TradingView interval for the live reading: 1D is the daily bar.
+  interval: "1D"
+
+signal:
+  # Two upward crossings of the RSI threshold must occur within this window.
+  window_days: 14
+  # calendar = 14 actual days; trading = 14 rows of stored RSI history.
+  window_unit: calendar
+
+  # Which side of fair value allows a signal to fire.
+  #
+  #   fair_value_below_price  -> fires when fair value < price   (stock is ABOVE fair value)
+  #   price_below_fair_value  -> fires when price < fair value   (stock is BELOW fair value)
+  #
+  # Set to the rule exactly as requested (fair value < price).
+  # Change this one line to flip it — see "The valuation gate" in the README.
+  valuation_rule: fair_value_below_price
+
+  # If Morningstar data is missing for a day, should the signal still fire?
+  # false = no fair value means no buy signal (recorded, but not fired).
+  fire_without_valuation: false
+
+storage:
+  database: data/screener.db
+  csv_dir: data
+
+morningstar:
+  # Saved browser session, created by `python -m screener.cli login`.
+  # Gitignored — never commit it, it is equivalent to a password.
+  state_file: auth/morningstar_state.json
+  # Seconds to wait for the quote page's data to load.
+  page_timeout: 45
+  # Save page HTML + screenshot to debug/ when extraction fails.
+  debug_on_failure: true
