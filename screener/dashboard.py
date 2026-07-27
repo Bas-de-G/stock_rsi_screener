@@ -101,7 +101,12 @@ def _collect(store: Store, config: Config) -> list[Row]:
 
     for ticker in config.tickers:
         series = store.rsi_series(ticker.symbol)[-window:]
-        sigs = [s for s in signals if s.symbol == ticker.symbol]
+        # Only show signals where the pattern completed (up2_date) falls within the chart window
+        chart_start = series[0].date if series else None
+        sigs = [
+            s for s in signals
+            if s.symbol == ticker.symbol and (not chart_start or s.up2_date >= chart_start)
+        ]
         rows.append(
             Row(
                 symbol=ticker.symbol,
