@@ -1,0 +1,66 @@
+name: Tests
+
+# The screener's own test suite. Runs on every push and pull request.
+#
+# Deliberately separate from the daily run: these tests are fully offline —
+# no network, no browser, no credentials — so they're fast and can't go red
+# because TradingView had a blip or a scraped page changed shape.
+
+on:
+  # Only main here. Without the branch filter, a push to a branch that has an
+  # open pull request triggers this twice — once for the push, once for the
+  # pull_request event — burning double the minutes for the same commit.
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor the README claims; 3.11 is what the daily job uses.
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+      - name: Check config.yaml is loadable
+        run: |
+          python -c "
+          from screener.config import load_config
+          c = load_config()
+          print(f'{len(c.tickers)} tickers, rule={c.signal.valuation_rule}')
+          "
+
+      - name: Check the dashboard builds from an empty database
+        run: |
+          python -c "
+          from pathlib import Path
+          from screener.config import load_config
+          from screener.storage import Store
+          from screener.dashboard import build_dashboard
+          c = load_config()
+          with Store(Path('/tmp/ci.db')) as s:
+              out = build_dashboard(s, c, Path('/tmp/ci.html'))
+          assert out.stat().st_size > 0, 'dashboard came out empty'
+          print('dashboard builds:', out.stat().st_size, 'bytes')
+          "

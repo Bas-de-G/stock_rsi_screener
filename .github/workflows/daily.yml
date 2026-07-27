@@ -1,0 +1,107 @@
+name: Daily screener run
+
+# Runs the screener on GitHub's servers every weekday, commits the collected
+# history back to the repo, and publishes the dashboard to GitHub Pages — so
+# there's a live URL that stays current with nobody's laptop switched on.
+#
+# NOTE: GitHub only runs scheduled workflows from the repository's DEFAULT
+# branch. On a feature branch this file only runs via "Run workflow"; merge it
+# to main for the daily schedule to start firing.
+#
+# Morningstar scraping is skipped by default: fair value is subscriber-only,
+# and a session cookie is a credential. Record fair values by hand in
+# fair_values.yaml instead — that file is committed, so it can be edited
+# straight from github.com and the next run picks it up.
+
+on:
+  schedule:
+    # 21:30 UTC on weekdays — about 30 minutes after the US market close,
+    # so the RSI reading is the settled daily bar, not an intraday value.
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+  push:
+    # Re-publish immediately when a fair value is edited on github.com.
+    # Restricted to the default branch: without this the job runs on every
+    # feature branch too, committing a generated SQLite file into whatever
+    # pull request happens to be open.
+    branches: [main]
+    paths:
+      - "fair_values.yaml"
+      - "config.yaml"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-screener
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Seed RSI history on first run
+        run: |
+          if [ ! -f data/screener.db ]; then
+            python -m screener.cli backfill --range 1y
+          fi
+
+      - name: Run screener
+        run: python -m screener.cli run
+
+      - name: Build dashboard
+        run: python -m screener.cli dashboard --output site/index.html
+
+      # Collected data belongs on the default branch only. Guarded rather
+      # than assumed, so a manual `workflow_dispatch` from a feature branch
+      # can't push generated files into an open pull request either.
+      - name: Commit collected data
+        if: github.ref_name == github.event.repository.default_branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # data/ is gitignored so local runs stay clean; CI force-adds it
+          # because this is where the shared history lives.
+          git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "data: screener run $(date -u +%Y-%m-%d)"
+            # Another run may have pushed while this one was working.
+            git pull --rebase --autostash origin "$GITHUB_REF_NAME" || true
+            git push
+          fi
+
+      # enablement: true turns Pages on via the API, so this works without
+      # anyone visiting Settings first. If the token isn't allowed to do that,
+      # the publish steps are skipped rather than failing the whole run --
+      # the data collection above has already succeeded and been committed.
+      - id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outcome == 'success'
+        with:
+          path: site
+
+      - id: deploy
+        if: steps.pages.outcome == 'success'
+        uses: actions/deploy-pages@v4
