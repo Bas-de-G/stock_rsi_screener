@@ -153,3 +153,48 @@ def test_entries_are_written_in_a_stable_order(tmp_path):
     )
     body = [ln for ln in path.read_text().splitlines() if ln and not ln.startswith("#")]
     assert [ln for ln in body if ln.endswith(":")] == ["AAPL:", "IBM:", "NVDA:"]
+
+
+# ------------------------------------------------- provenance (`source`)
+
+
+def test_source_defaults_to_manual_when_absent(tmp_path):
+    """Files written before the scraper existed must keep loading unchanged."""
+    path = write(tmp_path, "IBM: 225.00\n")
+    assert load_fair_values(path)["IBM"].source == "manual"
+
+
+def test_source_round_trips(tmp_path):
+    path = tmp_path / "fair_values.yaml"
+    save_fair_value(path, "IBM", 225.0, source="scraped")
+    assert load_fair_values(path)["IBM"].source == "scraped"
+
+
+def test_manual_source_is_not_written_back(tmp_path):
+    """A hand-edited file shouldn't grow a `source: manual` line it never had."""
+    path = tmp_path / "fair_values.yaml"
+    save_fair_value(path, "IBM", 225.0)
+    assert "source" not in path.read_text().split("fair_value")[-1]
+
+
+def test_scraped_source_is_written(tmp_path):
+    path = tmp_path / "fair_values.yaml"
+    save_fair_value(path, "IBM", 225.0, source="scraped")
+    assert "source: scraped" in path.read_text()
+
+
+def test_scraped_and_manual_entries_coexist(tmp_path):
+    path = tmp_path / "fair_values.yaml"
+    save_fair_value(path, "IBM", 225.0, source="scraped")
+    save_fair_value(path, "NVDA", 140.0)
+    values = load_fair_values(path)
+    assert values["IBM"].source == "scraped"
+    assert values["NVDA"].source == "manual"
+
+
+def test_rescraping_overwrites_a_manual_value(tmp_path):
+    path = tmp_path / "fair_values.yaml"
+    save_fair_value(path, "IBM", 200.0)
+    save_fair_value(path, "IBM", 225.0, source="scraped")
+    entry = load_fair_values(path)["IBM"]
+    assert (entry.fair_value, entry.source) == (225.0, "scraped")

@@ -18,6 +18,10 @@ Two spellings are accepted, so the quick one stays quick:
       fair_value: 280.00
       checked: 2026-07-27
       note: post-earnings cut
+
+`source` records where a number came from -- "manual" when someone typed it,
+"scraped" when `screener scrape` read it off the page. It is omitted when
+manual, so a hand-edited file stays as short as it looks above.
 """
 
 from __future__ import annotations
@@ -55,6 +59,9 @@ class FairValue:
     fair_value: float
     checked: str | None = None
     note: str | None = None
+    # How the number got here. Defaults to "manual" so files written before
+    # the scraper existed keep loading unchanged.
+    source: str = "manual"
 
 
 class FairValueError(ValueError):
@@ -86,6 +93,7 @@ def load_fair_values(path: Path) -> dict[str, FairValue]:
                 fair_value=value,
                 checked=_as_text(entry.get("checked")),
                 note=_as_text(entry.get("note")),
+                source=_as_text(entry.get("source")) or "manual",
             )
         else:
             out[key] = FairValue(symbol=key, fair_value=_as_number(entry, key, path))
@@ -114,6 +122,7 @@ def save_fair_value(
     fair_value: float,
     checked: str | None = None,
     note: str | None = None,
+    source: str = "manual",
 ) -> dict[str, FairValue]:
     """Record one value and rewrite the file, keeping every other entry."""
     values = load_fair_values(path)
@@ -122,6 +131,7 @@ def save_fair_value(
         fair_value=fair_value,
         checked=checked or dt.date.today().isoformat(),
         note=note,
+        source=source,
     )
     write_fair_values(path, values)
     return values
@@ -136,6 +146,10 @@ def write_fair_values(path: Path, values: dict[str, FairValue]) -> None:
             record["checked"] = entry.checked
         if entry.note:
             record["note"] = entry.note
+        # "manual" is the default on load, so writing it back only adds noise
+        # to the diff of a hand-edited file.
+        if entry.source and entry.source != "manual":
+            record["source"] = entry.source
         body[symbol] = record
 
     path.parent.mkdir(parents=True, exist_ok=True)

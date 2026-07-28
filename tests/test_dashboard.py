@@ -230,3 +230,87 @@ def test_build_dashboard_writes_a_file(tmp_path, config):
     assert "NVDA" in text
     assert "220.00" in text
     assert "below fair value" in text
+
+
+# ------------------------------------------------------- freshness line
+
+
+import datetime as dt
+
+from screener.dashboard import _freshness
+
+
+def valuation(checked, source="manual"):
+    return Valuation(
+        symbol="IBM", date="2026-07-28", price=217.0, fair_value=225.0,
+        fair_value_date=checked, source=source,
+    )
+
+
+def days_ago(n):
+    return (dt.date.today() - dt.timedelta(days=n)).isoformat()
+
+
+def test_freshness_reads_the_checked_date_not_the_row_date():
+    """`date` is rewritten every run, so it never looks old — `fair_value_date`
+    carries the `checked:` value from the YAML and is what actually ages."""
+    text, _ = _freshness(valuation(days_ago(5)))
+    assert text == "Checked 5 days ago"
+
+
+def test_freshness_today_and_yesterday_read_naturally():
+    assert _freshness(valuation(days_ago(0)))[0] == "Checked today"
+    assert _freshness(valuation(days_ago(1)))[0] == "Checked yesterday"
+
+
+def test_freshness_rolls_up_to_months():
+    assert "month" in _freshness(valuation(days_ago(75)))[0]
+    assert _freshness(valuation(days_ago(120)))[0] == "Checked about 4 months ago"
+
+
+def test_recent_values_are_not_flagged_stale():
+    assert _freshness(valuation(days_ago(30)))[1] == ""
+    assert _freshness(valuation(days_ago(90)))[1] == ""
+
+
+def test_values_past_a_quarter_are_flagged_stale():
+    """Morningstar revises estimates roughly quarterly."""
+    assert _freshness(valuation(days_ago(91)))[1] == " stale"
+    assert _freshness(valuation(days_ago(400)))[1] == " stale"
+
+
+def test_a_missing_checked_date_falls_back_to_the_row_date():
+    text, css = _freshness(valuation(None))
+    assert text == "Recorded 2026-07-28"
+    assert css == ""
+
+
+def test_an_unparseable_checked_date_is_shown_verbatim():
+    """Someone typing `checked: last Tuesday` shouldn't crash the dashboard."""
+    text, css = _freshness(valuation("last Tuesday"))
+    assert text == "Checked last Tuesday"
+    assert css == ""
+
+
+def test_stale_marker_reaches_the_rendered_page(config, tmp_path):
+    db = tmp_path / "t.db"
+    with Store(db) as store:
+        for i in range(20):
+            store.upsert_rsi_point(
+                RsiPoint("IBM", f"2026-07-{i + 1:02d}", 200.0, 45.0, "backfill:yahoo")
+            )
+        store.upsert_valuation(valuation(days_ago(200)))
+        out = build_dashboard(store, config, tmp_path / "out.html")
+    assert "provenance stale" in out.read_text()
+
+
+def test_scraped_values_are_labelled_as_such(config, tmp_path):
+    db = tmp_path / "t.db"
+    with Store(db) as store:
+        for i in range(20):
+            store.upsert_rsi_point(
+                RsiPoint("IBM", f"2026-07-{i + 1:02d}", 200.0, 45.0, "backfill:yahoo")
+            )
+        store.upsert_valuation(valuation(days_ago(2), source="scraped"))
+        out = build_dashboard(store, config, tmp_path / "out.html")
+    assert "scraped from Morningstar" in out.read_text()

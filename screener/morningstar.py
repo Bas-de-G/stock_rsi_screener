@@ -125,65 +125,164 @@ def save_login_session(config: Config, timeout_minutes: int = 10) -> Path:
     return state_file
 
 
-def scrape_ticker(ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
-    """Read price + fair value for one ticker from its Morningstar quote page."""
-    from playwright.sync_api import sync_playwright
-
+def _require_session(ms_config: MorningstarConfig) -> None:
     if not ms_config.state_file.exists():
         raise AuthenticationError(
             f"No saved Morningstar session at {ms_config.state_file}. "
             "Run: python -m screener.cli login"
         )
 
+
+def _scrape_on_page(page, ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
+    """Read one ticker using an already-open page.
+
+    Split out from `scrape_ticker` so the single-ticker and batch paths share
+    exactly one copy of the navigate-and-extract logic — a selector repair only
+    ever has to be made in one place.
+    """
     captured: list[dict] = []
+
+    def on_response(response):
+        url = response.url
+        if "morningstar.com" not in url:
+            return
+        if not any(tag in url for tag in ("sal-service", "api-global", "valuation", "priceFairValue")):
+            return
+        try:
+            if "json" in (response.headers.get("content-type") or ""):
+                captured.append(response.json())
+        except Exception:
+            pass  # A response we can't parse is simply not a source.
+
+    page.on("response", on_response)
+    try:
+        page.goto(
+            ticker.morningstar_url,
+            wait_until="domcontentloaded",
+            timeout=ms_config.page_timeout * 1000,
+        )
+        # The valuation card renders client-side after its XHR returns.
+        page.wait_for_timeout(6000)
+        try:
+            page.wait_for_selector("text=Fair Value", timeout=ms_config.page_timeout * 1000)
+        except Exception:
+            pass  # Fall through to the other strategies and the debug dump.
+
+        page_text = page.inner_text("body")
+        result = _extract(ticker.symbol, captured, page_text)
+
+        if not result.complete and ms_config.debug_on_failure:
+            _dump_debug(page, ticker.symbol, captured)
+
+        if result.fair_value is None and _looks_logged_out(page_text):
+            raise AuthenticationError(
+                f"Morningstar returned a signed-out page for {ticker.symbol}. "
+                "The saved session has expired — re-run: python -m screener.cli login"
+            )
+    finally:
+        page.remove_listener("response", on_response)
+
+    return result
+
+
+def scrape_ticker(ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
+    """Read price + fair value for one ticker from its Morningstar quote page."""
+    from playwright.sync_api import sync_playwright
+
+    _require_session(ms_config)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, **_launch_kwargs())
-        context = browser.new_context(storage_state=str(ms_config.state_file))
-        page = context.new_page()
-
-        def on_response(response):
-            url = response.url
-            if "morningstar.com" not in url:
-                return
-            if not any(tag in url for tag in ("sal-service", "api-global", "valuation", "priceFairValue")):
-                return
-            try:
-                if "json" in (response.headers.get("content-type") or ""):
-                    captured.append(response.json())
-            except Exception:
-                pass  # A response we can't parse is simply not a source.
-
-        page.on("response", on_response)
-
         try:
-            page.goto(
-                ticker.morningstar_url,
-                wait_until="domcontentloaded",
-                timeout=ms_config.page_timeout * 1000,
-            )
-            # The valuation card renders client-side after its XHR returns.
-            page.wait_for_timeout(6000)
-            try:
-                page.wait_for_selector("text=Fair Value", timeout=ms_config.page_timeout * 1000)
-            except Exception:
-                pass  # Fall through to the other strategies and the debug dump.
-
-            page_text = page.inner_text("body")
-            result = _extract(ticker.symbol, captured, page_text)
-
-            if not result.complete and ms_config.debug_on_failure:
-                _dump_debug(page, ticker.symbol, captured)
-
-            if result.fair_value is None and _looks_logged_out(page_text):
-                raise AuthenticationError(
-                    f"Morningstar returned a signed-out page for {ticker.symbol}. "
-                    "The saved session has expired — re-run: python -m screener.cli login"
-                )
+            context = browser.new_context(storage_state=str(ms_config.state_file))
+            page = context.new_page()
+            return _scrape_on_page(page, ticker, ms_config)
         finally:
             browser.close()
 
-    return result
+
+# A price and a fair value for the same stock are the same kind of number, so
+# they should land within an order of magnitude of each other. Anything wider is
+# almost always a *unit* mismatch rather than a real valuation gap -- the live
+# hazard being Rolls-Royce, quoted in pence on xlon, where a price read as GBX
+# 1,413.60 against a fair value read as GBP 14.50 would sail through the gate
+# and produce a confident, meaningless answer.
+_RATIO_FLOOR, _RATIO_CEILING = 0.1, 10.0
+
+
+class UnitMismatchError(MorningstarError):
+    """Raised when price and fair value look like they're in different units."""
+
+
+def check_units(result: ScrapeResult) -> None:
+    """Reject a result whose price and fair value can't be in the same currency."""
+    if result.price is None or result.fair_value is None:
+        return
+    ratio = result.price / result.fair_value
+    if not _RATIO_FLOOR <= ratio <= _RATIO_CEILING:
+        raise UnitMismatchError(
+            f"{result.symbol}: price {result.price:,.2f} and fair value "
+            f"{result.fair_value:,.2f} differ by {ratio:.1f}x — almost certainly a "
+            f"currency/unit mismatch (pence vs pounds?), not a real gap. Not recorded."
+        )
+
+
+def scrape_many(
+    tickers: list[Ticker],
+    ms_config: MorningstarConfig,
+    pause_range: tuple[float, float] = (3.0, 8.0),
+    on_result=None,
+) -> list[tuple[Ticker, ScrapeResult | None, str | None]]:
+    """Read several tickers in one browser session.
+
+    Returns a (ticker, result, error) triple per ticker, so one bad page doesn't
+    discard the good ones alongside it. `result` is None exactly when `error` is
+    set.
+
+    Two deliberate choices:
+
+    * **One browser, many pages.** `scrape_ticker` launches its own Chromium,
+      which for 35 tickers means 35 process launches.
+    * **A randomised pause between tickers.** Reading page after page as fast as
+      Chromium can go is the pattern that gets a subscriber session flagged.
+      This is a logged-in account on a paid product; pace it like a person.
+
+    An expired session aborts the whole batch — it would fail every remaining
+    ticker identically, and 35 copies of the same error helps nobody.
+    """
+    import random
+    import time
+
+    from playwright.sync_api import sync_playwright
+
+    _require_session(ms_config)
+    out: list[tuple[Ticker, ScrapeResult | None, str | None]] = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, **_launch_kwargs())
+        try:
+            context = browser.new_context(storage_state=str(ms_config.state_file))
+            for index, ticker in enumerate(tickers):
+                if index:
+                    time.sleep(random.uniform(*pause_range))
+                page = context.new_page()
+                try:
+                    result = _scrape_on_page(page, ticker, ms_config)
+                    check_units(result)
+                    entry = (ticker, result, None)
+                except AuthenticationError:
+                    raise  # every remaining ticker would fail the same way
+                except MorningstarError as exc:
+                    entry = (ticker, None, str(exc))
+                finally:
+                    page.close()
+                out.append(entry)
+                if on_result is not None:
+                    on_result(*entry)
+        finally:
+            browser.close()
+
+    return out
 
 
 def _looks_logged_out(page_text: str) -> bool:
