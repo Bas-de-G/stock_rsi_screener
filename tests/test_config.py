@@ -126,3 +126,15 @@ def test_unsupported_period_field_raises():
 
     with pytest.raises(MarketDataError, match="only serves"):
         rsi_field_name(9, "1D")
+
+
+def test_morningstar_headless_defaults_to_false(tmp_path):
+    """Headless has been observed to trip Morningstar's bot-protection;
+    false is the safe default, matching the interactive login flow."""
+    config = load_config(write(tmp_path, VALID))
+    assert config.morningstar.headless is False
+
+
+def test_morningstar_headless_can_be_enabled_explicitly(tmp_path):
+    config = load_config(write(tmp_path, VALID + "\nmorningstar:\n  headless: true\n"))
+    assert config.morningstar.headless is True

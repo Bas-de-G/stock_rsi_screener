@@ -19,6 +19,7 @@ from screener.morningstar import (
     _deep_find_number,
     _extract,
     _fair_value_from_text,
+    _looks_like_bot_challenge,
     _looks_logged_out,
     _price_from_text,
     to_valuation,
@@ -238,3 +239,37 @@ def test_the_error_names_the_symbol_and_the_ratio():
         check_units(result(1413.60, 14.50, "RR"))
     assert "RR" in str(exc.value)
     assert "97" in str(exc.value)
+
+
+# ------------------------------------------------- bot-challenge detection
+#
+# This is a regression test against a real failure: a headless `check-auth`
+# run against AAPL got served an AWS WAF CAPTCHA instead of the quote page,
+# with a perfectly valid session cookie. The text below is what
+# `page.inner_text("body")` returns for that page -- the *rendered* text, so
+# it excludes the `display: none` error banners and everything living only in
+# <script src> URLs (which is why "awswaf.com" itself isn't a marker: it never
+# appears in rendered text, only in a script tag's src attribute).
+
+WAF_CHALLENGE_PAGE = """
+Let's confirm you are human
+Complete the security check before continuing. This step verifies that you are not a bot, which helps to protect your account and prevent spam.
+Begin
+English
+"""
+
+
+def test_the_actual_captured_challenge_page_is_detected():
+    assert _looks_like_bot_challenge(WAF_CHALLENGE_PAGE)
+
+
+def test_a_normal_quote_page_is_not_flagged_as_a_challenge():
+    assert not _looks_like_bot_challenge(IBM_PAGE)
+
+
+def test_a_signed_out_page_is_not_confused_with_a_bot_challenge():
+    """Two different failure modes, two different fixes -- re-login vs.
+    retry with a visible browser -- so they must not collide."""
+    assert not _looks_like_bot_challenge(LOGGED_OUT_PAGE)
+    assert _looks_logged_out(LOGGED_OUT_PAGE)
+    assert not _looks_logged_out(WAF_CHALLENGE_PAGE)
