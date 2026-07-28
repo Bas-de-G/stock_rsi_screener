@@ -18,6 +18,7 @@ from .config import Config, load_config
 from .fairvalues import FairValueError, load_fair_values, save_fair_value
 from .morningstar import (
     AuthenticationError,
+    BotChallengeError,
     MorningstarError,
     save_login_session,
     scrape_ticker,
@@ -452,6 +453,11 @@ def cmd_scrape(config: Config, args) -> int:
         except AuthenticationError as exc:
             print(f"\n  {exc}")
             return 1
+        except BotChallengeError as exc:
+            print(f"\n  {exc}")
+            if recorded:
+                print(f"  ({recorded} value(s) before the challenge were still recorded.)")
+            return 1
         except MorningstarError as exc:
             print(f"\n  Scrape failed: {exc}")
             return 1
@@ -582,6 +588,9 @@ def cmd_check_auth(config: Config, args) -> int:
         result = scrape_ticker(ticker, config.morningstar)
     except AuthenticationError as exc:
         print(f"  NOT SIGNED IN: {exc}")
+        return 1
+    except BotChallengeError as exc:
+        print(f"  BLOCKED: {exc}")
         return 1
     except MorningstarError as exc:
         print(f"  Failed: {exc}")

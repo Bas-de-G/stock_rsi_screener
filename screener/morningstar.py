@@ -22,6 +22,13 @@ a moving target:
 
 If all three miss, the page HTML and a screenshot are written to debug/ so
 the selectors can be repaired against what the site actually served.
+
+Headless is off by default (`MorningstarConfig.headless = False`). A headless
+scrape has been observed to trip Morningstar's AWS WAF bot-protection — served
+as a "Let's confirm you are human" CAPTCHA page in place of the quote page —
+even with a perfectly valid session cookie. The interactive `login` flow's
+visible browser gets through, so scraping mirrors that rather than trying to
+be invisible.
 """
 
 from __future__ import annotations
@@ -50,6 +57,33 @@ class MorningstarError(RuntimeError):
 
 class AuthenticationError(MorningstarError):
     """Raised specifically when the saved session is missing or no longer valid."""
+
+
+class BotChallengeError(MorningstarError):
+    """Raised when Morningstar's bot-protection intercepts the request.
+
+    Distinct from `AuthenticationError` on purpose: this is not a login
+    problem. The saved session cookie can be perfectly valid while an AWS WAF
+    rule still serves a "Let's confirm you are human" CAPTCHA page instead of
+    the quote page, because what's being fingerprinted is the automated
+    browser, not the account.
+    """
+
+
+# Markers from the AWS WAF challenge page actually served to a headless
+# session (captured via `_dump_debug` and inspected directly). These come from
+# `page.inner_text("body")` — the *rendered* text — so markers that only exist
+# in <script src> URLs (e.g. "awswaf.com") won't match and aren't listed here.
+_BOT_CHALLENGE_MARKERS = (
+    "let's confirm you are human",
+    "verify you are human",
+    "you are not a bot",
+)
+
+
+def _looks_like_bot_challenge(page_text: str) -> bool:
+    lowered = page_text.lower()
+    return any(marker in lowered for marker in _BOT_CHALLENGE_MARKERS)
 
 
 @dataclass
@@ -169,6 +203,20 @@ def _scrape_on_page(page, ticker: Ticker, ms_config: MorningstarConfig) -> Scrap
             pass  # Fall through to the other strategies and the debug dump.
 
         page_text = page.inner_text("body")
+
+        # Checked before extraction, not after: a challenge page has no Fair
+        # Value card to find, so letting the three extraction strategies run
+        # first only produces a confusing "fair_value=None" with no clue why.
+        if _looks_like_bot_challenge(page_text):
+            if ms_config.debug_on_failure:
+                _dump_debug(page, ticker.symbol, captured)
+            raise BotChallengeError(
+                f"Morningstar's bot-protection (AWS WAF) challenged the request for "
+                f"{ticker.symbol} instead of serving the page. Your session is not the "
+                "problem — this is a fingerprinting check, not a login check. "
+                f"{'Retrying headless will not help; headless=false is already set.' if not ms_config.headless else 'Set morningstar.headless: false in config.yaml and try again — the interactive login uses a visible browser and gets through.'}"
+            )
+
         result = _extract(ticker.symbol, captured, page_text)
 
         if not result.complete and ms_config.debug_on_failure:
@@ -192,7 +240,7 @@ def scrape_ticker(ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
     _require_session(ms_config)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, **_launch_kwargs())
+        browser = p.chromium.launch(headless=ms_config.headless, **_launch_kwargs())
         try:
             context = browser.new_context(storage_state=str(ms_config.state_file))
             page = context.new_page()
@@ -247,8 +295,9 @@ def scrape_many(
       Chromium can go is the pattern that gets a subscriber session flagged.
       This is a logged-in account on a paid product; pace it like a person.
 
-    An expired session aborts the whole batch — it would fail every remaining
-    ticker identically, and 35 copies of the same error helps nobody.
+    An expired session, or a bot-protection challenge, aborts the whole batch —
+    both apply to the browser session as a whole, so every remaining ticker
+    would fail identically, and 35 copies of the same error helps nobody.
     """
     import random
     import time
@@ -259,7 +308,7 @@ def scrape_many(
     out: list[tuple[Ticker, ScrapeResult | None, str | None]] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, **_launch_kwargs())
+        browser = p.chromium.launch(headless=ms_config.headless, **_launch_kwargs())
         try:
             context = browser.new_context(storage_state=str(ms_config.state_file))
             for index, ticker in enumerate(tickers):
@@ -270,7 +319,7 @@ def scrape_many(
                     result = _scrape_on_page(page, ticker, ms_config)
                     check_units(result)
                     entry = (ticker, result, None)
-                except AuthenticationError:
+                except (AuthenticationError, BotChallengeError):
                     raise  # every remaining ticker would fail the same way
                 except MorningstarError as exc:
                     entry = (ticker, None, str(exc))

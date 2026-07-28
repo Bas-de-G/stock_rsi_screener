@@ -84,6 +84,12 @@ class MorningstarConfig:
     state_file: Path
     page_timeout: int = 45
     debug_on_failure: bool = True
+    # False by default: the interactive `login` flow uses a visible browser and
+    # gets through Morningstar's bot protection, while a headless scrape has
+    # been observed to trip an AWS WAF CAPTCHA on the subscriber-only page. This
+    # only runs on a laptop, not CI, so a visible window during a scrape is a
+    # fine trade for not being silently blocked.
+    headless: bool = False
 
 
 @dataclass(frozen=True)
@@ -183,6 +189,7 @@ def load_config(path: str | Path | None = None) -> Config:
         state_file=_resolve(ms_raw.get("state_file", "auth/morningstar_state.json")),
         page_timeout=int(ms_raw.get("page_timeout", 45)),
         debug_on_failure=bool(ms_raw.get("debug_on_failure", True)),
+        headless=bool(ms_raw.get("headless", False)),
     )
 
     dash_raw = raw.get("dashboard", {})

@@ -104,9 +104,15 @@ dashboard:
   chart_days: 90
 
 morningstar:
-  # v2 — the automated scraper. Not used unless you pass --with-morningstar.
-  # Until then, use the "Check fair value" button on the dashboard and record
-  # what you see with:  python -m screener.cli fair-value NVDA 225
+  # The automated scraper: `python -m screener.cli scrape`. Until you set it
+  # up, use the "Check fair value" button on the dashboard and record what you
+  # see with:  python -m screener.cli fair-value NVDA 225
   state_file: auth/morningstar_state.json
   page_timeout: 45
   debug_on_failure: true
+  # Leave false. A headless scrape has been observed to trip Morningstar's AWS
+  # WAF bot-protection (a CAPTCHA challenge page, not a login failure) on the
+  # subscriber-only quote page, while the interactive `login` flow's visible
+  # browser gets through fine. Setting this true trades that risk for a
+  # scrape that doesn't pop a window — probably not worth it.
+  headless: false
