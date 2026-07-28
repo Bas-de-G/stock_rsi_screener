@@ -21,7 +21,6 @@ from .morningstar import (
     MorningstarError,
     save_login_session,
     scrape_ticker,
-    to_valuation,
 )
 from .notify import format_signal, send_webhook
 from .rsi import wilder_rsi_series
@@ -133,30 +132,45 @@ def cmd_run(config: Config, args) -> int:
             )
             print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}")
 
-        # --- Price + fair value, from Morningstar (v2, opt-in) ----------
+        # --- Price + fair value, from Morningstar (opt-in) ---------------
         if not args.with_morningstar:
-            print("\n  (RSI only — check fair value from the dashboard button,")
-            print("   then record it with: python -m screener.cli fair-value SYM <value>)")
+            print("\n  (RSI only — record fair values with: python -m screener.cli scrape)")
         else:
+            # Routed through the same YAML file the `scrape` command writes, so
+            # there is exactly one way a fair value enters the system. Writing
+            # straight to the database would strand these values: it's
+            # gitignored locally and rebuilt from scratch by CI.
             print()
-            for ticker in config.tickers:
-                try:
-                    result = scrape_ticker(ticker, config.morningstar)
-                    valuation = to_valuation(result, today)
-                except AuthenticationError as exc:
-                    print(f"  {ticker.symbol}: {exc}")
-                    exit_code = 1
-                    break  # one expired session breaks every ticker
-                except MorningstarError as exc:
-                    print(f"  {ticker.symbol}: {exc}")
-                    exit_code = 1
-                    continue
-                store.upsert_valuation(valuation)
-                gap = (valuation.price / valuation.fair_value - 1) * 100
-                print(
-                    f"  {ticker.symbol}: price {valuation.price:,.2f}  "
-                    f"fair value {valuation.fair_value:,.2f}  ({gap:+.1f}% vs FV)"
-                )
+            from .morningstar import scrape_many
+
+            scraped = 0
+            try:
+                for ticker, result, error in scrape_many(
+                    list(config.tickers), config.morningstar
+                ):
+                    if error is not None:
+                        print(f"  {ticker.symbol}: {error}")
+                        exit_code = 1
+                        continue
+                    save_fair_value(
+                        config.storage.fair_values,
+                        ticker.symbol,
+                        result.fair_value,
+                        checked=today,
+                        source="scraped",
+                    )
+                    scraped += 1
+                    gap = (result.price / result.fair_value - 1) * 100
+                    print(
+                        f"  {ticker.symbol}: price {result.price:,.2f}  "
+                        f"fair value {result.fair_value:,.2f}  ({gap:+.1f}% vs FV)"
+                    )
+            except MorningstarError as exc:
+                print(f"  {exc}")
+                exit_code = 1
+            if scraped:
+                sync_fair_values(store, config, quiet=True)
+                print(f"\n  {scraped} written to {config.storage.fair_values.name} — commit it to share.")
 
         # --- Detect -----------------------------------------------------
         print()
@@ -332,6 +346,173 @@ def _apply_valuation_to_pending_signals(
     return updated
 
 
+def _signalled_symbols(store: Store, config: Config) -> list[str]:
+    """Symbols whose fired signal is recent enough to still be on the dashboard.
+
+    This is what makes scraping cheap. A fair value only changes anything when a
+    pattern has fired — it's what upgrades a plain buy to a strong one. With
+    `fire_without_valuation` set, a ticker sitting at RSI 60 with no pattern
+    gains nothing from being scraped, so don't fetch 35 subscriber pages to
+    answer a question about three of them.
+
+    The chart-window rule is mirrored from `dashboard._collect`, so a signal
+    that's aged off the dashboard doesn't drag a scrape along with it.
+    """
+    window = config.dashboard.chart_days
+    out: list[str] = []
+    for ticker in config.tickers:
+        series = store.rsi_series(ticker.symbol)
+        if not series:
+            continue
+        chart_start = series[-window:][0].date
+        if any(
+            s.fired and s.up2_date >= chart_start
+            for s in store.all_signals(ticker.symbol)
+        ):
+            out.append(ticker.symbol)
+    return out
+
+
+def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
+    """Work out which tickers `scrape` should visit."""
+    if args.symbols:
+        wanted = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+        tickers = []
+        for symbol in wanted:
+            try:
+                tickers.append(config.ticker(symbol))
+            except KeyError as exc:
+                print(f"  ! {exc}")
+        return tickers
+    if args.all:
+        return list(config.tickers)
+    symbols = _signalled_symbols(store, config)
+    return [config.ticker(s) for s in symbols]
+
+
+def cmd_scrape(config: Config, args) -> int:
+    """Read fair values off Morningstar and record them in the YAML file.
+
+    Runs from a laptop, not CI: the fair value is subscriber-only, so this needs
+    a logged-in session, and a session cookie is a credential that has no place
+    in a public repo's secrets. Estimates only move on earnings or a thesis
+    change anyway, so an occasional local run keeps up fine.
+    """
+    from .morningstar import scrape_many
+
+    date = args.date or dt.date.today().isoformat()
+
+    with Store(config.storage.database) as store:
+        targets = _resolve_scrape_targets(store, config, args)
+
+        if not targets:
+            print("Nothing to scrape.")
+            if args.symbols:
+                # Explicitly asked for tickers and got none — a typo, not an
+                # empty result. Exit non-zero so a script notices.
+                return 1
+            if not args.all:
+                print("  No ticker has a live signal, so no fair value would change anything.")
+                print("  Use --all to scrape every ticker anyway, or --symbols SYM,SYM.")
+            return 0
+
+        names = ", ".join(t.symbol for t in targets)
+        print(f"Scraping {len(targets)} ticker(s): {names}")
+        if args.dry_run:
+            print("\n(--dry-run: nothing fetched, nothing written)")
+            return 0
+        print("  Pacing requests — this is a logged-in session on a paid product.\n")
+
+        recorded, failed = 0, 0
+
+        def report(ticker, result, error):
+            nonlocal recorded, failed
+            if error is not None:
+                print(f"  {ticker.symbol}: {error}")
+                failed += 1
+                return
+            save_fair_value(
+                config.storage.fair_values,
+                ticker.symbol,
+                result.fair_value,
+                checked=date,
+                note=args.note,
+                source="scraped",
+            )
+            gap = (result.price / result.fair_value - 1) * 100
+            print(
+                f"  {ticker.symbol}: price {result.price:,.2f}  "
+                f"fair value {result.fair_value:,.2f}  ({gap:+.1f}% vs FV)  "
+                f"[{result.method or 'text'}]"
+            )
+            recorded += 1
+
+        try:
+            scrape_many(targets, config.morningstar, on_result=report)
+        except AuthenticationError as exc:
+            print(f"\n  {exc}")
+            return 1
+        except MorningstarError as exc:
+            print(f"\n  Scrape failed: {exc}")
+            return 1
+
+        if recorded:
+            sync_fair_values(store, config, quiet=True)
+
+    print(f"\n{recorded} recorded, {failed} failed → {config.storage.fair_values.name}")
+    if recorded:
+        if args.push:
+            return _commit_and_push_fair_values(config, recorded)
+        print("  Not pushed. Review the diff, then either:")
+        print(f"    git add {config.storage.fair_values.name} && git commit && git push")
+        print("    or re-run with --push to do that automatically.")
+    return 1 if failed and not recorded else 0
+
+
+def _commit_and_push_fair_values(config: Config, recorded: int) -> int:
+    """Commit just the fair-value file and push it.
+
+    Deliberately opt-in (`--push`), and deliberately narrow: it stages one file
+    by name. A scrape run shouldn't sweep up whatever else happens to be dirty
+    in the working tree.
+    """
+    import subprocess
+
+    path = config.storage.fair_values
+    repo = path.parent
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args], cwd=repo, capture_output=True, text=True
+        )
+
+    staged = git("add", str(path))
+    if staged.returncode != 0:
+        print(f"  ! git add failed: {staged.stderr.strip()}")
+        return 1
+
+    if git("diff", "--staged", "--quiet").returncode == 0:
+        print("  Nothing changed — every scraped value matched what was already recorded.")
+        return 0
+
+    plural = "value" if recorded == 1 else "values"
+    committed = git("commit", "-m", f"fair values: scraped {recorded} {plural}")
+    if committed.returncode != 0:
+        print(f"  ! git commit failed: {committed.stderr.strip() or committed.stdout.strip()}")
+        return 1
+
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    pushed = git("push", "-u", "origin", branch)
+    if pushed.returncode != 0:
+        print(f"  ! git push failed: {pushed.stderr.strip()}")
+        print("    The commit is made — push it by hand once that's sorted.")
+        return 1
+
+    print(f"  Committed and pushed to {branch}.")
+    print("  The next scheduled run rebuilds the dashboard with these values.")
+    return 0
+
+
 def cmd_dashboard(config: Config, args) -> int:
     from .dashboard import build_dashboard
 
@@ -449,6 +630,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_fv.add_argument("--date", help="date to record it against (default: today)")
     p_fv.add_argument("--note", help="optional note, e.g. 'post-earnings cut'")
     p_fv.set_defaults(func=cmd_fair_value)
+
+    p_scrape = sub.add_parser(
+        "scrape", help="read fair values off Morningstar (needs `login` first)"
+    )
+    p_scrape.add_argument(
+        "--all", action="store_true", help="every ticker, not just ones with a live signal"
+    )
+    p_scrape.add_argument("--symbols", help="explicit comma-separated list, e.g. IBM,NVDA")
+    p_scrape.add_argument(
+        "--dry-run", action="store_true", help="list what would be scraped, fetch nothing"
+    )
+    p_scrape.add_argument(
+        "--push", action="store_true", help="commit and push fair_values.yaml when done"
+    )
+    p_scrape.add_argument("--date", help="date to record against (default: today)")
+    p_scrape.add_argument("--note", help="optional note stored with every value in this run")
+    p_scrape.set_defaults(func=cmd_scrape)
 
     p_dash = sub.add_parser("dashboard", help="build the shareable HTML dashboard")
     p_dash.add_argument("--output", help="override the output path")

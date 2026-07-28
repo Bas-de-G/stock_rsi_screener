@@ -178,3 +178,63 @@ def test_to_valuation_builds_a_storable_row():
     assert valuation.date == "2026-07-27"
     assert valuation.price == 217.24
     assert valuation.fair_value == 225.00
+
+
+# ------------------------------------------------- unit mismatch guard
+
+
+from screener.morningstar import UnitMismatchError, check_units
+
+
+def result(price, fair_value, symbol="RR"):
+    return ScrapeResult(symbol=symbol, price=price, fair_value=fair_value)
+
+
+def test_matching_units_pass():
+    check_units(result(217.24, 225.00, "IBM"))  # does not raise
+
+
+def test_pence_against_pounds_is_rejected():
+    """The Rolls-Royce hazard: GBX 1413.60 price vs GBP 14.50 fair value.
+
+    A 97x 'discount' would sail through the valuation gate and mark a wildly
+    overvalued stock as a screaming buy.
+    """
+    with pytest.raises(UnitMismatchError, match="unit mismatch"):
+        check_units(result(1413.60, 14.50))
+
+
+def test_pounds_against_pence_is_rejected():
+    """Same mismatch the other way round."""
+    with pytest.raises(UnitMismatchError):
+        check_units(result(14.50, 1413.60))
+
+
+def test_a_genuinely_wide_but_plausible_gap_is_allowed():
+    """A stock at half its fair value is a real thing, not a unit bug."""
+    check_units(result(50.0, 100.0))
+    check_units(result(100.0, 50.0))
+
+
+def test_boundaries_are_inclusive():
+    check_units(result(10.0, 100.0))   # ratio 0.1
+    check_units(result(100.0, 10.0))   # ratio 10.0
+
+
+def test_just_outside_the_boundary_is_rejected():
+    with pytest.raises(UnitMismatchError):
+        check_units(result(100.0, 9.0))
+
+
+def test_incomplete_results_are_left_to_the_caller():
+    """Nothing to compare — `to_valuation` is what rejects these."""
+    check_units(result(None, 225.0))
+    check_units(result(217.0, None))
+    check_units(result(None, None))
+
+
+def test_the_error_names_the_symbol_and_the_ratio():
+    with pytest.raises(UnitMismatchError) as exc:
+        check_units(result(1413.60, 14.50, "RR"))
+    assert "RR" in str(exc.value)
+    assert "97" in str(exc.value)

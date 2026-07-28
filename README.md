@@ -233,15 +233,14 @@ and stale valuations are cleared from the database on the next run.
 
 ---
 
-## v2: automating the Morningstar half
+## Scraping fair values
 
-Everything for this is already in the repo, just switched off. When you want it:
+Set up once:
 
 ```bash
 python -m playwright install chromium
 python -m screener.cli login          # opens a browser; sign in by hand
 python -m screener.cli check-auth     # confirms the session works
-python -m screener.cli run --with-morningstar
 ```
 
 A **real Chromium window opens** on the Morningstar sign-in page and waits. Sign
@@ -251,8 +250,56 @@ to `auth/morningstar_state.json` (gitignored) and reused for weeks.
 > **On the Safari login:** Playwright can't borrow Safari's cookies, so being
 > signed in there doesn't carry over — this signs in once in its own browser.
 
-Then set `fire_without_valuation: false` stays as-is and every pattern gets
-scored automatically instead of waiting on a manual check.
+Then, whenever you want fair values refreshed:
+
+```bash
+python -m screener.cli scrape              # only tickers with a live signal
+python -m screener.cli scrape --dry-run    # see what it would visit first
+python -m screener.cli scrape --push       # ...and commit + push the result
+```
+
+**It only visits tickers with a live signal.** A fair value only changes
+anything when a pattern has fired — it's what upgrades a plain buy to a strong
+one. A ticker sitting at RSI 60 with no pattern gains nothing from being
+scraped, so a typical run fetches three or four pages instead of thirty-five.
+Use `--all` to override, or `--symbols IBM,NVDA` to check something specific.
+
+Results are written to `fair_values.yaml`, the same file you'd edit by hand —
+so scraped and hand-checked values flow through identical code, and every
+change shows up as a readable diff.
+
+### Sharing the results
+
+`scrape` does **not** push by default. It writes the file and stops, so you can
+look at the diff first:
+
+```bash
+git diff fair_values.yaml
+```
+
+Add `--push` to commit and push automatically when you trust it. Either way,
+once the file lands on `main` the next scheduled run rebuilds the dashboard —
+which is how the values reach anyone else looking at the page.
+
+### Why this runs on your laptop and not in CI
+
+Three reasons, and they compound:
+
+1. **Fair values barely move.** Analysts revise them on earnings or a thesis
+   change — roughly quarterly. Daily scraping of a number that changes four
+   times a year is all cost.
+2. **A session cookie is a credential, and this repo is public.** A GitHub
+   Actions secret is readable by anyone who can push a workflow. It also
+   expires every few weeks, turning into a recurring re-upload chore.
+3. **Datacenter IP + headless Chromium + a subscriber-only page** is the
+   textbook bot-block signature.
+
+The scraper paces itself (a randomised 3–8 second gap between pages) for the
+same reason.
+
+> **Not implemented:** an earlier version of this README described a
+> `MORNINGSTAR_STATE_B64` repository secret that `daily.yml` picked up
+> automatically. There is no such step, by the reasoning above.
 
 ---
 
@@ -277,20 +324,40 @@ So a Morningstar password never needs to be shared, pasted into a file, or sent
 over chat to use this. If one already was shared, changing it is the safe move —
 this tool won't need the new one.
 
-### Running the valuation half in CI
+---
 
-Only do this if you accept that a GitHub Actions secret is readable by anyone
-who can push a workflow to the repo — **on a public repo that's a real
-consideration**, and the safer answer is to run the Morningstar half on the Mac.
+## Contributing
 
-If you do want it:
+The repo is set up for more than one person working on it, with or without a
+coding agent.
+
+**Adding a collaborator:** Settings → Collaborators → Add people. That's enough
+to clone, push, and run workflows. Coding agents (Codex, Claude Code, others)
+are repo-agnostic — once someone has push access, whatever tool they prefer
+works.
+
+**Shared conventions** live in **[AGENTS.md](AGENTS.md)** — repo layout, the
+rules that aren't obvious from the code, and how to run things. `CLAUDE.md`
+points at the same file so the two can't drift apart. Read it before changing
+`screener/signals.py` or anything that writes a fair value.
+
+**Two things that will bite you otherwise:**
+
+- **Rebase, don't merge, when pulling.** `daily.yml` commits the binary
+  `data/screener.db` to `main` on every scheduled run. If you have local
+  commits, `git pull --rebase` — a merge produces a binary conflict nobody can
+  resolve by hand.
+- **Never commit `data/`.** It's gitignored for exactly this reason; CI
+  force-adds it, and only on `main`.
+
+**Tests** are offline by design — no network, no browser, no credentials:
 
 ```bash
-base64 -i auth/morningstar_state.json | pbcopy
+python -m pytest tests/ -q
 ```
 
-Paste it into a repository secret named `MORNINGSTAR_STATE_B64`. The workflow
-picks it up automatically.
+They run on Python 3.10, 3.11 and 3.12 for every pull request. Mock Playwright
+rather than driving it, so a Morningstar redesign can't turn the suite red.
 
 ---
 

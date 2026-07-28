@@ -154,6 +154,42 @@ def _y(rsi: float) -> float:
     return _PAD_T + span * (1.0 - max(0.0, min(100.0, rsi)) / 100.0)
 
 
+# Morningstar analysts revise a fair value on earnings or a thesis change --
+# call it quarterly. Past this, the number is still worth showing but shouldn't
+# look as authoritative as one from last week.
+_STALE_AFTER_DAYS = 90
+
+
+def _freshness(val: Valuation) -> tuple[str, str]:
+    """Human phrasing for how old a fair value is, plus a CSS class if it's stale.
+
+    Reads `fair_value_date`, which carries the `checked:` date from the YAML
+    file — `val.date` is when the row was last written, which is today on every
+    run and so never looks old.
+    """
+    checked = val.fair_value_date
+    if not checked:
+        return f"Recorded {html.escape(val.date)}", ""
+
+    try:
+        age = (dt.date.today() - dt.date.fromisoformat(checked)).days
+    except ValueError:
+        # A hand-typed date that isn't ISO. Show it rather than guessing.
+        return f"Checked {html.escape(checked)}", ""
+
+    if age <= 0:
+        text = "Checked today"
+    elif age == 1:
+        text = "Checked yesterday"
+    elif age < 30:
+        text = f"Checked {age} days ago"
+    elif age < 60:
+        text = "Checked about a month ago"
+    else:
+        text = f"Checked about {age // 30} months ago"
+    return text, " stale" if age > _STALE_AFTER_DAYS else ""
+
+
 def _chart_svg(row: Row, threshold: float) -> str:
     series = row.series
     if len(series) < 2:
@@ -242,14 +278,15 @@ def _card(row: Row, config: Config) -> str:
         _, passed = _gate(val, config)
         verdict = "below fair value" if val.price < val.fair_value else "above fair value"
         gate_class = "pass" if passed else "fail"
-        origin = "checked by hand" if val.source == "manual" else "from Morningstar"
+        origin = "by hand" if val.source == "manual" else "scraped from Morningstar"
+        age_text, age_class = _freshness(val)
         valuation_block = f"""
         <dl class="valuation {gate_class}">
           <div><dt>Fair value</dt><dd>{val.fair_value:,.2f}</dd></div>
           <div><dt>Price</dt><dd>{val.price:,.2f}</dd></div>
           <div><dt>Verdict</dt><dd>{verdict}</dd></div>
         </dl>
-        <p class="provenance">Recorded {html.escape(val.date)}, {origin}.</p>"""
+        <p class="provenance{age_class}">{age_text}, {origin}.</p>"""
     elif row.fired:
         valuation_block = """
         <p class="valuation pending">Buy signal on RSI alone — confirm the fair value
@@ -289,7 +326,8 @@ def _card(row: Row, config: Config) -> str:
     <a class="btn" href="{html.escape(row.tradingview_url)}"
        target="_blank" rel="noopener noreferrer">TradingView</a>
   </div>
-  <p class="record-hint"><code>screener fair-value {symbol} &lt;value&gt;</code></p>
+  <p class="record-hint"><code>screener scrape --symbols {symbol}</code>
+     or <code>screener fair-value {symbol} &lt;value&gt;</code></p>
 </article>"""
 
 
@@ -373,6 +411,7 @@ _CSS = """
   --green:      #14624A;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
+  --warn:       #8A6100;
   --shadow:     0 1px 2px rgba(16, 38, 60, .06), 0 8px 24px -16px rgba(16, 38, 60, .28);
 }
 
@@ -391,6 +430,7 @@ _CSS = """
     --green:      #4FBE92;
     --line:       #6FB3E0;
     --band:       rgba(224, 115, 106, .10);
+  --warn:       #D9A441;
     --shadow:     0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
   }
 }
@@ -409,6 +449,7 @@ _CSS = """
   --green:      #4FBE92;
   --line:       #6FB3E0;
   --band:       rgba(224, 115, 106, .10);
+  --warn:       #D9A441;
   --shadow:     0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
 }
 
@@ -426,6 +467,7 @@ _CSS = """
   --green:      #14624A;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
+  --warn:       #8A6100;
   --shadow:     0 1px 2px rgba(16, 38, 60, .06), 0 8px 24px -16px rgba(16, 38, 60, .28);
 }
 
@@ -776,6 +818,10 @@ h1 {
 }
 
 .provenance { margin: -4px 0 0; font-size: 11px; color: var(--ink-3); }
+/* Past a quarter the estimate may well have been revised since. Flagged
+   rather than hidden -- an old number still beats no number. */
+.provenance.stale { color: var(--warn); font-style: italic; }
+.provenance.stale::after { content: " — worth re-checking"; }
 
 /* ---------------------------------------------------------- actions */
 
