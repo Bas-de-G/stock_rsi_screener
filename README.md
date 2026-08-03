@@ -17,7 +17,7 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **35 market leaders** out of the box (AAPL, MSFT, NVDA, AMZN, IBM, JPM,
+Tracks **36 market leaders** out of the box (AAPL, MSFT, NVDA, AMZN, IBM, JPM,
 XOM, LLY, Rolls-Royce and more) — edit `config.yaml` to change the list. Every
 entry was checked against both data sources first, so none of them 404.
 
@@ -51,18 +51,35 @@ Valuation gate: price < fair value (stock trading BELOW Morningstar fair value)
 
 ## Signal strength
 
-An RSI pattern is a **buy signal on its own** — no fair value needed. Recording
-a fair value that agrees upgrades it to a **strong buy 🚀**:
+An RSI pattern is a **buy signal on its own** — no fair value needed. Two
+independent factors then *grade* it, and either can upgrade it to a
+**strong buy 🚀** on its own:
+
+- **Morningstar fair value** — is the price below what Morningstar thinks
+  it's worth? Checked by hand or via `screener scrape`.
+- **Earnings growth** — is YoY EPS growing? Pulled automatically from
+  TradingView's own scanner (the same free endpoint RSI comes from — no
+  Morningstar login needed for this one), so it's always there once a
+  ticker has a live reading.
+
+Neither factor is required to fire a signal — that's still the RSI pattern
+alone (or `fire_without_valuation: false` for strict mode, below). They only
+decide how much conviction the dashboard shows:
 
 | On the dashboard | What it means |
 |---|---|
-| **Strong buy 🚀** | Pattern completed *and* the price is below Morningstar fair value |
-| **Buy signal** | Pattern completed; fair value unchecked, or checked and it disagrees |
+| **Strong buy 🚀** | Pattern completed, and *every* factor that's been checked agrees. One checked factor confirming is enough if the other isn't known yet. |
+| **Buy signal** | Pattern completed; nothing checked disagrees, but nothing confirms it either — or one known factor disagrees while fired stays true |
 | **Pattern, gate failed** | Only in strict mode (below) |
 | Oversold / Near threshold / Neutral | No pattern; just where RSI sits now |
 
-So the flow is: the screener finds signals daily, you click **Check fair value
-on Morningstar** on any card you like the look of, and record what you read:
+The case worth watching for: a stock cheap and oversold by the numbers, but
+with **shrinking** earnings — the classic value trap. That shows as a plain
+buy signal, not a rocket, specifically because the two factors disagree.
+
+So the flow is: the screener finds signals daily, earnings growth grades them
+automatically, and for fair value you click **Check fair value on
+Morningstar** on any card you like the look of and record what you read:
 
 ```bash
 python -m screener.cli fair-value IBM 225
@@ -366,8 +383,10 @@ rather than driving it, so a Morningstar redesign can't turn the suite red.
 Everything lands in `data/`:
 
 - **`screener.db`** — SQLite, the source of truth. Three tables:
-  `rsi_history` (one row per symbol per day), `valuations` (Morningstar price
-  and fair value per day), `signals` (every completed pattern, fired or not).
+  `rsi_history` (one row per symbol per day, including that day's YoY EPS
+  growth), `valuations` (Morningstar price and fair value per day), `signals`
+  (every completed pattern, fired or not, with both grading factors as they
+  stood on the day it completed).
 - **`latest.csv`** — current snapshot, one row per symbol.
 - **`signals.csv`** — running log, appended whenever a pattern completes.
 - **`dashboard.html`** — the generated page (rebuilt on demand, not committed).
@@ -389,9 +408,9 @@ Patterns that match the RSI shape but fail the valuation gate are still
 recorded — just marked as not fired. You keep the history either way:
 
 ```
-SYMBOL  CROSS 1     DIP         CROSS 2       PRICE  FAIR VAL  RESULT
-IBM     2026-07-16  2026-07-22  2026-07-23   217.20    225.00  BUY SIGNAL
-ORCL    2026-07-15  2026-07-21  2026-07-27        -         -  pattern only (no valuation)
+SYMBOL  CROSS 1     DIP         CROSS 2       PRICE  FAIR VAL  EPS GROWTH  RESULT
+IBM     2026-07-16  2026-07-22  2026-07-23   217.20    225.00       +8.4%  STRONG BUY (all known factors confirm)
+ORCL    2026-07-15  2026-07-21  2026-07-27        -         -           -  BUY SIGNAL (fair value unchecked)
 ```
 
 Recording a fair value by hand applies it to every pattern for that symbol
@@ -446,6 +465,13 @@ Tuning knobs, all in `config.yaml`:
 | `signal.valuation_rule` | `fair_value_below_price` | see the warning above |
 | `signal.fire_without_valuation` | `false` | fire when Morningstar data is missing? |
 
+**Earnings growth** isn't configurable the way the above are — there's no
+threshold to tune. It's YoY EPS growth (trailing twelve months, falling back to
+fiscal-year for a stock too newly listed to have one — SanDisk's case right
+after its 2025 spin-off) read from TradingView's scanner endpoint, the same
+unauthenticated one RSI comes from. Any positive number confirms; the sign is
+the only question being asked, same as the valuation gate's plain boolean.
+
 ---
 
 ## Notifications
@@ -488,7 +514,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 132 tests
+python -m pytest tests/ -q      # 201 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

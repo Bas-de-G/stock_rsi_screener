@@ -25,7 +25,13 @@ from .morningstar import (
 )
 from .notify import format_signal, send_webhook
 from .rsi import wilder_rsi_series
-from .signals import find_cross_pairs, is_strong, signal_fires, valuation_passes
+from .signals import (
+    earnings_growth_passes,
+    find_cross_pairs,
+    is_strong,
+    signal_fires,
+    valuation_passes,
+)
 from .storage import (
     RsiPoint,
     Signal,
@@ -129,9 +135,17 @@ def cmd_run(config: Config, args) -> int:
                 exit_code = 1
                 continue
             store.upsert_rsi_point(
-                RsiPoint(ticker.symbol, today, quote.close, quote.rsi, "live:tradingview")
+                RsiPoint(
+                    ticker.symbol, today, quote.close, quote.rsi, "live:tradingview",
+                    quote.earnings_growth, quote.earnings_growth_period,
+                )
             )
-            print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}")
+            growth_note = (
+                f"   EPS growth ({quote.earnings_growth_period}) {quote.earnings_growth:+.1f}%"
+                if quote.earnings_growth is not None
+                else ""
+            )
+            print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}{growth_note}")
 
         # --- Price + fair value, from Morningstar (opt-in) ---------------
         if not args.with_morningstar:
@@ -189,6 +203,7 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
 
     for symbol in store.symbols():
         series = store.rsi_series(symbol)
+        rsi_by_date = {p.date: p for p in series}
         for pair in find_cross_pairs(series, config.rsi.threshold, config.signal):
             if store.signal_exists(symbol, pair.up2_date):
                 continue
@@ -197,6 +212,12 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
             price = valuation.price if valuation else None
             fair_value = valuation.fair_value if valuation else None
             known, confirms = valuation_passes(price, fair_value, config.signal)
+
+            # Only ever populated on a live-fetched row (see RsiPoint), so an
+            # up2_date that was backfilled rather than observed live comes back
+            # unknown here — same as an unchecked fair value.
+            growth = rsi_by_date[pair.up2_date].earnings_growth
+            eg_known, eg_confirms = earnings_growth_passes(growth)
 
             signal = Signal(
                 symbol=symbol,
@@ -209,6 +230,9 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
                 valuation_pass=confirms,
                 fired=signal_fires(confirms, config.signal),
                 recorded_at=now,
+                earnings_growth=growth,
+                earnings_growth_known=eg_known,
+                earnings_growth_pass=eg_confirms,
             )
             store.record_signal(signal)
             append_signal_csv(config.storage.csv_dir, signal)
@@ -269,8 +293,13 @@ def cmd_fair_value(config: Config, args) -> int:
 
         price = series[-1].close
         known, confirms = valuation_passes(price, args.value, config.signal)
-        verdict = "STRONG BUY — valuation confirms" if is_strong(known, confirms) else (
-            "buy signal stands, but it's trading above fair value")
+        eg_known, eg_confirms = earnings_growth_passes(series[-1].earnings_growth)
+        if is_strong((known, confirms), (eg_known, eg_confirms)):
+            verdict = "STRONG BUY — every known factor confirms"
+        elif confirms and eg_known and not eg_confirms:
+            verdict = "valuation confirms, but earnings are shrinking — not a strong buy"
+        else:
+            verdict = "buy signal stands, but it's trading above fair value"
         print(f"{symbol}: fair value {args.value:,.2f} vs close {price:,.2f}")
         print(f"  {verdict}")
         print(f"  ({config.signal.describe_rule()})")
@@ -541,19 +570,32 @@ def cmd_signals(config: Config, args) -> int:
         if not signals:
             print("No RSI patterns recorded yet.")
             return 0
-        print(f"{'SYMBOL':<8}{'CROSS 1':<12}{'DIP':<12}{'CROSS 2':<12}{'PRICE':>10}{'FAIR VAL':>10}  RESULT")
+        print(
+            f"{'SYMBOL':<8}{'CROSS 1':<12}{'DIP':<12}{'CROSS 2':<12}"
+            f"{'PRICE':>10}{'FAIR VAL':>10}{'EPS GROWTH':>12}  RESULT"
+        )
         for s in signals:
             price = f"{s.price:,.2f}" if s.price is not None else "-"
             fair = f"{s.fair_value:,.2f}" if s.fair_value is not None else "-"
-            if s.fired and is_strong(s.valuation_known, s.valuation_pass):
-                verdict = "STRONG BUY (valuation confirms)"
+            growth = f"{s.earnings_growth:+.1f}%" if s.earnings_growth is not None else "-"
+            strong = is_strong(
+                (s.valuation_known, s.valuation_pass),
+                (s.earnings_growth_known, s.earnings_growth_pass),
+            )
+            if s.fired and strong:
+                verdict = "STRONG BUY (all known factors confirm)"
+            elif s.fired and s.valuation_pass and s.earnings_growth_known and not s.earnings_growth_pass:
+                verdict = "BUY SIGNAL (valuation confirms, earnings shrinking)"
             elif s.fired and s.valuation_known:
                 verdict = "BUY SIGNAL (above fair value)"
             elif s.fired:
                 verdict = "BUY SIGNAL (fair value unchecked)"
             else:
                 verdict = "pattern only (valuation gate failed)"
-            print(f"{s.symbol:<8}{s.up1_date:<12}{s.down_date:<12}{s.up2_date:<12}{price:>10}{fair:>10}  {verdict}")
+            print(
+                f"{s.symbol:<8}{s.up1_date:<12}{s.down_date:<12}{s.up2_date:<12}"
+                f"{price:>10}{fair:>10}{growth:>12}  {verdict}"
+            )
     return 0
 
 
@@ -561,7 +603,10 @@ def cmd_report(config: Config, args) -> int:
     with Store(config.storage.database) as store:
         valuations = {v.symbol: v for v in store.latest_valuations()}
         print(f"Valuation gate: {config.signal.describe_rule()}\n")
-        print(f"{'SYMBOL':<8}{'DATE':<12}{'RSI':>8}{'PRICE':>11}{'FAIR VAL':>11}  GATE")
+        print(
+            f"{'SYMBOL':<8}{'DATE':<12}{'RSI':>8}{'PRICE':>11}{'FAIR VAL':>11}"
+            f"{'EPS GROWTH':>12}  GATE"
+        )
         for symbol in store.symbols():
             series = store.rsi_series(symbol)
             last = series[-1] if series else None
@@ -570,12 +615,17 @@ def cmd_report(config: Config, args) -> int:
             date = last.date if last else "-"
             price = f"{val.price:,.2f}" if val else "-"
             fair = f"{val.fair_value:,.2f}" if val else "-"
+            growth = (
+                f"{last.earnings_growth:+.1f}%"
+                if last and last.earnings_growth is not None
+                else "-"
+            )
             if val:
                 _, passed = valuation_passes(val.price, val.fair_value, config.signal)
                 gate = "pass" if passed else "fail"
             else:
                 gate = "unknown"
-            print(f"{symbol:<8}{date:<12}{rsi:>8}{price:>11}{fair:>11}  {gate}")
+            print(f"{symbol:<8}{date:<12}{rsi:>8}{price:>11}{fair:>11}{growth:>12}  {gate}")
             if series:
                 print(f"        history: {len(series)} days, {series[0].date} → {series[-1].date}")
     return 0

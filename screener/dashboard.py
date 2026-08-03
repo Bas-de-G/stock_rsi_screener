@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
-from .signals import find_upward_crosses, is_strong, valuation_passes
+from .signals import earnings_growth_passes, find_upward_crosses, is_strong, valuation_passes
 from .storage import RsiPoint, Signal, Store, Valuation
 
 # Plot geometry, in SVG user units.
@@ -52,9 +52,20 @@ class Row:
 
     @property
     def strong(self) -> bool:
-        """Pattern fired and a recorded fair value backs it up."""
+        """Pattern fired and every known grading factor backs it up.
+
+        Fair value and earnings growth grade independently: whichever ones
+        have actually been checked must all agree. A pattern with only one
+        of the two known can still earn the rocket on that one alone — same
+        lenient rule the dashboard already used for fair value by itself,
+        just extended to a second factor.
+        """
         return any(
-            s.fired and is_strong(s.valuation_known, s.valuation_pass) for s in self.signals
+            s.fired and is_strong(
+                (s.valuation_known, s.valuation_pass),
+                (s.earnings_growth_known, s.earnings_growth_pass),
+            )
+            for s in self.signals
         )
 
     @property
@@ -304,6 +315,18 @@ def _card(row: Row, config: Config) -> str:
         )
         patterns = f'<p class="patterns">Pattern completed: {marks}</p>'
 
+    growth = row.latest.earnings_growth if row.latest else None
+    if growth is not None:
+        _, eg_confirms = earnings_growth_passes(growth)
+        eg_class = "pass" if eg_confirms else "fail"
+        period_label = "TTM" if row.latest.earnings_growth_period == "ttm" else "FY"
+        growth_block = (
+            f'<p class="earnings {eg_class}">EPS growth ({period_label}): '
+            f'<strong>{growth:+.1f}%</strong></p>'
+        )
+    else:
+        growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
+
     symbol = html.escape(row.symbol)
     return f"""<article class="card state-{row.state}">
   <header class="card-head">
@@ -320,6 +343,7 @@ def _card(row: Row, config: Config) -> str:
   <p class="crosses">{cross_note}</p>
   {patterns}
   {valuation_block}
+  {growth_block}
   <div class="actions">
     <a class="btn primary" href="{html.escape(row.morningstar_url)}"
        target="_blank" rel="noopener noreferrer">Check fair value on Morningstar</a>
@@ -815,6 +839,25 @@ h1 {
   color: var(--accent);
   border-left: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.earnings {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink-3);
+}
+.earnings strong {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.earnings.pass { border-left-color: var(--green); }
+.earnings.fail { border-left-color: var(--crimson); }
+.earnings.none {
+  font-style: italic;
+  color: var(--ink-3);
+  border-left-color: var(--rule);
 }
 
 .provenance { margin: -4px 0 0; font-size: 11px; color: var(--ink-3); }

@@ -115,16 +115,46 @@ def valuation_passes(
     return True, price < fair_value
 
 
+def earnings_growth_passes(growth: float | None) -> tuple[bool, bool]:
+    """Apply the earnings-growth grading factor.
+
+    Returns (known, confirms), the same shape as `valuation_passes`, so both
+    factors grade a signal identically. `known` is False when TradingView has
+    neither a TTM nor an FY figure yet (e.g. a stock too recently listed to
+    have a trailing year). `confirms` is True for any positive YoY EPS growth
+    — no threshold to tune, mirroring the valuation gate's plain boolean.
+
+    Like the valuation gate, this only ever grades strength (see `is_strong`)
+    — it never affects whether a pattern fires at all.
+    """
+    if growth is None:
+        return False, False
+    return True, growth > 0
+
+
 def signal_fires(confirms: bool, config: SignalConfig) -> bool:
     """Whether a completed pattern counts as a buy signal.
 
     With fire_without_valuation set, the RSI pattern is enough on its own and
     the valuation only decides how strong it is. Without it, the screener runs
     strict and nothing fires until a fair value confirms it.
+
+    Deliberately takes only the valuation's `confirms` — earnings growth never
+    gates firing, only grading (see `is_strong`). A soft quarter shouldn't be
+    able to silently suppress an otherwise-good signal.
     """
     return confirms or config.fire_without_valuation
 
 
-def is_strong(known: bool, confirms: bool) -> bool:
-    """A strong buy: the pattern fired AND a real fair value backs it up."""
-    return known and confirms
+def is_strong(*factors: tuple[bool, bool]) -> bool:
+    """A strong buy: every grading factor that's known agrees.
+
+    Each factor is a (known, confirms) pair — one from `valuation_passes`, one
+    from `earnings_growth_passes`, or any later addition. A factor nobody's
+    checked yet doesn't count against the signal (a fresh pattern with no
+    fair value recorded can still be strong once earnings growth alone
+    confirms it), but with *nothing* known at all, this is never strong —
+    that would be calling a coin flip a conviction.
+    """
+    known = [confirms for known, confirms in factors if known]
+    return bool(known) and all(known)

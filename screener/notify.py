@@ -21,6 +21,8 @@ def format_signal(sig: Signal, rule_description: str) -> str:
     ]
     if sig.price is not None and sig.fair_value is not None:
         lines.append(f"  Price {sig.price:,.2f} vs fair value {sig.fair_value:,.2f}")
+    if sig.earnings_growth is not None:
+        lines.append(f"  YoY EPS growth: {sig.earnings_growth:+.1f}%")
     lines.append(f"  Valuation gate: {rule_description}")
     return "\n".join(lines)
 

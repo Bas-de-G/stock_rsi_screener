@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS rsi_history (
     close  REAL NOT NULL,
     rsi    REAL NOT NULL,
     source TEXT NOT NULL,   -- 'backfill:yahoo' | 'live:tradingview'
+    -- YoY EPS growth (%), from TradingView's own scanner field -- only ever
+    -- populated on a live row; backfill has no historical source for it, so
+    -- these are NULL on backfilled dates.
+    earnings_growth        REAL,
+    earnings_growth_period TEXT,   -- 'ttm' | 'fy' | NULL
     PRIMARY KEY (symbol, date)
 );
 
@@ -52,6 +57,12 @@ CREATE TABLE IF NOT EXISTS signals (
     fair_value         REAL,           -- fair value on up2_date, if known
     valuation_known    INTEGER NOT NULL,  -- 1 if we had a valuation for up2_date
     valuation_pass     INTEGER NOT NULL,  -- 1 if the valuation gate was satisfied
+    -- Second grading factor, independent of the valuation gate above. Both
+    -- factors only ever grade strength (the rocket) -- neither is required
+    -- for `fired`, which stays governed by the valuation gate alone.
+    earnings_growth       REAL,           -- YoY EPS growth (%) on up2_date, if known
+    earnings_growth_known INTEGER NOT NULL DEFAULT 0,
+    earnings_growth_pass  INTEGER NOT NULL DEFAULT 0,  -- 1 if growth was positive
     fired              INTEGER NOT NULL,  -- 1 if this counts as an actual buy signal
     recorded_at        TEXT NOT NULL,     -- when this row was written
     PRIMARY KEY (symbol, up2_date)
@@ -66,6 +77,8 @@ class RsiPoint:
     close: float
     rsi: float
     source: str
+    earnings_growth: float | None = None
+    earnings_growth_period: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +105,12 @@ class Signal:
     valuation_pass: bool
     fired: bool
     recorded_at: str
+    # A second, independent grading factor alongside the valuation gate above.
+    # Appended at the end with defaults so every existing positional Signal(...)
+    # call keeps working unchanged. Never affects `fired` -- see signals.py.
+    earnings_growth: float | None = None
+    earnings_growth_known: bool = False
+    earnings_growth_pass: bool = False
 
 
 class Store:
@@ -112,13 +131,31 @@ class Store:
 
         Databases created before manual fair-value entry existed have no
         `source` column; adding it in place preserves already-collected
-        history rather than forcing a rebuild.
+        history rather than forcing a rebuild. Same story for the earnings-
+        growth columns added alongside the fair-value grading factor.
         """
         with closing(self._conn.cursor()) as cur:
             columns = {r["name"] for r in cur.execute("PRAGMA table_info(valuations)")}
             if columns and "source" not in columns:
                 cur.execute(
                     "ALTER TABLE valuations ADD COLUMN source TEXT NOT NULL DEFAULT 'morningstar'"
+                )
+
+            rsi_columns = {r["name"] for r in cur.execute("PRAGMA table_info(rsi_history)")}
+            if rsi_columns and "earnings_growth" not in rsi_columns:
+                cur.execute("ALTER TABLE rsi_history ADD COLUMN earnings_growth REAL")
+                cur.execute("ALTER TABLE rsi_history ADD COLUMN earnings_growth_period TEXT")
+
+            signal_columns = {r["name"] for r in cur.execute("PRAGMA table_info(signals)")}
+            if signal_columns and "earnings_growth" not in signal_columns:
+                cur.execute("ALTER TABLE signals ADD COLUMN earnings_growth REAL")
+                cur.execute(
+                    "ALTER TABLE signals ADD COLUMN earnings_growth_known "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE signals ADD COLUMN earnings_growth_pass "
+                    "INTEGER NOT NULL DEFAULT 0"
                 )
 
     def close(self) -> None:
@@ -143,11 +180,17 @@ class Store:
             if existing and existing["source"] == "live:tradingview" and point.source != "live:tradingview":
                 return
             cur.execute(
-                """INSERT INTO rsi_history (symbol, date, close, rsi, source)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO rsi_history
+                     (symbol, date, close, rsi, source, earnings_growth, earnings_growth_period)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol, date) DO UPDATE SET
-                     close=excluded.close, rsi=excluded.rsi, source=excluded.source""",
-                (point.symbol, point.date, point.close, point.rsi, point.source),
+                     close=excluded.close, rsi=excluded.rsi, source=excluded.source,
+                     earnings_growth=excluded.earnings_growth,
+                     earnings_growth_period=excluded.earnings_growth_period""",
+                (
+                    point.symbol, point.date, point.close, point.rsi, point.source,
+                    point.earnings_growth, point.earnings_growth_period,
+                ),
             )
         self._conn.commit()
 
@@ -158,7 +201,10 @@ class Store:
                 (symbol,),
             )
             return [
-                RsiPoint(row["symbol"], row["date"], row["close"], row["rsi"], row["source"])
+                RsiPoint(
+                    row["symbol"], row["date"], row["close"], row["rsi"], row["source"],
+                    row["earnings_growth"], row["earnings_growth_period"],
+                )
                 for row in cur.fetchall()
             ]
 
@@ -238,8 +284,9 @@ class Store:
             cur.execute(
                 """INSERT OR IGNORE INTO signals
                      (symbol, up1_date, down_date, up2_date, price, fair_value,
-                      valuation_known, valuation_pass, fired, recorded_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      valuation_known, valuation_pass, earnings_growth,
+                      earnings_growth_known, earnings_growth_pass, fired, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sig.symbol,
                     sig.up1_date,
@@ -249,6 +296,9 @@ class Store:
                     sig.fair_value,
                     int(sig.valuation_known),
                     int(sig.valuation_pass),
+                    sig.earnings_growth,
+                    int(sig.earnings_growth_known),
+                    int(sig.earnings_growth_pass),
                     int(sig.fired),
                     sig.recorded_at,
                 ),
@@ -334,6 +384,8 @@ class Store:
                 r["symbol"], r["up1_date"], r["down_date"], r["up2_date"],
                 r["price"], r["fair_value"], bool(r["valuation_known"]),
                 bool(r["valuation_pass"]), bool(r["fired"]), r["recorded_at"],
+                r["earnings_growth"], bool(r["earnings_growth_known"]),
+                bool(r["earnings_growth_pass"]),
             )
             for r in rows
         ]
@@ -356,6 +408,11 @@ def export_csv_snapshot(store: Store, csv_dir: Path) -> Path:
                 "price": val.price if val else "",
                 "fair_value": val.fair_value if val else "",
                 "rsi": round(last.rsi, 2) if last else "",
+                "earnings_growth": (
+                    round(last.earnings_growth, 2)
+                    if last and last.earnings_growth is not None
+                    else ""
+                ),
                 "fair_value_below_price": (
                     "" if not val else str(val.fair_value < val.price)
                 ),
@@ -363,38 +420,65 @@ def export_csv_snapshot(store: Store, csv_dir: Path) -> Path:
         )
     with out_path.open("w", newline="") as f:
         writer = csv.DictWriter(
-            f, fieldnames=["symbol", "date", "price", "fair_value", "rsi", "fair_value_below_price"]
+            f,
+            fieldnames=[
+                "symbol", "date", "price", "fair_value", "rsi",
+                "earnings_growth", "fair_value_below_price",
+            ],
         )
         writer.writeheader()
         writer.writerows(rows)
     return out_path
 
 
+_SIGNAL_CSV_FIELDS = [
+    "symbol", "up1_date", "down_date", "up2_date",
+    "price", "fair_value", "valuation_known", "valuation_pass",
+    "earnings_growth", "earnings_growth_known", "earnings_growth_pass",
+    "fired", "recorded_at",
+]
+
+
+def _signal_csv_row(sig: Signal) -> dict:
+    return {
+        "symbol": sig.symbol,
+        "up1_date": sig.up1_date,
+        "down_date": sig.down_date,
+        "up2_date": sig.up2_date,
+        "price": sig.price,
+        "fair_value": sig.fair_value,
+        "valuation_known": sig.valuation_known,
+        "valuation_pass": sig.valuation_pass,
+        "earnings_growth": sig.earnings_growth,
+        "earnings_growth_known": sig.earnings_growth_known,
+        "earnings_growth_pass": sig.earnings_growth_pass,
+        "fired": sig.fired,
+        "recorded_at": sig.recorded_at,
+    }
+
+
 def append_signal_csv(csv_dir: Path, sig: Signal) -> Path:
-    """Append one fired/considered signal to a running log CSV a friend can open in Excel."""
+    """Append one fired/considered signal to a running log CSV a friend can open in Excel.
+
+    Rewrites the file rather than a true append: this CSV is force-committed
+    to `main` by CI, so a copy written under an older header (e.g. before the
+    earnings-growth columns existed) is sitting in git history right now.
+    Blindly appending new-format rows below an old header would misalign
+    every column from that point on. Reading the existing rows back through
+    `DictReader` and rewriting under the current header costs nothing at this
+    file's size (a signal fires rarely) and can't drift out of alignment.
+    """
     csv_dir.mkdir(parents=True, exist_ok=True)
     out_path = csv_dir / "signals.csv"
-    is_new = not out_path.exists()
-    with out_path.open("a", newline="") as f:
-        fieldnames = [
-            "symbol", "up1_date", "down_date", "up2_date",
-            "price", "fair_value", "valuation_known", "valuation_pass", "fired", "recorded_at",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if is_new:
-            writer.writeheader()
-        writer.writerow(
-            {
-                "symbol": sig.symbol,
-                "up1_date": sig.up1_date,
-                "down_date": sig.down_date,
-                "up2_date": sig.up2_date,
-                "price": sig.price,
-                "fair_value": sig.fair_value,
-                "valuation_known": sig.valuation_known,
-                "valuation_pass": sig.valuation_pass,
-                "fired": sig.fired,
-                "recorded_at": sig.recorded_at,
-            }
-        )
+
+    existing_rows: list[dict] = []
+    if out_path.exists():
+        with out_path.open(newline="") as f:
+            existing_rows = list(csv.DictReader(f))
+
+    with out_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_SIGNAL_CSV_FIELDS, restval="")
+        writer.writeheader()
+        writer.writerows(existing_rows)
+        writer.writerow(_signal_csv_row(sig))
     return out_path
