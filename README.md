@@ -19,7 +19,9 @@ Data comes from two places:
 
 Tracks **36 market leaders** out of the box (AAPL, MSFT, NVDA, AMZN, IBM, JPM,
 XOM, LLY, Rolls-Royce and more) — edit `config.yaml` to change the list. Every
-entry was checked against both data sources first, so none of them 404.
+entry was checked against both data sources first, so none of them 404. Push a
+new ticker to `main` and the next scheduled run backfills its history
+automatically — nothing to run or push by hand.
 
 Non-US listings work too, they just need their own identifiers. Rolls-Royce is
 the worked example: `LSE:RR.` on TradingView (trailing dot), `RR.L` on Yahoo,
@@ -105,7 +107,7 @@ python -m playwright install chromium     # browser used for Morningstar
 cp .env.example .env                      # optional; see "Credentials" below
 ```
 
-### 1. Build RSI history (once)
+### 1. Build RSI history
 
 ```bash
 python -m screener.cli backfill --range 1y
@@ -117,6 +119,13 @@ so signals work from day one.
 
 The computed RSI matches TradingView's exactly — same Wilder smoothing,
 verified to the cent (see `tests/test_rsi.py`).
+
+Safe to run any time, not just once: it skips any ticker that already has a
+full chart's worth of history, so re-running it after adding a ticker to
+`config.yaml` only fetches the new one. (`--force` refetches everyone anyway.)
+This is also why the daily CI job calls it unconditionally on every scheduled
+run — a newly added ticker backfills itself on the next run, with nothing to
+push by hand.
 
 ### 2. Run it
 
@@ -514,7 +523,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 201 tests
+python -m pytest tests/ -q      # 204 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

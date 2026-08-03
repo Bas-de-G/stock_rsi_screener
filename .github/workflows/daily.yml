@@ -55,11 +55,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Seed RSI history on first run
-        run: |
-          if [ ! -f data/screener.db ]; then
-            python -m screener.cli backfill --range 1y
-          fi
+      # Cheap to call every run: `backfill` skips any ticker that already has
+      # a full chart's worth of history, so this only ever does real work for
+      # a ticker newly added to config.yaml. That's what lets a new ticker
+      # (SanDisk, say) pick up its own history automatically instead of
+      # trickling in one live row a day for months.
+      - name: Backfill any tickers missing history
+        run: python -m screener.cli backfill --range 1y
 
       - name: Run screener
         run: python -m screener.cli run
