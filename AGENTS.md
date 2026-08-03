@@ -93,6 +93,16 @@ that point — `storage.append_signal_csv` reads the existing rows back and
 rewrites the whole file under the current header instead. Keep that pattern if
 `Signal` grows again.
 
+**`backfill` skips a ticker that already has a full chart's worth of history**
+(`>= dashboard.chart_days` rows), unless `--force`. That's what makes it safe
+for `daily.yml` to call unconditionally on every scheduled run instead of the
+old one-time-only guard (`if [ ! -f data/screener.db ]`), which meant a ticker
+added to `config.yaml` after the database already existed — SanDisk was the
+case that surfaced this — would never get backfilled by CI and would trickle
+in one live row a day. If you add a threshold check like this elsewhere,
+remember the point is "has enough for the *dashboard*," not "has the bare
+minimum for RSI to compute."
+
 ## Credentials
 
 There is **no password setting anywhere in this tool** — not in `config.yaml`,
@@ -110,7 +120,7 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 201 tests, fully offline
+python -m pytest tests/ -q          # 204 tests, fully offline
 
 python -m screener.cli backfill     # once, seeds RSI history from Yahoo
 python -m screener.cli run          # the daily job (RSI only)

@@ -77,9 +77,22 @@ def cmd_backfill(config: Config, args) -> int:
 
     Without this, the tool would need to observe 14+ days of live readings
     before it could ever recognise the pattern.
+
+    Skips a ticker that already has a full chart's worth of history (unless
+    --force), which is what makes this cheap and safe to call unconditionally
+    on every scheduled run. That matters because CI used to only ever backfill
+    once, guarded by "does the database file exist at all" — so a ticker added
+    to config.yaml after that first run (SanDisk, say) would never get
+    backfilled by CI and would trickle in one live row a day instead. Making
+    this idempotent and calling it every run lets a new ticker backfill itself.
     """
     with Store(config.storage.database) as store:
         for ticker in config.tickers:
+            existing = store.rsi_series(ticker.symbol)
+            if not args.force and len(existing) >= config.dashboard.chart_days:
+                print(f"  {ticker.symbol}: already has {len(existing)} days — skip (--force to refetch)")
+                continue
+
             try:
                 closes = fetch_daily_closes(ticker.yahoo, range_=args.range)
             except MarketDataError as exc:
@@ -672,6 +685,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_backfill = sub.add_parser("backfill", help="seed RSI history from daily closes")
     p_backfill.add_argument("--range", default="1y", help="history range (e.g. 6mo, 1y, 2y)")
+    p_backfill.add_argument(
+        "--force", action="store_true",
+        help="refetch even tickers that already have a full history",
+    )
     p_backfill.set_defaults(func=cmd_backfill)
 
     p_run = sub.add_parser("run", help="the daily job (RSI only by default)")
