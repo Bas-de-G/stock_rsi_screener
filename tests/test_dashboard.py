@@ -369,7 +369,10 @@ def test_stale_marker_reaches_the_rendered_page(config, tmp_path):
     assert "provenance stale" in out.read_text()
 
 
-def test_scraped_values_are_labelled_as_such(config, tmp_path):
+def test_provenance_line_does_not_say_how_the_value_was_obtained(config, tmp_path):
+    """The dashboard shouldn't read as "we do this by hand" — whether a value
+    was typed in or scraped is an implementation detail, not something a
+    friend looking at the page needs to know. Only freshness is shown."""
     db = tmp_path / "t.db"
     with Store(db) as store:
         for i in range(20):
@@ -378,4 +381,7 @@ def test_scraped_values_are_labelled_as_such(config, tmp_path):
             )
         store.upsert_valuation(valuation(days_ago(2), source="scraped"))
         out = build_dashboard(store, config, tmp_path / "out.html")
-    assert "scraped from Morningstar" in out.read_text()
+    text = out.read_text()
+    assert "by hand" not in text
+    assert "scraped from Morningstar" not in text
+    assert "Checked 2 days ago" in text

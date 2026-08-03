@@ -289,7 +289,6 @@ def _card(row: Row, config: Config) -> str:
         _, passed = _gate(val, config)
         verdict = "below fair value" if val.price < val.fair_value else "above fair value"
         gate_class = "pass" if passed else "fail"
-        origin = "by hand" if val.source == "manual" else "scraped from Morningstar"
         age_text, age_class = _freshness(val)
         valuation_block = f"""
         <dl class="valuation {gate_class}">
@@ -297,7 +296,7 @@ def _card(row: Row, config: Config) -> str:
           <div><dt>Price</dt><dd>{val.price:,.2f}</dd></div>
           <div><dt>Verdict</dt><dd>{verdict}</dd></div>
         </dl>
-        <p class="provenance{age_class}">{age_text}, {origin}.</p>"""
+        <p class="provenance{age_class}">{age_text}.</p>"""
     elif row.fired:
         valuation_block = """
         <p class="valuation pending">Buy signal on RSI alone — confirm the fair value
