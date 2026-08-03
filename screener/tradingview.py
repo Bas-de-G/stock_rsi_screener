@@ -29,6 +29,12 @@ class LiveQuote:
     symbol: str
     close: float
     rsi: float
+    # YoY EPS growth, as a percentage (32.6 means +32.6%), and which window it
+    # came from. Both None when TradingView has neither figure yet — happens
+    # for a stock too new to have a trailing year, e.g. SanDisk right after
+    # its 2025 spin-off.
+    earnings_growth: float | None = None
+    earnings_growth_period: str | None = None  # "ttm" | "fy" | None
 
 
 # TradingView serves RSI as fixed-period fields, not a parameterised one:
@@ -36,6 +42,13 @@ class LiveQuote:
 # have to be computed locally, which would no longer be TradingView's number.
 _RSI_FIELD_BY_PERIOD = {14: "RSI", 7: "RSI7"}
 SUPPORTED_LIVE_PERIODS = tuple(sorted(_RSI_FIELD_BY_PERIOD))
+
+# Same free, unauthenticated scanner endpoint as RSI — no Morningstar login
+# needed for this factor. TTM (trailing twelve months) is preferred as the
+# more current figure; FY (fiscal year) is the fallback for a stock too
+# recently listed to have a full trailing year yet.
+_EPS_GROWTH_TTM_FIELD = "earnings_per_share_diluted_yoy_growth_ttm"
+_EPS_GROWTH_FY_FIELD = "earnings_per_share_diluted_yoy_growth_fy"
 
 
 def rsi_field_name(period: int, interval: str) -> str:
@@ -57,6 +70,9 @@ def _close_field_name(interval: str) -> str:
 def fetch_live_rsi(tv_symbol: str, period: int = 14, interval: str = "1D") -> LiveQuote:
     """Fetch the current close + RSI that TradingView itself shows for `tv_symbol`.
 
+    Also picks up YoY EPS growth in the same request — it's a fundamentals
+    field, not a price-interval one, so it rides along at no extra cost.
+
     tv_symbol looks like "NASDAQ:NVDA" (exchange:ticker), matching what's in
     config.yaml and what appears in the TradingView URL bar.
     """
@@ -64,7 +80,7 @@ def fetch_live_rsi(tv_symbol: str, period: int = 14, interval: str = "1D") -> Li
     close_field = _close_field_name(interval)
     params = {
         "symbol": tv_symbol,
-        "fields": f"{rsi_field},{close_field}",
+        "fields": f"{rsi_field},{close_field},{_EPS_GROWTH_TTM_FIELD},{_EPS_GROWTH_FY_FIELD}",
         "no_status": "true",
     }
     url = f"{_SCANNER_URL}?{urllib.parse.urlencode(params)}"
@@ -80,11 +96,25 @@ def fetch_live_rsi(tv_symbol: str, period: int = 14, interval: str = "1D") -> Li
             f"TradingView returned no {rsi_field}/{close_field} for {tv_symbol}: {data}"
         )
 
+    growth, growth_period = _pick_earnings_growth(data)
     return LiveQuote(
         symbol=tv_symbol,
         close=float(data[close_field]),
         rsi=float(data[rsi_field]),
+        earnings_growth=growth,
+        earnings_growth_period=growth_period,
     )
+
+
+def _pick_earnings_growth(data: dict) -> tuple[float | None, str | None]:
+    """TTM preferred; FY is the fallback for a stock too new to have one."""
+    ttm = data.get(_EPS_GROWTH_TTM_FIELD)
+    if ttm is not None:
+        return float(ttm), "ttm"
+    fy = data.get(_EPS_GROWTH_FY_FIELD)
+    if fy is not None:
+        return float(fy), "fy"
+    return None, None
 
 
 def fetch_daily_closes(yahoo_symbol: str, range_: str = "1y") -> list[tuple[str, float]]:

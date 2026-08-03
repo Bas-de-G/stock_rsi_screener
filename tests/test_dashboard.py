@@ -34,13 +34,19 @@ def config(tmp_path):
     return load_config(path)
 
 
-def signal(symbol="NVDA", up2="2026-07-23", known=False, confirms=False, fired=True):
+def signal(
+    symbol="NVDA", up2="2026-07-23", known=False, confirms=False, fired=True,
+    eg_known=False, eg_confirms=False,
+):
     """A recorded pattern. `fired` defaults True: under the configured
-    lenient mode the RSI pattern is a buy signal on its own."""
+    lenient mode the RSI pattern is a buy signal on its own. Earnings growth
+    defaults unknown, matching a pattern recorded before this factor existed."""
     return Signal(
         symbol=symbol, up1_date="2026-07-16", down_date="2026-07-22", up2_date=up2,
         price=200.0 if known else None, fair_value=220.0 if known else None,
         valuation_known=known, valuation_pass=confirms, fired=fired, recorded_at="now",
+        earnings_growth=15.0 if eg_known else None,
+        earnings_growth_known=eg_known, earnings_growth_pass=eg_confirms,
     )
 
 
@@ -81,6 +87,31 @@ def test_contradicting_fair_value_leaves_it_a_plain_buy_signal():
     r = row(signals=[signal(known=True, confirms=False, fired=True)])
     assert r.state == "signal_checked"
     assert r.fired is True
+    assert r.strong is False
+
+
+def test_earnings_growth_alone_makes_it_a_strong_buy():
+    """No fair value recorded yet, but earnings growth alone confirms —
+    same lenient rule the dashboard already used for fair value by itself."""
+    r = row(signals=[signal(known=False, fired=True, eg_known=True, eg_confirms=True)])
+    assert r.state == "strong"
+    assert r.strong is True
+
+
+def test_both_factors_confirming_is_strong():
+    r = row(signals=[
+        signal(known=True, confirms=True, fired=True, eg_known=True, eg_confirms=True)
+    ])
+    assert r.strong is True
+
+
+def test_fair_value_confirms_but_earnings_shrinking_is_not_strong():
+    """The value-trap case: cheap and oversold, but earnings declining —
+    one dissenting known factor withholds the rocket."""
+    r = row(signals=[
+        signal(known=True, confirms=True, fired=True, eg_known=True, eg_confirms=False)
+    ])
+    assert r.state == "signal_checked"
     assert r.strong is False
 
 
@@ -178,6 +209,40 @@ def test_unconfirmed_signal_invites_a_fair_value_check(config):
 def test_strong_buy_card_carries_the_rocket(config):
     html = render([row(signals=[signal(known=True, confirms=True, fired=True)])], config)
     assert "Strong buy 🚀" in html
+
+
+def test_growing_earnings_are_shown_and_flagged_as_passing(config):
+    r = row(series=[
+        RsiPoint("NVDA", "2026-07-27", 100.0, 45.0, "live:tradingview", 32.6, "ttm")
+    ])
+    html = render([r], config)
+    assert "+32.6%" in html
+    assert 'class="earnings pass"' in html
+    assert "TTM" in html
+
+
+def test_shrinking_earnings_are_flagged_as_failing(config):
+    r = row(series=[
+        RsiPoint("NVDA", "2026-07-27", 100.0, 45.0, "live:tradingview", -47.1, "ttm")
+    ])
+    html = render([r], config)
+    assert "-47.1%" in html
+    assert 'class="earnings fail"' in html
+
+
+def test_fy_fallback_is_labelled_distinctly_from_ttm(config):
+    """SanDisk-style case: too new for a trailing year, so FY is what's shown."""
+    r = row(series=[
+        RsiPoint("NVDA", "2026-07-27", 100.0, 45.0, "live:tradingview", 22.7, "fy")
+    ])
+    html = render([r], config)
+    assert "FY" in html
+
+
+def test_no_earnings_data_shows_a_placeholder(config):
+    html = render([row()], config)  # default row() series has no earnings_growth
+    assert 'class="earnings none"' in html
+    assert "No earnings growth data yet" in html
 
 
 def test_non_usd_close_shows_its_currency(config):

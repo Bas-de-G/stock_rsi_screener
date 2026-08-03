@@ -6,13 +6,17 @@ rules.
 
 ## What this is
 
-A screener that watches ~35 large-cap stocks for a double-oversold-recovery
+A screener that watches ~36 large-cap stocks for a double-oversold-recovery
 pattern: RSI crosses 30 upward, falls back below, and crosses up again inside 14
-days. A completed pattern is a buy signal on its own. A Morningstar fair value
-that agrees upgrades it to a strong buy (🚀 on the dashboard).
+days. A completed pattern is a buy signal on its own. Two independent factors
+grade it — Morningstar fair value and YoY earnings growth — and either one
+agreeing on its own is enough to upgrade it to a strong buy (🚀 on the
+dashboard); both being known and one dissenting withholds it (the value-trap
+case: cheap and oversold, but earnings shrinking).
 
-The RSI half runs itself on GitHub Actions. The valuation half runs from a
-laptop, on purpose — see "Credentials" below.
+The RSI half, and earnings growth alongside it, run themselves on GitHub
+Actions — both come from TradingView's free scanner endpoint, no login needed.
+The valuation half runs from a laptop, on purpose — see "Credentials" below.
 
 ## Layout
 
@@ -22,7 +26,7 @@ laptop, on purpose — see "Credentials" below.
 | `screener/tradingview.py` | live RSI (TradingView) + historical closes (Yahoo) |
 | `screener/rsi.py` | Wilder RSI, used for backfill only |
 | `screener/signals.py` | pattern detection and the valuation gate |
-| `screener/storage.py` | SQLite: `rsi_history`, `valuations`, `signals` |
+| `screener/storage.py` | SQLite: `rsi_history` (+ earnings growth), `valuations`, `signals` |
 | `screener/fairvalues.py` | the committed `fair_values.yaml` |
 | `screener/morningstar.py` | logged-in scraping of price + fair value |
 | `screener/dashboard.py` | the self-contained HTML page |
@@ -42,17 +46,26 @@ cleared from the database on the next run.
 only on `main` (see the branch guard in `.github/workflows/daily.yml`). A human
 committing it will collide with the bot.
 
-**The three signal predicates are deliberately separate** (`screener/signals.py`):
+**The signal predicates are deliberately separate** (`screener/signals.py`):
 
 - `valuation_passes(price, fair_value, config)` → `(known, confirms)`. `known` is
   False when there's nothing to compare; `confirms` answers "does the valuation
   agree?" — not "is this a signal?"
+- `earnings_growth_passes(growth)` → the same `(known, confirms)` shape, for YoY
+  EPS growth. `confirms` is any positive number — no threshold to tune.
 - `signal_fires(confirms, config)` → whether it counts as a buy signal at all.
-  With `fire_without_valuation: true` the RSI pattern stands alone.
-- `is_strong(known, confirms)` → whether it earns the rocket.
+  With `fire_without_valuation: true` the RSI pattern stands alone. Deliberately
+  takes only the valuation's `confirms` — earnings growth never gates firing,
+  only grading, so a soft quarter can't silently suppress a signal.
+- `is_strong(*factors)` → whether it earns the rocket. Takes any number of
+  `(known, confirms)` pairs — one per grading factor — and requires every
+  factor that's *known* to agree. A factor nobody's checked doesn't count
+  against the signal, but with nothing known at all, it's never strong.
 
 Collapsing these back into one function breaks the "fire on the pattern, grade
-on the valuation" behaviour the dashboard is built around.
+on independent factors" behaviour the dashboard is built around. Adding a third
+grading factor later is just another `(known, confirms)` pair passed to
+`is_strong` — the signature doesn't need to change.
 
 **The dashboard only shows signals inside the chart window.** `dashboard._collect`
 filters on `up2_date >= ` the first date in the visible series, and
@@ -64,6 +77,21 @@ and has a different identifier on all three services — `LSE:RR.` / `RR.L` /
 `xlon/rr.`. `morningstar.check_units` rejects a price/fair-value pair more than
 10× apart, which is what catches a pence-vs-pounds mix-up before it reaches the
 gate.
+
+**Earnings growth only exists on live-fetched rows.** `rsi_history.earnings_growth`
+comes from TradingView's scanner alongside RSI (`tradingview.fetch_live_rsi`) —
+backfill has no historical source for it, so a signal whose `up2_date` was
+backfilled rather than observed live shows earnings growth as unknown forever,
+the same way an unchecked fair value does. TTM is preferred; FY is the fallback
+for a stock too newly listed to have a trailing year (SanDisk, post its 2025
+spin-off, is the live example).
+
+**`signals.csv` rewrites, it doesn't append.** It's force-committed to `main`
+by CI, so a copy from before any given schema change is sitting in git history.
+A blind append under a grown header would misalign columns on every row after
+that point — `storage.append_signal_csv` reads the existing rows back and
+rewrites the whole file under the current header instead. Keep that pattern if
+`Signal` grows again.
 
 ## Credentials
 
@@ -82,7 +110,7 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 168 tests, fully offline
+python -m pytest tests/ -q          # 201 tests, fully offline
 
 python -m screener.cli backfill     # once, seeds RSI history from Yahoo
 python -m screener.cli run          # the daily job (RSI only)

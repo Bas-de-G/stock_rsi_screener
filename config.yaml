@@ -1,7 +1,7 @@
 # Stock RSI screener configuration.
 # Safe to commit — contains no credentials.
 
-# 34 large-cap market leaders. Every entry below was checked against both
+# Large-cap market leaders. Every entry below was checked against both
 # TradingView and Yahoo before being added, so none of them 404 on a run.
 # `tradingview` must carry the right exchange prefix (WMT is NASDAQ, not NYSE);
 # `morningstar` is the URL slug: xnas = Nasdaq, xnys = NYSE.
@@ -28,6 +28,8 @@ tickers:
   - {symbol: TXN,   tradingview: "NASDAQ:TXN",   morningstar: xnas/txn}
   - {symbol: AMAT,  tradingview: "NASDAQ:AMAT",  morningstar: xnas/amat}
   - {symbol: CSCO,  tradingview: "NASDAQ:CSCO",  morningstar: xnas/csco}
+  # Flash storage, spun back off from Western Digital as its own listing in 2025.
+  - {symbol: SNDK,  tradingview: "NASDAQ:SNDK",  morningstar: xnas/sndk}
 
   # --- Financials ----------------------------------------------------
   - {symbol: JPM,   tradingview: "NYSE:JPM",     morningstar: xnys/jpm}

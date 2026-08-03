@@ -8,6 +8,7 @@ import pytest
 
 from screener.config import SignalConfig
 from screener.signals import (
+    earnings_growth_passes,
     find_cross_pairs,
     find_upward_crosses,
     is_strong,
@@ -178,20 +179,20 @@ def test_pattern_alone_fires_when_configured_to():
     """The RSI pattern is a buy signal on its own; fair value only grades it."""
     known, confirms = valuation_passes(None, None, config(fire_without_valuation=True))
     assert signal_fires(confirms, config(fire_without_valuation=True)) is True
-    assert is_strong(known, confirms) is False
+    assert is_strong((known, confirms)) is False
 
 
 def test_pattern_alone_does_not_fire_in_strict_mode():
     known, confirms = valuation_passes(None, None, config(fire_without_valuation=False))
     assert signal_fires(confirms, config(fire_without_valuation=False)) is False
-    assert is_strong(known, confirms) is False
+    assert is_strong((known, confirms)) is False
 
 
 def test_confirming_valuation_makes_it_a_strong_buy():
     cfg = config(fire_without_valuation=True, valuation_rule="price_below_fair_value")
     known, confirms = valuation_passes(217.24, 225.00, cfg)   # below fair value
     assert signal_fires(confirms, cfg) is True
-    assert is_strong(known, confirms) is True
+    assert is_strong((known, confirms)) is True
 
 
 def test_contradicting_valuation_still_fires_but_is_not_strong():
@@ -199,14 +200,14 @@ def test_contradicting_valuation_still_fires_but_is_not_strong():
     cfg = config(fire_without_valuation=True, valuation_rule="price_below_fair_value")
     known, confirms = valuation_passes(240.00, 225.00, cfg)   # above fair value
     assert signal_fires(confirms, cfg) is True
-    assert is_strong(known, confirms) is False
+    assert is_strong((known, confirms)) is False
 
 
 def test_contradicting_valuation_blocks_the_signal_in_strict_mode():
     cfg = config(fire_without_valuation=False, valuation_rule="price_below_fair_value")
     known, confirms = valuation_passes(240.00, 225.00, cfg)
     assert signal_fires(confirms, cfg) is False
-    assert is_strong(known, confirms) is False
+    assert is_strong((known, confirms)) is False
 
 
 def test_a_confirmed_signal_is_strong_under_either_mode():
@@ -214,4 +215,66 @@ def test_a_confirmed_signal_is_strong_under_either_mode():
         cfg = config(fire_without_valuation=fire, valuation_rule="price_below_fair_value")
         known, confirms = valuation_passes(217.24, 225.00, cfg)
         assert signal_fires(confirms, cfg) is True
-        assert is_strong(known, confirms) is True
+        assert is_strong((known, confirms)) is True
+
+
+# ------------------------------------------------- earnings growth gate
+
+
+def test_missing_earnings_growth_is_unknown():
+    known, confirms = earnings_growth_passes(None)
+    assert (known, confirms) == (False, False)
+
+
+def test_positive_growth_confirms():
+    known, confirms = earnings_growth_passes(32.6)
+    assert (known, confirms) == (True, True)
+
+
+def test_negative_growth_does_not_confirm():
+    known, confirms = earnings_growth_passes(-47.1)
+    assert (known, confirms) == (True, False)
+
+
+def test_zero_growth_does_not_confirm():
+    """Flat earnings aren't growing earnings -- no threshold to tune, just > 0."""
+    known, confirms = earnings_growth_passes(0.0)
+    assert (known, confirms) == (True, False)
+
+
+# --------------------------------------- is_strong across multiple factors
+
+
+def test_nothing_known_is_never_strong():
+    """Not even the coin-flip case: with zero factors checked, no rocket."""
+    assert is_strong((False, False), (False, False)) is False
+
+
+def test_a_single_known_factor_confirming_is_enough():
+    """A fresh pattern with no fair value yet can still be strong on
+    earnings growth alone -- and vice versa."""
+    assert is_strong((False, False), (True, True)) is True
+    assert is_strong((True, True), (False, False)) is True
+
+
+def test_a_single_known_factor_denying_blocks_it():
+    assert is_strong((False, False), (True, False)) is False
+    assert is_strong((True, False), (False, False)) is False
+
+
+def test_both_known_and_agreeing_is_strong():
+    assert is_strong((True, True), (True, True)) is True
+
+
+def test_both_known_but_disagreeing_is_not_strong():
+    """One dissenting *known* factor is enough to withhold the rocket --
+    this is the value-trap case: cheap and oversold, but earnings shrinking."""
+    assert is_strong((True, True), (True, False)) is False
+    assert is_strong((True, False), (True, True)) is False
+
+
+def test_is_strong_accepts_any_number_of_factors():
+    """Extensible to a third factor later without changing the call shape."""
+    assert is_strong((True, True), (True, True), (True, True)) is True
+    assert is_strong((True, True), (True, True), (True, False)) is False
+    assert is_strong((False, False), (False, False), (True, True)) is True

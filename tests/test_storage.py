@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from screener.storage import RsiPoint, Signal, Store, Valuation
+import sqlite3
+
+from screener.storage import (
+    RsiPoint,
+    Signal,
+    Store,
+    Valuation,
+    append_signal_csv,
+    export_csv_snapshot,
+)
 
 
 @pytest.fixture()
@@ -131,3 +140,185 @@ def test_schema_survives_reopening_the_same_file(tmp_path):
         s.upsert_rsi_point(RsiPoint("NVDA", "2026-01-01", 100.0, 44.0, "live:tradingview"))
     with Store(path) as s:
         assert len(s.rsi_series("NVDA")) == 1
+
+
+# ------------------------------------------------- earnings growth roundtrip
+
+
+def test_earnings_growth_roundtrips(store):
+    store.upsert_rsi_point(
+        RsiPoint("NVDA", "2026-01-01", 100.0, 44.0, "live:tradingview", 32.6, "ttm")
+    )
+    point = store.rsi_series("NVDA")[0]
+    assert (point.earnings_growth, point.earnings_growth_period) == (32.6, "ttm")
+
+
+def test_earnings_growth_defaults_to_unknown(store):
+    """Backfilled rows have no source for this -- must not silently become 0."""
+    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-01", 100.0, 44.0, "backfill:yahoo"))
+    point = store.rsi_series("NVDA")[0]
+    assert (point.earnings_growth, point.earnings_growth_period) == (None, None)
+
+
+def test_a_live_update_can_add_earnings_growth_to_a_backfilled_day(store):
+    """Same date, first written by backfill (no growth data), then overwritten
+    by a live run the day it happens to run -- earnings growth should attach."""
+    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-01", 100.0, 44.0, "backfill:yahoo"))
+    store.upsert_rsi_point(
+        RsiPoint("NVDA", "2026-01-01", 101.0, 46.0, "live:tradingview", 10.0, "fy")
+    )
+    point = store.rsi_series("NVDA")[0]
+    assert (point.earnings_growth, point.earnings_growth_period) == (10.0, "fy")
+
+
+# --------------------------------------------- signal earnings-growth fields
+
+
+def test_signal_earnings_growth_roundtrips(store):
+    sig = Signal(
+        "NVDA", "2026-01-01", "2026-01-03", "2026-01-05",
+        200.0, 190.0, True, True, True, "now",
+        earnings_growth=32.6, earnings_growth_known=True, earnings_growth_pass=True,
+    )
+    store.record_signal(sig)
+    stored = store.all_signals("NVDA")[0]
+    assert stored.earnings_growth == 32.6
+    assert stored.earnings_growth_known is True
+    assert stored.earnings_growth_pass is True
+
+
+def test_signal_earnings_growth_defaults_to_unknown(store):
+    """Old-style positional Signal(...) construction must keep working."""
+    sig = Signal("NVDA", "2026-01-01", "2026-01-03", "2026-01-05",
+                 200.0, 190.0, True, True, True, "now")
+    store.record_signal(sig)
+    stored = store.all_signals("NVDA")[0]
+    assert stored.earnings_growth is None
+    assert stored.earnings_growth_known is False
+    assert stored.earnings_growth_pass is False
+
+
+def test_update_signal_valuation_does_not_touch_earnings_growth(store):
+    """Re-scoring a signal against a newly-checked fair value must not
+    clobber an earnings-growth snapshot captured independently."""
+    store.record_signal(Signal(
+        "IBM", "2026-07-16", "2026-07-22", "2026-07-23",
+        None, None, False, False, False, "now",
+        earnings_growth=15.0, earnings_growth_known=True, earnings_growth_pass=True,
+    ))
+    store.update_signal_valuation("IBM", "2026-07-23", 217.20, 225.00, True, True, True)
+    stored = store.all_signals("IBM")[0]
+    assert stored.earnings_growth == 15.0
+    assert stored.earnings_growth_known is True
+    assert stored.earnings_growth_pass is True
+
+
+# ------------------------------------------------------------- migrations
+
+
+def test_migrating_an_old_rsi_history_table_adds_earnings_columns(tmp_path):
+    """A database from before this factor existed has no earnings columns at
+    all; opening it with the current Store must add them without losing rows."""
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """CREATE TABLE rsi_history (
+             symbol TEXT NOT NULL, date TEXT NOT NULL,
+             close REAL NOT NULL, rsi REAL NOT NULL, source TEXT NOT NULL,
+             PRIMARY KEY (symbol, date)
+           );"""
+    )
+    conn.execute(
+        "INSERT INTO rsi_history VALUES (?, ?, ?, ?, ?)",
+        ("NVDA", "2026-01-01", 100.0, 44.0, "backfill:yahoo"),
+    )
+    conn.commit()
+    conn.close()
+
+    with Store(path) as s:
+        points = s.rsi_series("NVDA")
+        assert len(points) == 1
+        assert points[0].close == 100.0
+        assert points[0].earnings_growth is None
+
+
+def test_migrating_an_old_signals_table_adds_earnings_columns(tmp_path):
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """CREATE TABLE signals (
+             symbol TEXT NOT NULL, up1_date TEXT NOT NULL, down_date TEXT NOT NULL,
+             up2_date TEXT NOT NULL, price REAL, fair_value REAL,
+             valuation_known INTEGER NOT NULL, valuation_pass INTEGER NOT NULL,
+             fired INTEGER NOT NULL, recorded_at TEXT NOT NULL,
+             PRIMARY KEY (symbol, up2_date)
+           );"""
+    )
+    conn.execute(
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("NVDA", "2026-01-01", "2026-01-03", "2026-01-05", 200.0, 190.0, 1, 1, 1, "now"),
+    )
+    conn.commit()
+    conn.close()
+
+    with Store(path) as s:
+        signals = s.all_signals("NVDA")
+        assert len(signals) == 1
+        assert signals[0].fired is True
+        assert signals[0].earnings_growth_known is False
+        assert signals[0].earnings_growth_pass is False
+
+
+# ------------------------------------------------------------- CSV export
+
+
+def test_signal_csv_includes_earnings_growth(tmp_path):
+    sig = Signal(
+        "NVDA", "2026-01-01", "2026-01-03", "2026-01-05",
+        200.0, 190.0, True, True, True, "now",
+        earnings_growth=32.6, earnings_growth_known=True, earnings_growth_pass=True,
+    )
+    path = append_signal_csv(tmp_path, sig)
+    text = path.read_text()
+    assert "earnings_growth" in text.splitlines()[0]
+    assert "32.6" in text
+
+
+def test_appending_a_signal_preserves_rows_written_under_an_older_header(tmp_path):
+    """Regression test: data/signals.csv already exists in the wild under the
+    pre-earnings-growth header. A blind append would misalign every column
+    on the new row; this must rewrite under the current header instead,
+    keeping the old row's values (blank for the new columns)."""
+    csv_path = tmp_path / "signals.csv"
+    csv_path.write_text(
+        "symbol,up1_date,down_date,up2_date,price,fair_value,"
+        "valuation_known,valuation_pass,fired,recorded_at\n"
+        "AAPL,2026-01-13,2026-01-23,2026-01-26,,,False,False,True,2026-07-27T19:36:06\n"
+    )
+    sig = Signal(
+        "NVDA", "2026-01-01", "2026-01-03", "2026-01-05",
+        200.0, 190.0, True, True, True, "now",
+        earnings_growth=32.6, earnings_growth_known=True, earnings_growth_pass=True,
+    )
+    append_signal_csv(tmp_path, sig)
+
+    lines = csv_path.read_text().splitlines()
+    assert lines[0].split(",") == [
+        "symbol", "up1_date", "down_date", "up2_date", "price", "fair_value",
+        "valuation_known", "valuation_pass", "earnings_growth",
+        "earnings_growth_known", "earnings_growth_pass", "fired", "recorded_at",
+    ]
+    assert len(lines) == 3  # header + old row + new row
+    assert lines[1].startswith("AAPL,")
+    assert lines[2].startswith("NVDA,")
+    assert "32.6" in lines[2]
+
+
+def test_csv_snapshot_includes_earnings_growth(store, tmp_path):
+    store.upsert_rsi_point(
+        RsiPoint("NVDA", "2026-01-01", 100.0, 44.0, "live:tradingview", 32.6, "ttm")
+    )
+    path = export_csv_snapshot(store, tmp_path)
+    text = path.read_text()
+    assert "earnings_growth" in text.splitlines()[0]
+    assert "32.6" in text
