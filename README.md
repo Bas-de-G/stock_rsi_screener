@@ -358,14 +358,25 @@ rules that aren't obvious from the code, and how to run things. `CLAUDE.md`
 points at the same file so the two can't drift apart. Read it before changing
 `screener/signals.py` or anything that writes a fair value.
 
-**Two things that will bite you otherwise:**
+**Things that will bite you otherwise:**
 
-- **Rebase, don't merge, when pulling.** `daily.yml` commits the binary
-  `data/screener.db` to `main` on every scheduled run. If you have local
-  commits, `git pull --rebase` — a merge produces a binary conflict nobody can
-  resolve by hand.
-- **Never commit `data/`.** It's gitignored for exactly this reason; CI
-  force-adds it, and only on `main`.
+- **`git pull` refuses, complaining `data/screener.db` would be overwritten.**
+  The most common trigger: you ran `backfill`, `run`, or `dashboard` locally,
+  which modified that tracked file, and now a plain pull won't clobber your
+  uncommitted changes. Since the file is fully regenerable — running the
+  command again reproduces it — the fix is to discard your local copy, not
+  merge it:
+  ```bash
+  git checkout -- data/screener.db data/latest.csv data/signals.csv
+  git pull
+  ```
+  Treat everything under `data/` as disposable on your machine; the copy
+  committed to `main` by CI is the shared one.
+- **Rebase, don't merge, if you have local *commits* touching `data/`.**
+  `daily.yml` commits that same binary file on every scheduled run, so a merge
+  produces a conflict nobody can resolve by hand — `git pull --rebase` instead.
+- **Never commit `data/` yourself.** It's gitignored for exactly this reason;
+  CI force-adds it, and only on `main`.
 
 **Tests** are offline by design — no network, no browser, no credentials:
 
