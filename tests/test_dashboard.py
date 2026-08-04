@@ -294,7 +294,10 @@ def test_build_dashboard_writes_a_file(tmp_path, config):
     text = out.read_text()
     assert "NVDA" in text
     assert "220.00" in text
-    assert "below fair value" in text
+    # The verdict now reports *how far* to fair value rather than just which
+    # side of it, because the gate demands a per-horizon margin: 190 -> 220 is
+    # +16%, which is not enough for the daily chart's 30%.
+    assert "+16% to fair value" in text
 
 
 # ------------------------------------------------------- freshness line
@@ -440,3 +443,108 @@ def test_card_cross_count_agrees_with_its_pattern(config, tmp_path):
         rows = {r.symbol: r for r in _collect(store, config)}
     ibm = rows["IBM"]
     assert len(ibm.crosses) >= 2
+
+
+# ------------------------------------------- market filter & horizon pages
+
+
+from screener.dashboard import build_all_dashboards
+
+
+def test_cards_carry_their_market_classes(config):
+    r = row(markets=("sp500", "nasdaq"))
+    html = render([r], config)
+    assert "in-sp500" in html and "in-nasdaq" in html
+
+
+def test_the_market_filter_is_pure_css_no_javascript(config):
+    """The page must stay readable and filterable with JS disabled."""
+    html = render([row(markets=("sp500",))], config)
+    assert "<script" not in html.lower()
+    assert 'input type="radio" name="mk"' in html
+    assert "#mk-sp500:checked ~ .sheet .card:not(.in-sp500)" in html
+
+
+def test_every_active_market_gets_a_radio_and_a_tab(config):
+    html = render([row(markets=("sp500",))], config)
+    for m in config.active_markets:
+        assert f'id="mk-{m}"' in html
+        assert f'for="mk-{m}"' in html
+    assert 'id="mk-all"' in html
+
+
+def test_the_horizon_selector_links_to_every_page(config):
+    html = render([row()], config, config.horizon("1d"))
+    for h in config.horizons:
+        expected = "index.html" if h.key == "1d" else f"{h.key}.html"
+        assert f'href="{expected}"' in html
+
+
+def test_the_current_horizon_is_marked_active(config):
+    html = render([row()], config, config.horizon("4h"))
+    assert '<a class="tf on" href="4h.html">4 hours</a>' in html
+
+
+def test_the_page_states_its_own_margin_and_leverage(config):
+    html = render([row()], config, config.horizon("1h"))
+    assert "10%" in html and "10x" in html
+
+
+def test_leverage_shows_only_when_a_signal_fired(config):
+    fired = render([row(signals=[signal(fired=True)])], config, config.horizon("1h"))
+    assert 'class="lev">10x<' in fired
+    quiet = render([row()], config, config.horizon("1h"))
+    assert 'class="lev">' not in quiet
+
+
+def test_leverage_matches_the_horizon(config):
+    for key, lev in [("1h", "10x"), ("4h", "5x"), ("1d", "2x"), ("1w", "1x")]:
+        html = render([row(signals=[signal(fired=True)])], config, config.horizon(key))
+        assert f'class="lev">{lev}<' in html
+
+
+def test_the_leverage_caveat_is_always_present(config):
+    """A bare "10x" with no context on a page someone reads on their phone."""
+    html = render([row()], config, config.horizon("1h"))
+    assert "multiplies losses" in html
+    assert "nothing here is financial advice" in html.lower()
+
+
+def test_build_all_dashboards_writes_one_page_per_horizon(tmp_path, config):
+    db = tmp_path / "t.db"
+    with Store(db) as store:
+        for i in range(20):
+            store.upsert_rsi_point(
+                RsiPoint("IBM", f"2026-07-{i + 1:02d}", 200.0, 45.0, "backfill:yahoo")
+            )
+        paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
+    names = sorted(p.name for p in paths)
+    assert names == ["1h.html", "1w.html", "4h.html", "index.html"]
+    assert all(p.exists() and p.stat().st_size > 0 for p in paths)
+
+
+def test_the_default_horizon_is_index_html(tmp_path, config):
+    """The published Pages URL must keep working without a redirect."""
+    db = tmp_path / "t.db"
+    with Store(db) as store:
+        store.upsert_rsi_point(RsiPoint("IBM", "2026-07-01", 200.0, 45.0, "backfill:yahoo"))
+        paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
+    index = next(p for p in paths if p.name == "index.html")
+    assert "1 day" in index.read_text()
+
+
+def test_each_page_only_carries_its_own_horizons_data(tmp_path, config):
+    """Separate pages are the whole reason this stays small -- an hourly bar
+    must not leak into the daily page."""
+    db = tmp_path / "t.db"
+    with Store(db) as store:
+        for i in range(20):
+            store.upsert_rsi_point(
+                RsiPoint("IBM", f"2026-07-{i + 1:02d}", 200.0, 45.0, "t", horizon="1d")
+            )
+        store.upsert_rsi_point(
+            RsiPoint("IBM", "2026-07-20T14:00", 999.0, 12.0, "t", horizon="1h")
+        )
+        paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
+    daily = next(p for p in paths if p.name == "index.html").read_text()
+    assert "2026-07-20T14:00" not in daily

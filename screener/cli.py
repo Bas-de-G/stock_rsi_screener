@@ -12,9 +12,10 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+from dataclasses import replace
 from pathlib import Path
 
-from .config import Config, load_config
+from .config import DEFAULT_HORIZON, DEFAULT_HORIZONS, Config, load_config
 from .fairvalues import FairValueError, load_fair_values, save_fair_value
 from .morningstar import (
     AuthenticationError,
@@ -86,39 +87,58 @@ def cmd_backfill(config: Config, args) -> int:
     backfilled by CI and would trickle in one live row a day instead. Making
     this idempotent and calling it every run lets a new ticker backfill itself.
     """
+    horizons = _selected_horizons(config, args)
     with Store(config.storage.database) as store:
-        for ticker in config.tickers:
-            existing = store.rsi_series(ticker.symbol)
-            if not args.force and len(existing) >= config.dashboard.chart_days:
-                print(f"  {ticker.symbol}: already has {len(existing)} days — skip (--force to refetch)")
-                continue
-
-            try:
-                closes = fetch_daily_closes(ticker.yahoo, range_=args.range)
-            except MarketDataError as exc:
-                print(f"  {ticker.symbol}: {exc}")
-                continue
-
-            if len(closes) < config.rsi.period + 1:
-                print(f"  {ticker.symbol}: only {len(closes)} closes, need {config.rsi.period + 1}")
-                continue
-
-            dates = [d for d, _ in closes]
-            prices = [c for _, c in closes]
-            rsis = wilder_rsi_series(prices, config.rsi.period)
-
-            written = 0
-            for date, close, rsi in zip(dates, prices, rsis):
-                if rsi is None:
+        for horizon in horizons:
+            print(f"\n[{horizon.key}] {horizon.label} bars")
+            for ticker in config.tickers:
+                existing = store.rsi_series(ticker.symbol, horizon.key)
+                # Intraday bars go stale between runs in a way daily ones don't:
+                # a full 1h history collected yesterday is missing every bar
+                # since. Always refetch those; the upsert dedupes.
+                seeded = len(existing) >= config.dashboard.chart_days
+                if seeded and not horizon.intraday and not args.force:
+                    print(f"  {ticker.symbol}: {len(existing)} bars already — skip (--force to refetch)")
                     continue
-                store.upsert_rsi_point(
-                    RsiPoint(ticker.symbol, date, close, rsi, "backfill:yahoo")
-                )
-                written += 1
-            print(f"  {ticker.symbol}: {written} days of RSI history ({dates[0]} → {dates[-1]})")
 
-        _detect_and_record(store, config, announce=False)
+                # Each horizon has its own sensible depth (5y of weekly bars,
+                # but only 730d of hourly -- Yahoo's intraday ceiling).
+                rng = args.range or horizon.yahoo_range
+                try:
+                    closes = fetch_daily_closes(
+                        ticker.yahoo, range_=rng, interval=horizon.yahoo_interval
+                    )
+                except MarketDataError as exc:
+                    print(f"  {ticker.symbol}: {exc}")
+                    continue
+
+                if len(closes) < config.rsi.period + 1:
+                    print(f"  {ticker.symbol}: only {len(closes)} bars, need {config.rsi.period + 1}")
+                    continue
+
+                dates = [d for d, _ in closes]
+                prices = [c for _, c in closes]
+                rsis = wilder_rsi_series(prices, config.rsi.period)
+
+                written = 0
+                for date, close, rsi in zip(dates, prices, rsis):
+                    if rsi is None:
+                        continue
+                    store.upsert_rsi_point(
+                        RsiPoint(ticker.symbol, date, close, rsi, "backfill:yahoo",
+                                 horizon=horizon.key)
+                    )
+                    written += 1
+                print(f"  {ticker.symbol}: {written} bars ({dates[0]} → {dates[-1]})")
+
+        _detect_and_record(store, config, announce=False, horizons=horizons)
     return 0
+
+
+def _selected_horizons(config: Config, args) -> list:
+    """Which horizons a command should act on: --horizon, else all of them."""
+    key = getattr(args, "horizon", None)
+    return [config.horizon(key)] if key else list(config.horizons)
 
 
 def cmd_run(config: Config, args) -> int:
@@ -130,35 +150,46 @@ def cmd_run(config: Config, args) -> int:
           f"within {config.signal.window_days} {config.signal.window_unit} days\n")
 
     exit_code = 0
+    horizons = _selected_horizons(config, args)
     with Store(config.storage.database) as store:
         recorded = sync_fair_values(store, config)
         if recorded:
             print(f"  {recorded} hand-checked fair value(s) loaded "
                   f"from {config.storage.fair_values.name}\n")
         # --- RSI, from TradingView -------------------------------------
-        for ticker in config.tickers:
-            try:
-                quote = fetch_live_rsi(
-                    ticker.tradingview,
-                    period=config.rsi.period,
-                    interval=config.rsi.interval,
+        # One live reading per (ticker, horizon). The daily bar is keyed by
+        # date; intraday bars are keyed by the minute the run happened, so a
+        # run every hour lays down a genuine intraday series rather than
+        # overwriting a single row all day.
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        for horizon in horizons:
+            print(f"\n[{horizon.key}] {horizon.label} bars")
+            for ticker in config.tickers:
+                try:
+                    quote = fetch_live_rsi(
+                        ticker.tradingview,
+                        period=config.rsi.period,
+                        interval=horizon.tv_interval,
+                    )
+                except MarketDataError as exc:
+                    print(f"  {ticker.symbol}: RSI unavailable — {exc}")
+                    exit_code = 1
+                    continue
+                store.upsert_rsi_point(
+                    RsiPoint(
+                        ticker.symbol,
+                        stamp if horizon.intraday else today,
+                        quote.close, quote.rsi, "live:tradingview",
+                        quote.earnings_growth, quote.earnings_growth_period,
+                        horizon=horizon.key,
+                    )
                 )
-            except MarketDataError as exc:
-                print(f"  {ticker.symbol}: RSI unavailable — {exc}")
-                exit_code = 1
-                continue
-            store.upsert_rsi_point(
-                RsiPoint(
-                    ticker.symbol, today, quote.close, quote.rsi, "live:tradingview",
-                    quote.earnings_growth, quote.earnings_growth_period,
+                growth_note = (
+                    f"   EPS growth ({quote.earnings_growth_period}) {quote.earnings_growth:+.1f}%"
+                    if quote.earnings_growth is not None
+                    else ""
                 )
-            )
-            growth_note = (
-                f"   EPS growth ({quote.earnings_growth_period}) {quote.earnings_growth:+.1f}%"
-                if quote.earnings_growth is not None
-                else ""
-            )
-            print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}{growth_note}")
+                print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}{growth_note}")
 
         # --- Price + fair value, from Morningstar (opt-in) ---------------
         if not args.with_morningstar:
@@ -210,60 +241,76 @@ def cmd_run(config: Config, args) -> int:
 
         # --- Detect -----------------------------------------------------
         print()
-        _detect_and_record(store, config, announce=True)
+        _detect_and_record(store, config, announce=True, horizons=horizons)
 
         snapshot = export_csv_snapshot(store, config.storage.csv_dir)
         print(f"\nSnapshot written to {snapshot}")
     return exit_code
 
 
-def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Signal]:
-    """Scan stored history for the pattern and record anything new."""
+def _detect_and_record(
+    store: Store, config: Config, announce: bool, horizons=None
+) -> list[Signal]:
+    """Scan stored history for the pattern and record anything new.
+
+    Runs per horizon: each has its own bar series, its own cross-spacing
+    window, and its own valuation margin, so the same symbol can legitimately
+    have a fired 1h signal and no 1w signal at the same moment.
+    """
     new_signals: list[Signal] = []
     now = dt.datetime.now().isoformat(timespec="seconds")
+    horizons = horizons if horizons is not None else list(config.horizons)
 
-    for symbol in store.symbols():
-        series = store.rsi_series(symbol)
-        rsi_by_date = {p.date: p for p in series}
-        for pair in find_cross_pairs(series, config.rsi.threshold, config.signal):
-            if store.signal_exists(symbol, pair.up2_date):
+    for horizon in horizons:
+        window = replace(config.signal, window_days=horizon.window_days)
+        for symbol in store.symbols():
+            series = store.rsi_series(symbol, horizon.key)
+            if not series:
                 continue
+            rsi_by_date = {p.date: p for p in series}
+            for pair in find_cross_pairs(series, config.rsi.threshold, window):
+                if store.signal_exists(symbol, pair.up2_date, horizon.key):
+                    continue
 
-            valuation = store.valuation(symbol, pair.up2_date)
-            price = valuation.price if valuation else None
-            fair_value = valuation.fair_value if valuation else None
-            known, confirms = valuation_passes(price, fair_value, config.signal)
+                valuation = store.valuation(symbol, pair.up2_date)
+                price = valuation.price if valuation else None
+                fair_value = valuation.fair_value if valuation else None
+                known, confirms = valuation_passes(
+                    price, fair_value, config.signal, horizon.margin
+                )
 
-            # Only ever populated on a live-fetched row (see RsiPoint), so an
-            # up2_date that was backfilled rather than observed live comes back
-            # unknown here — same as an unchecked fair value.
-            growth = rsi_by_date[pair.up2_date].earnings_growth
-            eg_known, eg_confirms = earnings_growth_passes(growth)
+                # Only ever populated on a live-fetched row (see RsiPoint), so
+                # an up2_date that was backfilled rather than observed live
+                # comes back unknown here — same as an unchecked fair value.
+                growth = rsi_by_date[pair.up2_date].earnings_growth
+                eg_known, eg_confirms = earnings_growth_passes(growth)
 
-            signal = Signal(
-                symbol=symbol,
-                up1_date=pair.up1_date,
-                down_date=pair.down_date,
-                up2_date=pair.up2_date,
-                price=price,
-                fair_value=fair_value,
-                valuation_known=known,
-                valuation_pass=confirms,
-                fired=signal_fires(confirms, config.signal),
-                recorded_at=now,
-                earnings_growth=growth,
-                earnings_growth_known=eg_known,
-                earnings_growth_pass=eg_confirms,
-            )
-            store.record_signal(signal)
-            append_signal_csv(config.storage.csv_dir, signal)
-            new_signals.append(signal)
+                signal = Signal(
+                    symbol=symbol,
+                    up1_date=pair.up1_date,
+                    down_date=pair.down_date,
+                    up2_date=pair.up2_date,
+                    price=price,
+                    fair_value=fair_value,
+                    valuation_known=known,
+                    valuation_pass=confirms,
+                    fired=signal_fires(confirms, config.signal),
+                    recorded_at=now,
+                    earnings_growth=growth,
+                    earnings_growth_known=eg_known,
+                    earnings_growth_pass=eg_confirms,
+                    horizon=horizon.key,
+                )
+                store.record_signal(signal)
+                append_signal_csv(config.storage.csv_dir, signal)
+                new_signals.append(signal)
 
     if announce:
         fired = [s for s in new_signals if s.fired]
         if fired:
             for signal in fired:
-                message = format_signal(signal, config.signal.describe_rule())
+                horizon = config.horizon(signal.horizon)
+                message = format_signal(signal, config.signal.describe_rule(), horizon)
                 print(message)
                 if send_webhook(message):
                     print("  (sent to webhook)")
@@ -277,8 +324,8 @@ def _detect_and_record(store: Store, config: Config, announce: bool) -> list[Sig
                     else "valuation gate not satisfied"
                 )
                 print(
-                    f"  {signal.symbol}: RSI pattern completed {signal.up2_date}, "
-                    f"but not fired — {reason}."
+                    f"  {signal.symbol} [{signal.horizon}]: RSI pattern completed "
+                    f"{signal.up2_date}, but not fired — {reason}."
                 )
     return new_signals
 
@@ -300,7 +347,7 @@ def cmd_fair_value(config: Config, args) -> int:
     date = args.date or dt.date.today().isoformat()
 
     with Store(config.storage.database) as store:
-        series = store.rsi_series(symbol)
+        series = store.rsi_series(symbol, DEFAULT_HORIZON)
         if not series:
             print(f"No price history for {symbol} yet — run `backfill` or `run` first.")
             return 1
@@ -313,7 +360,8 @@ def cmd_fair_value(config: Config, args) -> int:
         count = sync_fair_values(store, config, quiet=True)
 
         price = series[-1].close
-        known, confirms = valuation_passes(price, args.value, config.signal)
+        daily = config.horizon(DEFAULT_HORIZON)
+        known, confirms = valuation_passes(price, args.value, config.signal, daily.margin)
         eg_known, eg_confirms = earnings_growth_passes(series[-1].earnings_growth)
         if is_strong((known, confirms), (eg_known, eg_confirms)):
             verdict = "STRONG BUY — every known factor confirms"
@@ -322,7 +370,7 @@ def cmd_fair_value(config: Config, args) -> int:
         else:
             verdict = "buy signal stands, but it's trading above fair value"
         print(f"{symbol}: fair value {args.value:,.2f} vs close {price:,.2f}")
-        print(f"  {verdict}")
+        print(f"  {verdict}  (1d gate needs {daily.margin_pct} headroom)")
         print(f"  ({config.signal.describe_rule()})")
         print(f"  saved to {config.storage.fair_values.name} ({count} recorded in total)")
 
@@ -356,7 +404,9 @@ def sync_fair_values(store: Store, config: Config, quiet: bool = False) -> int:
 
     applied = 0
     for symbol, entry in values.items():
-        series = store.rsi_series(symbol)
+        # Daily close is the reference price for the gate regardless of which
+        # horizon is being scored -- Morningstar's own comparison is daily.
+        series = store.rsi_series(symbol, DEFAULT_HORIZON)
         if not series:
             if not quiet:
                 print(f"  ! {symbol} has a fair value but no price history — skipped")
@@ -372,12 +422,18 @@ def sync_fair_values(store: Store, config: Config, quiet: bool = False) -> int:
                 source="manual",
             )
         )
-        known, confirms = valuation_passes(latest.close, entry.fair_value, config.signal)
-        fired = signal_fires(confirms, config.signal)
-        for signal in store.all_signals(symbol):
-            store.update_signal_valuation(
-                symbol, signal.up2_date, latest.close, entry.fair_value, known, confirms, fired
+        # Re-score per horizon: the same fair value clears 1h's 10% margin
+        # while failing 1w's 50%, so `confirms` genuinely differs by horizon.
+        for horizon in config.horizons:
+            known, confirms = valuation_passes(
+                latest.close, entry.fair_value, config.signal, horizon.margin
             )
+            fired = signal_fires(confirms, config.signal)
+            for signal in store.all_signals(symbol, horizon.key):
+                store.update_signal_valuation(
+                    symbol, signal.up2_date, latest.close, entry.fair_value,
+                    known, confirms, fired, horizon.key,
+                )
         applied += 1
     return applied
 
@@ -386,14 +442,16 @@ def _apply_valuation_to_pending_signals(
     store: Store, config: Config, symbol: str, price: float, fair_value: float
 ) -> int:
     """Re-score every recorded pattern for `symbol` against one fair value."""
-    known, confirms = valuation_passes(price, fair_value, config.signal)
-    fired = signal_fires(confirms, config.signal)
     updated = 0
-    for signal in store.all_signals(symbol):
-        store.update_signal_valuation(
-            symbol, signal.up2_date, price, fair_value, known, confirms, fired
-        )
-        updated += 1
+    for horizon in config.horizons:
+        known, confirms = valuation_passes(price, fair_value, config.signal, horizon.margin)
+        fired = signal_fires(confirms, config.signal)
+        for signal in store.all_signals(symbol, horizon.key):
+            store.update_signal_valuation(
+                symbol, signal.up2_date, price, fair_value,
+                known, confirms, fired, horizon.key,
+            )
+            updated += 1
     return updated
 
 
@@ -412,15 +470,19 @@ def _signalled_symbols(store: Store, config: Config) -> list[str]:
     window = config.dashboard.chart_days
     out: list[str] = []
     for ticker in config.tickers:
-        series = store.rsi_series(ticker.symbol)
-        if not series:
-            continue
-        chart_start = series[-window:][0].date
-        if any(
-            s.fired and s.up2_date >= chart_start
-            for s in store.all_signals(ticker.symbol)
-        ):
-            out.append(ticker.symbol)
+        # A signal on any horizon is reason enough to check the fair value --
+        # the same Morningstar number feeds all four gates.
+        for horizon in config.horizons:
+            series = store.rsi_series(ticker.symbol, horizon.key)
+            if not series:
+                continue
+            chart_start = series[-window:][0].date
+            if any(
+                s.fired and s.up2_date >= chart_start
+                for s in store.all_signals(ticker.symbol, horizon.key)
+            ):
+                out.append(ticker.symbol)
+                break
     return out
 
 
@@ -585,29 +647,33 @@ def _commit_and_push_fair_values(config: Config, recorded: int) -> int:
 
 
 def cmd_dashboard(config: Config, args) -> int:
-    from .dashboard import build_dashboard
+    from .dashboard import build_all_dashboards, build_dashboard
 
     output = Path(args.output) if args.output else config.dashboard.output
     with Store(config.storage.database) as store:
         sync_fair_values(store, config, quiet=True)
-        path = build_dashboard(store, config, output)
+        if args.horizon:
+            paths = [build_dashboard(store, config, output, horizon=args.horizon)]
+        else:
+            paths = build_all_dashboards(store, config, output)
 
-    print(f"Dashboard written to {path}")
+    for path in paths:
+        print(f"Dashboard written to {path}")
     if args.open:
         import webbrowser
 
-        webbrowser.open(path.as_uri())
+        webbrowser.open(paths[0].as_uri())
     return 0
 
 
 def cmd_signals(config: Config, args) -> int:
     with Store(config.storage.database) as store:
-        signals = store.all_signals(args.symbol)
+        signals = store.all_signals(args.symbol, getattr(args, 'horizon', None))
         if not signals:
             print("No RSI patterns recorded yet.")
             return 0
         print(
-            f"{'SYMBOL':<8}{'CROSS 1':<12}{'DIP':<12}{'CROSS 2':<12}"
+            f"{'SYMBOL':<8}{'TF':<5}{'CROSS 1':<12}{'DIP':<12}{'CROSS 2':<12}"
             f"{'PRICE':>10}{'FAIR VAL':>10}{'EPS GROWTH':>12}  RESULT"
         )
         for s in signals:
@@ -629,7 +695,7 @@ def cmd_signals(config: Config, args) -> int:
             else:
                 verdict = "pattern only (valuation gate failed)"
             print(
-                f"{s.symbol:<8}{s.up1_date:<12}{s.down_date:<12}{s.up2_date:<12}"
+                f"{s.symbol:<8}{s.horizon:<5}{s.up1_date:<12}{s.down_date:<12}{s.up2_date:<12}"
                 f"{price:>10}{fair:>10}{growth:>12}  {verdict}"
             )
     return 0
@@ -644,7 +710,7 @@ def cmd_report(config: Config, args) -> int:
             f"{'EPS GROWTH':>12}  GATE"
         )
         for symbol in store.symbols():
-            series = store.rsi_series(symbol)
+            series = store.rsi_series(symbol, DEFAULT_HORIZON)
             last = series[-1] if series else None
             val = valuations.get(symbol)
             rsi = f"{last.rsi:.2f}" if last else "-"
@@ -657,7 +723,10 @@ def cmd_report(config: Config, args) -> int:
                 else "-"
             )
             if val:
-                _, passed = valuation_passes(val.price, val.fair_value, config.signal)
+                _, passed = valuation_passes(
+                    val.price, val.fair_value, config.signal,
+                    config.horizon(DEFAULT_HORIZON).margin,
+                )
                 gate = "pass" if passed else "fail"
             else:
                 gate = "unknown"
@@ -707,7 +776,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_login.set_defaults(func=cmd_login)
 
     p_backfill = sub.add_parser("backfill", help="seed RSI history from daily closes")
-    p_backfill.add_argument("--range", default="1y", help="history range (e.g. 6mo, 1y, 2y)")
+    p_backfill.add_argument(
+        "--range", default=None,
+        help="override history range (e.g. 6mo, 2y); default is per-horizon",
+    )
     p_backfill.add_argument(
         "--force", action="store_true",
         help="refetch even tickers that already have a full history",
@@ -761,6 +833,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_check = sub.add_parser("check-auth", help="verify the saved Morningstar session")
     p_check.set_defaults(func=cmd_check_auth)
+
+    for sub_parser in (p_run, p_backfill, p_dash, p_signals):
+        sub_parser.add_argument(
+            "--horizon", choices=[h.key for h in DEFAULT_HORIZONS],
+            help="limit to one RSI timeframe (default: all four)",
+        )
 
     return parser
 

@@ -21,21 +21,30 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA = """
+# Split per table rather than one blob: the multi-horizon migration has to
+# re-create a single table in place (SQLite cannot ALTER a primary key), and
+# needs that table's DDL on its own to do it.
+_RSI_HISTORY_DDL = """
 CREATE TABLE IF NOT EXISTS rsi_history (
-    symbol TEXT NOT NULL,
-    date   TEXT NOT NULL,   -- ISO yyyy-mm-dd
-    close  REAL NOT NULL,
-    rsi    REAL NOT NULL,
-    source TEXT NOT NULL,   -- 'backfill:yahoo' | 'live:tradingview'
+    symbol  TEXT NOT NULL,
+    horizon TEXT NOT NULL DEFAULT '1d',  -- '1h' | '4h' | '1d' | '1w'
+    -- 'yyyy-mm-dd' for the daily and weekly bars, full ISO 'yyyy-mm-ddThh:mm'
+    -- for intraday. Sorts correctly as a string either way, which is what the
+    -- ORDER BY in rsi_series relies on.
+    date    TEXT NOT NULL,
+    close   REAL NOT NULL,
+    rsi     REAL NOT NULL,
+    source  TEXT NOT NULL,   -- 'backfill:yahoo' | 'live:tradingview'
     -- YoY EPS growth (%), from TradingView's own scanner field -- only ever
     -- populated on a live row; backfill has no historical source for it, so
     -- these are NULL on backfilled dates.
     earnings_growth        REAL,
     earnings_growth_period TEXT,   -- 'ttm' | 'fy' | NULL
-    PRIMARY KEY (symbol, date)
+    PRIMARY KEY (symbol, horizon, date)
 );
+"""
 
+_VALUATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS valuations (
     symbol         TEXT NOT NULL,
     date           TEXT NOT NULL,  -- date we captured this, ISO yyyy-mm-dd
@@ -47,7 +56,9 @@ CREATE TABLE IF NOT EXISTS valuations (
     source         TEXT NOT NULL DEFAULT 'morningstar',  -- 'morningstar' | 'manual'
     PRIMARY KEY (symbol, date)
 );
+"""
 
+_SIGNALS_DDL = """
 CREATE TABLE IF NOT EXISTS signals (
     symbol             TEXT NOT NULL,
     up1_date           TEXT NOT NULL,  -- first upward cross of the threshold
@@ -65,9 +76,13 @@ CREATE TABLE IF NOT EXISTS signals (
     earnings_growth_pass  INTEGER NOT NULL DEFAULT 0,  -- 1 if growth was positive
     fired              INTEGER NOT NULL,  -- 1 if this counts as an actual buy signal
     recorded_at        TEXT NOT NULL,     -- when this row was written
-    PRIMARY KEY (symbol, up2_date)
+    horizon            TEXT NOT NULL DEFAULT '1d',
+    PRIMARY KEY (symbol, horizon, up2_date)
 );
 """
+
+SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL
+
 
 
 @dataclass(frozen=True)
@@ -79,6 +94,9 @@ class RsiPoint:
     source: str
     earnings_growth: float | None = None
     earnings_growth_period: str | None = None
+    # Appended last with a default so every existing positional RsiPoint(...)
+    # call keeps working; '1d' is what all pre-multi-horizon data was.
+    horizon: str = "1d"
 
 
 @dataclass(frozen=True)
@@ -111,6 +129,7 @@ class Signal:
     earnings_growth: float | None = None
     earnings_growth_known: bool = False
     earnings_growth_pass: bool = False
+    horizon: str = "1d"
 
 
 class Store:
@@ -158,6 +177,28 @@ class Store:
                     "INTEGER NOT NULL DEFAULT 0"
                 )
 
+            # Multi-horizon support widened both primary keys, and SQLite can't
+            # ALTER a primary key -- the table has to be rebuilt. Everything
+            # collected before this existed was the daily bar, so it migrates
+            # to horizon='1d' and the screener carries on with its history
+            # intact rather than starting over.
+            self._add_horizon_column(cur, "rsi_history", _RSI_HISTORY_DDL)
+            self._add_horizon_column(cur, "signals", _SIGNALS_DDL)
+
+    @staticmethod
+    def _add_horizon_column(cur, table: str, create_ddl: str) -> None:
+        columns = [r["name"] for r in cur.execute(f"PRAGMA table_info({table})")]
+        if not columns or "horizon" in columns:
+            return
+        carried = ", ".join(columns)
+        cur.execute(f"ALTER TABLE {table} RENAME TO {table}_pre_horizon")
+        cur.executescript(create_ddl)
+        cur.execute(
+            f"INSERT INTO {table} ({carried}, horizon) "
+            f"SELECT {carried}, '1d' FROM {table}_pre_horizon"
+        )
+        cur.execute(f"DROP TABLE {table}_pre_horizon")
+
     def close(self) -> None:
         self._conn.close()
 
@@ -173,37 +214,38 @@ class Store:
         """Insert, but never let a backfilled estimate clobber a live reading."""
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                "SELECT source FROM rsi_history WHERE symbol=? AND date=?",
-                (point.symbol, point.date),
+                "SELECT source FROM rsi_history WHERE symbol=? AND horizon=? AND date=?",
+                (point.symbol, point.horizon, point.date),
             )
             existing = cur.fetchone()
             if existing and existing["source"] == "live:tradingview" and point.source != "live:tradingview":
                 return
             cur.execute(
                 """INSERT INTO rsi_history
-                     (symbol, date, close, rsi, source, earnings_growth, earnings_growth_period)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(symbol, date) DO UPDATE SET
+                     (symbol, horizon, date, close, rsi, source,
+                      earnings_growth, earnings_growth_period)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol, horizon, date) DO UPDATE SET
                      close=excluded.close, rsi=excluded.rsi, source=excluded.source,
                      earnings_growth=excluded.earnings_growth,
                      earnings_growth_period=excluded.earnings_growth_period""",
                 (
-                    point.symbol, point.date, point.close, point.rsi, point.source,
-                    point.earnings_growth, point.earnings_growth_period,
+                    point.symbol, point.horizon, point.date, point.close, point.rsi,
+                    point.source, point.earnings_growth, point.earnings_growth_period,
                 ),
             )
         self._conn.commit()
 
-    def rsi_series(self, symbol: str) -> list[RsiPoint]:
+    def rsi_series(self, symbol: str, horizon: str = "1d") -> list[RsiPoint]:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                "SELECT * FROM rsi_history WHERE symbol=? ORDER BY date ASC",
-                (symbol,),
+                "SELECT * FROM rsi_history WHERE symbol=? AND horizon=? ORDER BY date ASC",
+                (symbol, horizon),
             )
             return [
                 RsiPoint(
                     row["symbol"], row["date"], row["close"], row["rsi"], row["source"],
-                    row["earnings_growth"], row["earnings_growth_period"],
+                    row["earnings_growth"], row["earnings_growth_period"], row["horizon"],
                 )
                 for row in cur.fetchall()
             ]
@@ -272,10 +314,11 @@ class Store:
 
     # -- signals -----------------------------------------------------------
 
-    def signal_exists(self, symbol: str, up2_date: str) -> bool:
+    def signal_exists(self, symbol: str, up2_date: str, horizon: str = "1d") -> bool:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                "SELECT 1 FROM signals WHERE symbol=? AND up2_date=?", (symbol, up2_date)
+                "SELECT 1 FROM signals WHERE symbol=? AND horizon=? AND up2_date=?",
+                (symbol, horizon, up2_date),
             )
             return cur.fetchone() is not None
 
@@ -285,8 +328,9 @@ class Store:
                 """INSERT OR IGNORE INTO signals
                      (symbol, up1_date, down_date, up2_date, price, fair_value,
                       valuation_known, valuation_pass, earnings_growth,
-                      earnings_growth_known, earnings_growth_pass, fired, recorded_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      earnings_growth_known, earnings_growth_pass, fired,
+                      recorded_at, horizon)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sig.symbol,
                     sig.up1_date,
@@ -301,6 +345,7 @@ class Store:
                     int(sig.earnings_growth_pass),
                     int(sig.fired),
                     sig.recorded_at,
+                    sig.horizon,
                 ),
             )
         self._conn.commit()
@@ -314,19 +359,26 @@ class Store:
         known: bool,
         confirms: bool,
         fired: bool,
+        horizon: str = "1d",
     ) -> None:
         """Re-score an existing pattern once a fair value becomes available.
 
         A pattern recorded before anyone checked the valuation can legitimately
         become a fired signal later, so this updates in place rather than
         writing a second row for the same pattern.
+
+        Scoped to one horizon because the gate is horizon-dependent: the same
+        Morningstar fair value clears the 10% margin a 1h signal needs while
+        failing the 50% a 1w signal needs, so `confirms` genuinely differs per
+        horizon for identical inputs.
         """
         with closing(self._conn.cursor()) as cur:
             cur.execute(
                 """UPDATE signals
                       SET price=?, fair_value=?, valuation_known=?, valuation_pass=?, fired=?
-                    WHERE symbol=? AND up2_date=?""",
-                (price, fair_value, int(known), int(confirms), int(fired), symbol, up2_date),
+                    WHERE symbol=? AND horizon=? AND up2_date=?""",
+                (price, fair_value, int(known), int(confirms), int(fired),
+                 symbol, horizon, up2_date),
             )
         self._conn.commit()
 
@@ -372,12 +424,15 @@ class Store:
             )
             return [r["symbol"] for r in cur.fetchall()]
 
-    def all_signals(self, symbol: str | None = None) -> list[Signal]:
+    def all_signals(self, symbol: str | None = None, horizon: str | None = None) -> list[Signal]:
+        clauses, params = [], []
+        if symbol:
+            clauses.append("symbol=?"); params.append(symbol)
+        if horizon:
+            clauses.append("horizon=?"); params.append(horizon)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with closing(self._conn.cursor()) as cur:
-            if symbol:
-                cur.execute("SELECT * FROM signals WHERE symbol=? ORDER BY up2_date ASC", (symbol,))
-            else:
-                cur.execute("SELECT * FROM signals ORDER BY up2_date ASC")
+            cur.execute(f"SELECT * FROM signals {where} ORDER BY up2_date ASC", params)
             rows = cur.fetchall()
         return [
             Signal(
@@ -385,20 +440,20 @@ class Store:
                 r["price"], r["fair_value"], bool(r["valuation_known"]),
                 bool(r["valuation_pass"]), bool(r["fired"]), r["recorded_at"],
                 r["earnings_growth"], bool(r["earnings_growth_known"]),
-                bool(r["earnings_growth_pass"]),
+                bool(r["earnings_growth_pass"]), r["horizon"],
             )
             for r in rows
         ]
 
 
-def export_csv_snapshot(store: Store, csv_dir: Path) -> Path:
+def export_csv_snapshot(store: Store, csv_dir: Path, horizon: str = "1d") -> Path:
     """Write a friend-readable snapshot: latest valuation + latest RSI per symbol."""
     csv_dir.mkdir(parents=True, exist_ok=True)
     out_path = csv_dir / "latest.csv"
     valuations = {v.symbol: v for v in store.latest_valuations()}
     rows = []
     for symbol in store.symbols():
-        series = store.rsi_series(symbol)
+        series = store.rsi_series(symbol, horizon)
         last = series[-1] if series else None
         val = valuations.get(symbol)
         rows.append(

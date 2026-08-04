@@ -14,9 +14,12 @@ import requests
 from .storage import Signal
 
 
-def format_signal(sig: Signal, rule_description: str) -> str:
+def format_signal(sig: Signal, rule_description: str, horizon=None) -> str:
+    head = f"BUY SIGNAL — {sig.symbol}"
+    if horizon is not None:
+        head += f" [{horizon.label} chart]"
     lines = [
-        f"BUY SIGNAL — {sig.symbol}",
+        head,
         f"  RSI crossed up on {sig.up1_date}, dipped {sig.down_date}, crossed up again {sig.up2_date}",
     ]
     if sig.price is not None and sig.fair_value is not None:
@@ -24,6 +27,11 @@ def format_signal(sig: Signal, rule_description: str) -> str:
     if sig.earnings_growth is not None:
         lines.append(f"  YoY EPS growth: {sig.earnings_growth:+.1f}%")
     lines.append(f"  Valuation gate: {rule_description}")
+    if horizon is not None:
+        lines.append(
+            f"  Needs {horizon.margin_pct} headroom to fair value on this timeframe; "
+            f"suggested leverage {horizon.leverage}x"
+        )
     return "\n".join(lines)
 
 

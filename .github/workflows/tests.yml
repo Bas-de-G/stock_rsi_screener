@@ -46,21 +46,34 @@ jobs:
       - name: Check config.yaml is loadable
         run: |
           python -c "
-          from screener.config import load_config
+          from screener.config import load_config, MARKETS
           c = load_config()
           print(f'{len(c.tickers)} tickers, rule={c.signal.valuation_rule}')
+          syms = [t.symbol for t in c.tickers]
+          dupes = {s for s in syms if syms.count(s) > 1}
+          assert not dupes, f'duplicate symbols: {dupes}'
+          untagged = [t.symbol for t in c.tickers if not t.markets]
+          assert not untagged, f'tickers with no market tag: {untagged}'
+          for m in MARKETS:
+              print(f'  {m}: {len(c.tickers_in(m))}')
+          for h in c.horizons:
+              print(f'  {h.key}: window {h.window_days}d, margin {h.margin_pct}, {h.leverage}x')
           "
 
-      - name: Check the dashboard builds from an empty database
+      - name: Check every dashboard page builds from an empty database
         run: |
           python -c "
           from pathlib import Path
           from screener.config import load_config
           from screener.storage import Store
-          from screener.dashboard import build_dashboard
+          from screener.dashboard import build_all_dashboards
           c = load_config()
           with Store(Path('/tmp/ci.db')) as s:
-              out = build_dashboard(s, c, Path('/tmp/ci.html'))
-          assert out.stat().st_size > 0, 'dashboard came out empty'
-          print('dashboard builds:', out.stat().st_size, 'bytes')
+              outs = build_all_dashboards(s, c, Path('/tmp/ci/index.html'))
+          assert len(outs) == len(c.horizons), 'one page per horizon expected'
+          assert any(o.name == 'index.html' for o in outs), 'default horizon must be index.html'
+          for o in outs:
+              assert o.stat().st_size > 0, f'{o.name} came out empty'
+              assert '<script' not in o.read_text().lower(), f'{o.name} grew a script tag'
+              print(f'  {o.name}: {o.stat().st_size} bytes')
           "

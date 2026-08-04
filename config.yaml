@@ -7,52 +7,52 @@
 # `morningstar` is the URL slug: xnas = Nasdaq, xnys = NYSE.
 tickers:
   # --- Mega-cap tech -------------------------------------------------
-  - {symbol: AAPL,  tradingview: "NASDAQ:AAPL",  morningstar: xnas/aapl}
-  - {symbol: MSFT,  tradingview: "NASDAQ:MSFT",  morningstar: xnas/msft}
-  - {symbol: GOOGL, tradingview: "NASDAQ:GOOGL", morningstar: xnas/googl}
-  - {symbol: AMZN,  tradingview: "NASDAQ:AMZN",  morningstar: xnas/amzn}
-  - {symbol: NVDA,  tradingview: "NASDAQ:NVDA",  morningstar: xnas/nvda}
-  - {symbol: META,  tradingview: "NASDAQ:META",  morningstar: xnas/meta}
-  - {symbol: TSLA,  tradingview: "NASDAQ:TSLA",  morningstar: xnas/tsla}
-  - {symbol: NFLX,  tradingview: "NASDAQ:NFLX",  morningstar: xnas/nflx}
-  - {symbol: ADBE,  tradingview: "NASDAQ:ADBE",  morningstar: xnas/adbe}
-  - {symbol: CRM,   tradingview: "NYSE:CRM",     morningstar: xnys/crm}
-  - {symbol: ORCL,  tradingview: "NYSE:ORCL",    morningstar: xnys/orcl}
-  - {symbol: IBM,   tradingview: "NYSE:IBM",     morningstar: xnys/ibm}
+  - {symbol: AAPL,  tradingview: "NASDAQ:AAPL",  morningstar: xnas/aapl, markets: [sp500, nasdaq]}
+  - {symbol: MSFT,  tradingview: "NASDAQ:MSFT",  morningstar: xnas/msft, markets: [sp500, nasdaq]}
+  - {symbol: GOOGL, tradingview: "NASDAQ:GOOGL", morningstar: xnas/googl, markets: [sp500, nasdaq]}
+  - {symbol: AMZN,  tradingview: "NASDAQ:AMZN",  morningstar: xnas/amzn, markets: [sp500, nasdaq]}
+  - {symbol: NVDA,  tradingview: "NASDAQ:NVDA",  morningstar: xnas/nvda, markets: [sp500, nasdaq]}
+  - {symbol: META,  tradingview: "NASDAQ:META",  morningstar: xnas/meta, markets: [sp500, nasdaq]}
+  - {symbol: TSLA,  tradingview: "NASDAQ:TSLA",  morningstar: xnas/tsla, markets: [sp500, nasdaq]}
+  - {symbol: NFLX,  tradingview: "NASDAQ:NFLX",  morningstar: xnas/nflx, markets: [sp500, nasdaq]}
+  - {symbol: ADBE,  tradingview: "NASDAQ:ADBE",  morningstar: xnas/adbe, markets: [sp500, nasdaq]}
+  - {symbol: CRM,   tradingview: "NYSE:CRM",     morningstar: xnys/crm, markets: [sp500]}
+  - {symbol: ORCL,  tradingview: "NYSE:ORCL",    morningstar: xnys/orcl, markets: [sp500]}
+  - {symbol: IBM,   tradingview: "NYSE:IBM",     morningstar: xnys/ibm, markets: [sp500]}
 
   # --- Semiconductors ------------------------------------------------
-  - {symbol: AVGO,  tradingview: "NASDAQ:AVGO",  morningstar: xnas/avgo}
-  - {symbol: AMD,   tradingview: "NASDAQ:AMD",   morningstar: xnas/amd}
-  - {symbol: INTC,  tradingview: "NASDAQ:INTC",  morningstar: xnas/intc}
-  - {symbol: QCOM,  tradingview: "NASDAQ:QCOM",  morningstar: xnas/qcom}
-  - {symbol: TXN,   tradingview: "NASDAQ:TXN",   morningstar: xnas/txn}
-  - {symbol: AMAT,  tradingview: "NASDAQ:AMAT",  morningstar: xnas/amat}
-  - {symbol: CSCO,  tradingview: "NASDAQ:CSCO",  morningstar: xnas/csco}
+  - {symbol: AVGO,  tradingview: "NASDAQ:AVGO",  morningstar: xnas/avgo, markets: [sp500, nasdaq]}
+  - {symbol: AMD,   tradingview: "NASDAQ:AMD",   morningstar: xnas/amd, markets: [sp500, nasdaq]}
+  - {symbol: INTC,  tradingview: "NASDAQ:INTC",  morningstar: xnas/intc, markets: [sp500, nasdaq]}
+  - {symbol: QCOM,  tradingview: "NASDAQ:QCOM",  morningstar: xnas/qcom, markets: [sp500, nasdaq]}
+  - {symbol: TXN,   tradingview: "NASDAQ:TXN",   morningstar: xnas/txn, markets: [sp500, nasdaq]}
+  - {symbol: AMAT,  tradingview: "NASDAQ:AMAT",  morningstar: xnas/amat, markets: [sp500, nasdaq]}
+  - {symbol: CSCO,  tradingview: "NASDAQ:CSCO",  morningstar: xnas/csco, markets: [sp500, nasdaq]}
   # Flash storage, spun back off from Western Digital as its own listing in 2025.
-  - {symbol: SNDK,  tradingview: "NASDAQ:SNDK",  morningstar: xnas/sndk}
+  - {symbol: SNDK,  tradingview: "NASDAQ:SNDK",  morningstar: xnas/sndk, markets: [nasdaq]}
 
   # --- Financials ----------------------------------------------------
-  - {symbol: JPM,   tradingview: "NYSE:JPM",     morningstar: xnys/jpm}
-  - {symbol: V,     tradingview: "NYSE:V",       morningstar: xnys/v}
-  - {symbol: MA,    tradingview: "NYSE:MA",      morningstar: xnys/ma}
+  - {symbol: JPM,   tradingview: "NYSE:JPM",     morningstar: xnys/jpm, markets: [sp500]}
+  - {symbol: V,     tradingview: "NYSE:V",       morningstar: xnys/v, markets: [sp500]}
+  - {symbol: MA,    tradingview: "NYSE:MA",      morningstar: xnys/ma, markets: [sp500]}
 
   # --- Healthcare ----------------------------------------------------
-  - {symbol: JNJ,   tradingview: "NYSE:JNJ",     morningstar: xnys/jnj}
-  - {symbol: UNH,   tradingview: "NYSE:UNH",     morningstar: xnys/unh}
-  - {symbol: LLY,   tradingview: "NYSE:LLY",     morningstar: xnys/lly}
+  - {symbol: JNJ,   tradingview: "NYSE:JNJ",     morningstar: xnys/jnj, markets: [sp500]}
+  - {symbol: UNH,   tradingview: "NYSE:UNH",     morningstar: xnys/unh, markets: [sp500]}
+  - {symbol: LLY,   tradingview: "NYSE:LLY",     morningstar: xnys/lly, markets: [sp500]}
 
   # --- Consumer & industrial ------------------------------------------
-  - {symbol: WMT,   tradingview: "NASDAQ:WMT",   morningstar: xnas/wmt}
-  - {symbol: COST,  tradingview: "NASDAQ:COST",  morningstar: xnas/cost}
-  - {symbol: PEP,   tradingview: "NASDAQ:PEP",   morningstar: xnas/pep}
-  - {symbol: PG,    tradingview: "NYSE:PG",      morningstar: xnys/pg}
-  - {symbol: KO,    tradingview: "NYSE:KO",      morningstar: xnys/ko}
-  - {symbol: HD,    tradingview: "NYSE:HD",      morningstar: xnys/hd}
-  - {symbol: DIS,   tradingview: "NYSE:DIS",     morningstar: xnys/dis}
+  - {symbol: WMT,   tradingview: "NASDAQ:WMT",   morningstar: xnas/wmt, markets: [sp500, nasdaq]}
+  - {symbol: COST,  tradingview: "NASDAQ:COST",  morningstar: xnas/cost, markets: [sp500, nasdaq]}
+  - {symbol: PEP,   tradingview: "NASDAQ:PEP",   morningstar: xnas/pep, markets: [sp500, nasdaq]}
+  - {symbol: PG,    tradingview: "NYSE:PG",      morningstar: xnys/pg, markets: [sp500]}
+  - {symbol: KO,    tradingview: "NYSE:KO",      morningstar: xnys/ko, markets: [sp500]}
+  - {symbol: HD,    tradingview: "NYSE:HD",      morningstar: xnys/hd, markets: [sp500]}
+  - {symbol: DIS,   tradingview: "NYSE:DIS",     morningstar: xnys/dis, markets: [sp500]}
 
   # --- Energy ---------------------------------------------------------
-  - {symbol: XOM,   tradingview: "NYSE:XOM",     morningstar: xnys/xom}
-  - {symbol: CVX,   tradingview: "NYSE:CVX",     morningstar: xnys/cvx}
+  - {symbol: XOM,   tradingview: "NYSE:XOM",     morningstar: xnys/xom, markets: [sp500]}
+  - {symbol: CVX,   tradingview: "NYSE:CVX",     morningstar: xnys/cvx, markets: [sp500]}
 
   # --- UK listing ------------------------------------------------------
   # Rolls-Royce Holdings (the aero-engine maker; Rolls-Royce Motor Cars is
@@ -62,7 +62,7 @@ tickers:
   #   Yahoo        RR.L
   #   Morningstar  xlon/rr.
   # Quoted in pence, not pounds -- 1413.6 means GBX 1413.6 (about GBP 14.14).
-  - {symbol: RR, tradingview: "LSE:RR.", morningstar: xlon/rr., yahoo: RR.L, currency: GBX}
+  - {symbol: RR, tradingview: "LSE:RR.", morningstar: xlon/rr., yahoo: RR.L, currency: GBX, markets: [europe]}
 
   # --- Dutch listings (Euronext Amsterdam) ------------------------------
   # AEX heavyweights. Three identifier quirks apply to every one of these:
@@ -77,38 +77,77 @@ tickers:
   # these are always settled daily bars -- never a mid-session RSI.
 
   # Semiconductors -- the cluster the AEX is genuinely world-class at.
-  - {symbol: ASML,  tradingview: "EURONEXT:ASML",  morningstar: xams/asml,  yahoo: ASML.AS,  currency: EUR}
-  - {symbol: ASM,   tradingview: "EURONEXT:ASM",   morningstar: xams/asm,   yahoo: ASM.AS,   currency: EUR}
-  - {symbol: BESI,  tradingview: "EURONEXT:BESI",  morningstar: xams/besi,  yahoo: BESI.AS,  currency: EUR}
+  - {symbol: ASML,  tradingview: "EURONEXT:ASML",  morningstar: xams/asml,  yahoo: ASML.AS,  currency: EUR, markets: [europe]}
+  - {symbol: ASM,   tradingview: "EURONEXT:ASM",   morningstar: xams/asm,   yahoo: ASM.AS,   currency: EUR, markets: [europe]}
+  - {symbol: BESI,  tradingview: "EURONEXT:BESI",  morningstar: xams/besi,  yahoo: BESI.AS,  currency: EUR, markets: [europe]}
 
   # Tech & payments
-  - {symbol: ADYEN, tradingview: "EURONEXT:ADYEN", morningstar: xams/adyen, yahoo: ADYEN.AS, currency: EUR}
-  - {symbol: PRX,   tradingview: "EURONEXT:PRX",   morningstar: xams/prx,   yahoo: PRX.AS,   currency: EUR}
+  - {symbol: ADYEN, tradingview: "EURONEXT:ADYEN", morningstar: xams/adyen, yahoo: ADYEN.AS, currency: EUR, markets: [europe]}
+  - {symbol: PRX,   tradingview: "EURONEXT:PRX",   morningstar: xams/prx,   yahoo: PRX.AS,   currency: EUR, markets: [europe]}
 
   # Consumer & media
   # HEIA is the operating company. Heineken Holding (HEIO) tracks the same
   # asset at a persistent discount, so it's left out as duplicate exposure.
-  - {symbol: HEIA,  tradingview: "EURONEXT:HEIA",  morningstar: xams/heia,  yahoo: HEIA.AS,  currency: EUR}
-  - {symbol: AD,    tradingview: "EURONEXT:AD",    morningstar: xams/ad,    yahoo: AD.AS,    currency: EUR}
-  - {symbol: UMG,   tradingview: "EURONEXT:UMG",   morningstar: xams/umg,   yahoo: UMG.AS,   currency: EUR}
+  - {symbol: HEIA,  tradingview: "EURONEXT:HEIA",  morningstar: xams/heia,  yahoo: HEIA.AS,  currency: EUR, markets: [europe]}
+  - {symbol: AD,    tradingview: "EURONEXT:AD",    morningstar: xams/ad,    yahoo: AD.AS,    currency: EUR, markets: [europe]}
+  - {symbol: UMG,   tradingview: "EURONEXT:UMG",   morningstar: xams/umg,   yahoo: UMG.AS,   currency: EUR, markets: [europe]}
 
   # Financials
-  - {symbol: INGA,  tradingview: "EURONEXT:INGA",  morningstar: xams/inga,  yahoo: INGA.AS,  currency: EUR}
-  - {symbol: ABN,   tradingview: "EURONEXT:ABN",   morningstar: xams/abn,   yahoo: ABN.AS,   currency: EUR}
-  - {symbol: NN,    tradingview: "EURONEXT:NN",    morningstar: xams/nn,    yahoo: NN.AS,    currency: EUR}
+  - {symbol: INGA,  tradingview: "EURONEXT:INGA",  morningstar: xams/inga,  yahoo: INGA.AS,  currency: EUR, markets: [europe]}
+  - {symbol: ABN,   tradingview: "EURONEXT:ABN",   morningstar: xams/abn,   yahoo: ABN.AS,   currency: EUR, markets: [europe]}
+  - {symbol: NN,    tradingview: "EURONEXT:NN",    morningstar: xams/nn,    yahoo: NN.AS,    currency: EUR, markets: [europe]}
   # Aegon re-domiciled to Bermuda in 2023 but still trades in Amsterdam in
   # euros and remains an AEX constituent, so nothing here changes.
-  - {symbol: AGN,   tradingview: "EURONEXT:AGN",   morningstar: xams/agn,   yahoo: AGN.AS,   currency: EUR}
+  - {symbol: AGN,   tradingview: "EURONEXT:AGN",   morningstar: xams/agn,   yahoo: AGN.AS,   currency: EUR, markets: [europe]}
 
   # Health, chemicals & industrials
-  - {symbol: PHIA,  tradingview: "EURONEXT:PHIA",  morningstar: xams/phia,  yahoo: PHIA.AS,  currency: EUR}
-  - {symbol: AKZA,  tradingview: "EURONEXT:AKZA",  morningstar: xams/akza,  yahoo: AKZA.AS,  currency: EUR}
-  - {symbol: DSFIR, tradingview: "EURONEXT:DSFIR", morningstar: xams/dsfir, yahoo: DSFIR.AS, currency: EUR}
+  - {symbol: PHIA,  tradingview: "EURONEXT:PHIA",  morningstar: xams/phia,  yahoo: PHIA.AS,  currency: EUR, markets: [europe]}
+  - {symbol: AKZA,  tradingview: "EURONEXT:AKZA",  morningstar: xams/akza,  yahoo: AKZA.AS,  currency: EUR, markets: [europe]}
+  - {symbol: DSFIR, tradingview: "EURONEXT:DSFIR", morningstar: xams/dsfir, yahoo: DSFIR.AS, currency: EUR, markets: [europe]}
 
   # Services & telecom
-  - {symbol: WKL,   tradingview: "EURONEXT:WKL",   morningstar: xams/wkl,   yahoo: WKL.AS,   currency: EUR}
-  - {symbol: KPN,   tradingview: "EURONEXT:KPN",   morningstar: xams/kpn,   yahoo: KPN.AS,   currency: EUR}
-  - {symbol: RAND,  tradingview: "EURONEXT:RAND",  morningstar: xams/rand,  yahoo: RAND.AS,  currency: EUR}
+  - {symbol: WKL,   tradingview: "EURONEXT:WKL",   morningstar: xams/wkl,   yahoo: WKL.AS,   currency: EUR, markets: [europe]}
+  - {symbol: KPN,   tradingview: "EURONEXT:KPN",   morningstar: xams/kpn,   yahoo: KPN.AS,   currency: EUR, markets: [europe]}
+  - {symbol: RAND,  tradingview: "EURONEXT:RAND",  morningstar: xams/rand,  yahoo: RAND.AS,  currency: EUR, markets: [europe]}
+
+  # --- Under $10 -------------------------------------------------------
+  # Curated rather than filtered on price: a dynamic cutoff would silently
+  # change the group's membership day to day. If one of these runs above $10,
+  # drop it from here by hand.
+  #
+  # Morningstar's fair-value coverage thins out at this end of the market, so
+  # expect several of these to grade on RSI and earnings growth alone.
+  - {symbol: SNAP,  tradingview: "NYSE:SNAP",   morningstar: xnys/snap, markets: [penny]}
+  - {symbol: NIO,   tradingview: "NYSE:NIO",    morningstar: xnys/nio,  markets: [penny]}
+  - {symbol: RIG,   tradingview: "NYSE:RIG",    morningstar: xnys/rig,  markets: [penny]}
+  - {symbol: CHPT,  tradingview: "NYSE:CHPT",   morningstar: xnys/chpt, markets: [penny]}
+  - {symbol: JOBY,  tradingview: "NYSE:JOBY",   morningstar: xnys/joby, markets: [penny]}
+  - {symbol: BB,    tradingview: "NYSE:BB",     morningstar: xnys/bb,   markets: [penny]}
+  - {symbol: ACHR,  tradingview: "NYSE:ACHR",   morningstar: xnys/achr, markets: [penny]}
+  - {symbol: PLUG,  tradingview: "NASDAQ:PLUG", morningstar: xnas/plug, markets: [penny, nasdaq]}
+  - {symbol: GRAB,  tradingview: "NASDAQ:GRAB", morningstar: xnas/grab, markets: [penny, nasdaq]}
+  - {symbol: LCID,  tradingview: "NASDAQ:LCID", morningstar: xnas/lcid, markets: [penny, nasdaq]}
+  - {symbol: SOUN,  tradingview: "NASDAQ:SOUN", morningstar: xnas/soun, markets: [penny, nasdaq]}
+
+# Each RSI timeframe, and the three things that scale with holding period.
+# The interval codes themselves aren't configurable -- they're what TradingView
+# and Yahoo actually accept -- but these three are:
+#
+#   window_days  how far apart the two upward crosses of 30 may be. Has to be
+#                per-horizon: a flat 14 days is only two weekly bars, so a 1w
+#                pattern could never form at all.
+#   margin       how far below fair value the price must sit before the
+#                valuation gate confirms. Longer hold, more headroom demanded.
+#   leverage     the multiplier the dashboard suggests for this timeframe.
+#                A fixed number attached to the horizon, not a calculation --
+#                and 10x on an hourly signal is a genuinely aggressive setting.
+#
+# Delete any key to fall back to the built-in default shown here.
+horizons:
+  "1h": {window_days: 2,  margin: 0.10, leverage: 10}
+  "4h": {window_days: 5,  margin: 0.20, leverage: 5}
+  "1d": {window_days: 14, margin: 0.30, leverage: 2}
+  "1w": {window_days: 90, margin: 0.50, leverage: 1}
 
 rsi:
   # Wilder RSI, the same definition TradingView's "RSI (14)" uses.
