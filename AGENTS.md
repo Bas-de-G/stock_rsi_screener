@@ -46,6 +46,13 @@ cleared from the database on the next run.
 only on `main` (see the branch guard in `.github/workflows/daily.yml`). A human
 committing it will collide with the bot.
 
+**Running the screener locally modifies a tracked file, which blocks `git
+pull`.** `data/screener.db` (and the CSVs) are force-added by CI, so they stay
+tracked even though `.gitignore` covers them. Any local `backfill`/`run`/
+`dashboard` invocation dirties that file; the next plain `pull` refuses rather
+than overwrite it. Fix: discard it, don't merge it — it's fully regenerable —
+`git checkout -- data/screener.db data/latest.csv data/signals.csv && git pull`.
+
 **The signal predicates are deliberately separate** (`screener/signals.py`):
 
 - `valuation_passes(price, fair_value, config)` → `(known, confirms)`. `known` is
