@@ -349,6 +349,11 @@ look at the diff first:
 git diff fair_values.yaml
 ```
 
+**It skips anything checked in the last 14 days.** Morningstar revises a fair
+value on earnings or a thesis change, so re-reading the same page days later
+almost always returns the number already on file. `--force` re-reads anyway,
+`--max-age N` changes the window.
+
 Add `--push` to commit and push automatically when you trust it. Either way,
 once the file lands on `main` the next scheduled run rebuilds the dashboard —
 which is how the values reach anyone else looking at the page.
@@ -580,7 +585,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 273 tests
+python -m pytest tests/ -q      # 294 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

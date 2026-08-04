@@ -81,9 +81,26 @@ jobs:
       # Collected data belongs on the default branch only. Guarded rather
       # than assumed, so a manual `workflow_dispatch` from a feature branch
       # can't push generated files into an open pull request either.
+      # data/screener.db is a binary blob, and SQLite deltas badly in git --
+      # measured at ~57% of raw size per revision, because writes shuffle
+      # pages throughout the file. At 9 scheduled runs a weekday that is
+      # ~0.8 GB a month, or 9 GB a year; GitHub warns at 1 GB.
+      #
+      # So only the last run of the day snapshots it. The intermediate runs
+      # still publish a fully fresh dashboard -- they just don't write the
+      # database back. Nothing is lost by that: `backfill` reconstructs every
+      # horizon's bars from Yahoo at the start of each run, and the patterns
+      # are re-derived from those deterministically.
+      #
+      # Manual dispatches and config pushes always commit, so you can force a
+      # snapshot whenever you want one.
       - name: Commit collected data
         if: github.ref_name == github.event.repository.default_branch
         run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%H)" != "21" ]; then
+            echo "Intraday run — dashboard published; database snapshot deferred to 21:00 UTC."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # data/ is gitignored so local runs stay clean; CI force-adds it

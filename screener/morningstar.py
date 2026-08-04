@@ -170,7 +170,10 @@ def _require_session(ms_config: MorningstarConfig) -> None:
         )
 
 
-def _scrape_on_page(page, ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
+def _scrape_on_page(
+    page, ticker: Ticker, ms_config: MorningstarConfig,
+    reference_price: float | None = None,
+) -> ScrapeResult:
     """Read one ticker using an already-open page.
 
     Split out from `scrape_ticker` so the single-ticker and batch paths share
@@ -220,7 +223,7 @@ def _scrape_on_page(page, ticker: Ticker, ms_config: MorningstarConfig) -> Scrap
                 f"{'Retrying headless will not help; headless=false is already set.' if not ms_config.headless else 'Set morningstar.headless: false in config.yaml and try again — the interactive login uses a visible browser and gets through.'}"
             )
 
-        result = _extract(ticker.symbol, captured, page_text)
+        result = _extract(ticker.symbol, captured, page_text, reference_price)
 
         if not result.complete and ms_config.debug_on_failure:
             _dump_debug(page, ticker.symbol, captured)
@@ -236,7 +239,9 @@ def _scrape_on_page(page, ticker: Ticker, ms_config: MorningstarConfig) -> Scrap
     return result
 
 
-def scrape_ticker(ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
+def scrape_ticker(
+    ticker: Ticker, ms_config: MorningstarConfig, reference_price: float | None = None
+) -> ScrapeResult:
     """Read price + fair value for one ticker from its Morningstar quote page."""
     from playwright.sync_api import sync_playwright
 
@@ -247,7 +252,7 @@ def scrape_ticker(ticker: Ticker, ms_config: MorningstarConfig) -> ScrapeResult:
         try:
             context = browser.new_context(storage_state=str(ms_config.state_file))
             page = context.new_page()
-            return _scrape_on_page(page, ticker, ms_config)
+            return _scrape_on_page(page, ticker, ms_config, reference_price)
         finally:
             browser.close()
 
@@ -283,6 +288,7 @@ def scrape_many(
     ms_config: MorningstarConfig,
     pause_range: tuple[float, float] = (3.0, 8.0),
     on_result=None,
+    reference_prices: dict[str, float] | None = None,
 ) -> list[tuple[Ticker, ScrapeResult | None, str | None]]:
     """Read several tickers in one browser session.
 
@@ -319,7 +325,8 @@ def scrape_many(
                     time.sleep(random.uniform(*pause_range))
                 page = context.new_page()
                 try:
-                    result = _scrape_on_page(page, ticker, ms_config)
+                    ref = (reference_prices or {}).get(ticker.symbol)
+                    result = _scrape_on_page(page, ticker, ms_config, ref)
                     check_units(result)
                     entry = (ticker, result, None)
                 except (AuthenticationError, BotChallengeError):
@@ -343,8 +350,20 @@ def _looks_logged_out(page_text: str) -> bool:
     return any(m in lowered for m in markers)
 
 
-def _extract(symbol: str, captured: list[dict], page_text: str) -> ScrapeResult:
-    """Try each extraction strategy in order of reliability."""
+def _extract(
+    symbol: str,
+    captured: list[dict],
+    page_text: str,
+    reference_price: float | None = None,
+) -> ScrapeResult:
+    """Try each extraction strategy in order of reliability.
+
+    `reference_price` is the close the screener already holds from TradingView.
+    It does two jobs: it disambiguates the fair value when a page offers more
+    than one candidate, and it stands in for the page's own price, which is
+    only ever used for display and the sanity check -- the valuation gate
+    compares against the stored close, never against anything scraped here.
+    """
     result = ScrapeResult(symbol=symbol, price=None, fair_value=None)
 
     # Strategy 1 — Morningstar's own JSON.
@@ -362,7 +381,7 @@ def _extract(symbol: str, captured: list[dict], page_text: str) -> ScrapeResult:
 
     # Strategy 2/3 — read the rendered card.
     if result.fair_value is None:
-        fv = _fair_value_from_text(page_text)
+        fv = _fair_value_from_text(page_text, reference_price)
         if fv is not None:
             result.fair_value = fv
             result.method = (result.method + "+text").lstrip("+")
@@ -371,6 +390,17 @@ def _extract(symbol: str, captured: list[dict], page_text: str) -> ScrapeResult:
         if px is not None:
             result.price = px
             result.method = (result.method + "+text").lstrip("+")
+
+    # When the caller knows the price, that wins outright -- it is not a
+    # fallback. `_price_from_text` takes the first currency-prefixed figure on
+    # the page, which is frequently the wrong one: on AMD it read 1.62 against
+    # a ~$200 stock, and on a sparse layout it will happily return the fair
+    # value itself. TradingView's close is authoritative for the listing, is
+    # already in the listing's own currency, and is what the valuation gate
+    # compares against anyway -- so nothing is gained by trusting the page.
+    if reference_price is not None:
+        result.price = reference_price
+        result.method = (result.method + "+ref-price").lstrip("+")
 
     result.uncertainty = _labelled_word(page_text, "Uncertainty")
     result.moat = _labelled_word(page_text, "Economic Moat")
@@ -410,22 +440,49 @@ def _coerce_number(value) -> float | None:
     return None
 
 
-def _fair_value_from_text(text: str) -> float | None:
-    """Read the fair value out of the "Price vs Fair Value" card.
+def _fair_value_candidates(text: str) -> list[float]:
+    """Every number that looks like it belongs to a "Fair Value" label.
 
-    Guards against the two nearby decoys on that card: the section heading
-    "Price vs Fair Value", and the "1-Star Price"/"5-Star Price" rows.
+    Guards against the two decoys that sit right next to the real one on the
+    card: the "Price vs Fair Value" section heading, and the "1-Star Price" /
+    "5-Star Price" rows just below it.
     """
+    out: list[float] = []
     for match in re.finditer(r"Fair Value", text):
-        start = match.start()
-        preceding = text[max(0, start - 12) : start]
-        if "vs" in preceding:  # the "Price vs Fair Value" heading
-            continue
+        preceding = text[max(0, match.start() - 12) : match.start()]
+        if "vs" in preceding or "/" in preceding:
+            continue  # "Price vs Fair Value" heading, or a "Price/Fair Value" ratio
         window = text[match.end() : match.end() + 60]
         money = re.search(_MONEY, window)
         if money:
-            return _coerce_number(money.group(1))
-    return None
+            value = _coerce_number(money.group(1))
+            if value is not None:
+                out.append(value)
+    return out
+
+
+def _fair_value_from_text(text: str, reference_price: float | None = None) -> float | None:
+    """Read the fair value, using a known price to disambiguate when there are
+    several candidates.
+
+    A fair value estimate is, by construction, the same order of magnitude as
+    the price — an analyst saying a $400 stock is worth $16 isn't a valuation,
+    it's a parse error. So when the caller knows the real price (it always does:
+    TradingView already gave us the close), prefer the candidate that's within
+    a plausible ratio of it and ignore the rest. Without a reference this falls
+    back to "first match wins", which is the old behaviour.
+    """
+    candidates = _fair_value_candidates(text)
+    if not candidates:
+        return None
+    if reference_price is None or reference_price <= 0:
+        return candidates[0]
+
+    plausible = [
+        c for c in candidates
+        if _RATIO_FLOOR <= reference_price / c <= _RATIO_CEILING
+    ]
+    return plausible[0] if plausible else None
 
 
 def _price_from_text(text: str) -> float | None:

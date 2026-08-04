@@ -205,7 +205,8 @@ def cmd_run(config: Config, args) -> int:
             scraped = 0
             try:
                 for ticker, result, error in scrape_many(
-                    list(config.tickers), config.morningstar
+                    list(config.tickers), config.morningstar,
+                    reference_prices=_reference_prices(store, list(config.tickers)),
                 ):
                     if error is not None:
                         print(f"  {ticker.symbol}: {error}")
@@ -486,6 +487,38 @@ def _signalled_symbols(store: Store, config: Config) -> list[str]:
     return out
 
 
+# Morningstar analysts revise a fair value on earnings or a thesis change --
+# roughly quarterly. Re-reading the same page days later almost always returns
+# the number already on file, so it is wasted requests against a logged-in
+# session on a paid product.
+DEFAULT_MAX_FAIR_VALUE_AGE_DAYS = 14
+
+
+def _fresh_fair_values(config: Config, max_age_days: int) -> dict[str, int]:
+    """Symbols checked recently enough to skip, mapped to how many days ago.
+
+    An entry with no `checked:` date counts as stale — it was hand-written
+    without one, and guessing that it's current would be worse than re-reading.
+    """
+    try:
+        values = load_fair_values(config.storage.fair_values)
+    except FairValueError:
+        return {}
+
+    fresh: dict[str, int] = {}
+    today = dt.date.today()
+    for symbol, entry in values.items():
+        if not entry.checked:
+            continue
+        try:
+            age = (today - dt.date.fromisoformat(entry.checked)).days
+        except ValueError:
+            continue  # unparseable hand-typed date: treat as stale
+        if 0 <= age < max_age_days:
+            fresh[symbol] = age
+    return fresh
+
+
 def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
     """Work out which tickers `scrape` should visit."""
     if args.symbols:
@@ -499,8 +532,46 @@ def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
         return tickers
     if args.all:
         return list(config.tickers)
-    symbols = _signalled_symbols(store, config)
-    return [config.ticker(s) for s in symbols]
+    return [config.ticker(s) for s in _signalled_symbols(store, config)]
+
+
+def _drop_recently_checked(config: Config, tickers: list, args) -> tuple[list, list]:
+    """Split targets into (to scrape, skipped as still fresh).
+
+    Kept separate from target *resolution* so that "you named a symbol that
+    doesn't exist" and "that symbol was checked on Tuesday" stay distinguishable
+    — the first is a typo worth a non-zero exit, the second is the feature
+    working.
+    """
+    if getattr(args, "force", False):
+        return tickers, []
+
+    max_age = getattr(args, "max_age", None) or DEFAULT_MAX_FAIR_VALUE_AGE_DAYS
+    fresh = _fresh_fair_values(config, max_age)
+    kept, skipped = [], []
+    for ticker in tickers:
+        if ticker.symbol in fresh:
+            skipped.append((ticker.symbol, fresh[ticker.symbol]))
+        else:
+            kept.append(ticker)
+    return kept, skipped
+
+
+def _reference_prices(store: Store, tickers: list) -> dict[str, float]:
+    """Latest stored close per symbol, for the scraper to lean on.
+
+    TradingView already gave us an authoritative price for every listing, in
+    the listing's own currency. Handing it to the scraper means a Morningstar
+    page whose own price we can't parse still produces a usable fair value,
+    and lets the extractor reject a fair-value candidate that's the wrong
+    order of magnitude.
+    """
+    out: dict[str, float] = {}
+    for ticker in tickers:
+        series = store.rsi_series(ticker.symbol, DEFAULT_HORIZON)
+        if series:
+            out[ticker.symbol] = series[-1].close
+    return out
 
 
 def cmd_scrape(config: Config, args) -> int:
@@ -518,7 +589,19 @@ def cmd_scrape(config: Config, args) -> int:
     with Store(config.storage.database) as store:
         targets = _resolve_scrape_targets(store, config, args)
 
+        targets, fresh_skipped = _drop_recently_checked(config, targets, args)
+        if fresh_skipped:
+            max_age = getattr(args, "max_age", None) or DEFAULT_MAX_FAIR_VALUE_AGE_DAYS
+            listed = ", ".join(
+                f"{s} (today)" if d == 0 else f"{s} ({d}d ago)" for s, d in fresh_skipped
+            )
+            print(f"Already checked within {max_age} days, skipping {len(fresh_skipped)}: {listed}")
+            print("  (--force re-reads them, --max-age changes the window)")
+
         if not targets:
+            if fresh_skipped:
+                print("Nothing left to scrape — every candidate is still fresh.")
+                return 0
             print("Nothing to scrape.")
             if args.symbols:
                 # Explicitly asked for tickers and got none — a typo, not an
@@ -576,7 +659,10 @@ def cmd_scrape(config: Config, args) -> int:
             recorded += 1
 
         try:
-            scrape_many(targets, config.morningstar, on_result=report)
+            scrape_many(
+                targets, config.morningstar, on_result=report,
+                reference_prices=_reference_prices(store, targets),
+            )
         except AuthenticationError as exc:
             print(f"\n  {exc}")
             return 1
@@ -814,6 +900,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_scrape.add_argument(
         "--push", action="store_true", help="commit and push fair_values.yaml when done"
+    )
+    p_scrape.add_argument(
+        "--force", action="store_true",
+        help="re-read fair values even if they were checked recently",
+    )
+    p_scrape.add_argument(
+        "--max-age", type=int, default=None, dest="max_age",
+        help=f"days a fair value stays fresh (default: {DEFAULT_MAX_FAIR_VALUE_AGE_DAYS})",
     )
     p_scrape.add_argument("--date", help="date to record against (default: today)")
     p_scrape.add_argument("--note", help="optional note stored with every value in this run")

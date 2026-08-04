@@ -106,6 +106,22 @@ indices back. Without it, cards showed "1 upward cross of 30" directly above a
 completed up/down/up pattern, which by definition needs two. Any future code
 that counts crosses over a slice has the same trap.
 
+**The scraper never trusts the page's own price.** `_price_from_text` takes
+the first currency-prefixed figure on the page, which is regularly the wrong
+one — on AMD it read 1.62 for a ~$200 stock, and on a sparse layout it returns
+the fair value itself. The screener already holds an authoritative close from
+TradingView in the listing's own currency, and `sync_fair_values` uses *that*
+for the gate regardless, so `_extract` takes a `reference_price` that
+overrides whatever the page said. The same reference disambiguates the fair
+value: a candidate more than 10x off the real price is a parse error, not a
+valuation — that's what fixed UNH reading $16 against a $409 price.
+
+**`scrape` skips fair values checked within 14 days** (`--force` overrides,
+`--max-age` retunes). Kept in `_drop_recently_checked`, deliberately separate
+from `_resolve_scrape_targets`, so "you named a symbol that doesn't exist"
+stays distinguishable from "that one is still fresh" — the first is a non-zero
+exit, the second is the feature working.
+
 **A scrape result can be incomplete without raising.** `_scrape_on_page`
 returns a `ScrapeResult` with `price=None` or `fair_value=None` when the page
 loads fine, isn't a bot challenge and isn't signed out, but extraction still
@@ -157,6 +173,22 @@ that point — `storage.append_signal_csv` reads the existing rows back and
 rewrites the whole file under the current header instead. Keep that pattern if
 `Signal` grows again.
 
+**History depth is sized to what's displayed, not to what Yahoo offers.** Only
+`chart_days` (90) bars are ever plotted, plus 15 to seed Wilder's RSI and one
+lead-in bar. Each horizon's `yahoo_range` lands at ~2.5x that. Asking for
+Yahoo's full 730-day intraday depth gave 5,000 hourly bars a ticker — a 54 MB
+database to show 2.8 MB worth. That matters because the database is committed
+to git: at hourly runs it was ~9 GB a year, and GitHub warns at 1 GB. For the
+same reason only the last scheduled run of the day commits it; intermediate
+runs publish a fresh dashboard without snapshotting, which loses nothing
+because `backfill` rebuilds every horizon from Yahoo each run.
+
+**Tests must never touch the repo's real `config.yaml` or `fair_values.yaml`.**
+`load_config` falls back to repo-root defaults for any storage path a test
+config omits, so a fixture missing `fair_values:` points at the live file — and
+a test that writes one overwrites committed data. That happened. `conftest.py`
+now has an autouse guard that restores the file and fails the test.
+
 **`backfill` skips a ticker that already has a full chart's worth of history**
 (`>= dashboard.chart_days` rows), unless `--force`. That's what makes it safe
 for `daily.yml` to call unconditionally on every scheduled run instead of the
@@ -184,7 +216,7 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 273 tests, fully offline
+python -m pytest tests/ -q          # 294 tests, fully offline
 
 python -m screener.cli backfill              # seeds all four horizons
 python -m screener.cli run                   # the scheduled job (RSI only)

@@ -90,7 +90,8 @@ def fake_scrape(results):
     its import inside the function body, so the name is resolved from the
     source module at call time.
     """
-    def _fake(tickers, ms_config, pause_range=(3.0, 8.0), on_result=None):
+    def _fake(tickers, ms_config, pause_range=(3.0, 8.0), on_result=None,
+              reference_prices=None):
         out = []
         for t in tickers:
             entry = (t, results.get(t.symbol), None)

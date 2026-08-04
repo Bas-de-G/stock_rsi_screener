@@ -325,3 +325,89 @@ def test_the_euro_page_still_avoids_the_star_price_decoys():
     r = _extract("RAND", [], euro_page())
     assert r.fair_value == 44.00
     assert r.fair_value not in (59.40, 30.80)
+
+
+# --------------------------------- fair value disambiguation by known price
+#
+# Two real failures motivated this. On AMD the page's own price parsed as 1.62
+# (AMD trades near $200), and on UNH the fair value parsed as 16.00 against a
+# $409 price. Both were caught by the unit guard and discarded -- correct, but
+# it meant neither ticker could ever be scraped.
+#
+# The screener already holds an authoritative close from TradingView, so it
+# can hand that to the extractor: it stands in for a price the page won't
+# yield, and it rules out fair-value candidates of the wrong magnitude.
+
+from screener.morningstar import _fair_value_candidates
+
+MULTI_CANDIDATE_PAGE = """
+UnitedHealth Group Inc UNH
+$409.62 +2.10 (0.51%)
+Price vs Fair Value
+Fair Value $16.00
+Fair Value $530.00
+1-Star Price $700.00
+5-Star Price $300.00
+"""
+
+
+def test_all_fair_value_candidates_are_gathered():
+    assert _fair_value_candidates(MULTI_CANDIDATE_PAGE) == [16.0, 530.0]
+
+
+def test_the_vs_heading_is_still_skipped():
+    assert 409.62 not in _fair_value_candidates(MULTI_CANDIDATE_PAGE)
+
+
+def test_a_price_over_fair_value_ratio_label_is_skipped():
+    """`Price/Fair Value` is a Morningstar metric in its own right; its value
+    is a ratio like 0.85, not a valuation."""
+    page = "Price/Fair Value 0.85\nFair Value $225.00\n"
+    assert _fair_value_candidates(page) == [225.0]
+
+
+def test_a_known_price_picks_the_plausible_candidate():
+    """The UNH case: $16 against a $409 price is a parse error, not a view."""
+    assert _fair_value_from_text(MULTI_CANDIDATE_PAGE, 409.62) == 530.0
+
+
+def test_without_a_known_price_the_first_candidate_wins():
+    """Unchanged fallback behaviour when the caller has no reference."""
+    assert _fair_value_from_text(MULTI_CANDIDATE_PAGE) == 16.0
+
+
+def test_no_plausible_candidate_returns_none_rather_than_a_wrong_one():
+    page = "Fair Value $16.00\n"
+    assert _fair_value_from_text(page, 4000.0) is None
+
+
+def test_a_single_sane_candidate_is_unaffected_by_the_reference():
+    assert _fair_value_from_text(IBM_PAGE, 217.24) == 225.00
+    assert _fair_value_from_text(IBM_PAGE) == 225.00
+
+
+def test_the_reference_price_substitutes_for_an_unparseable_page_price():
+    """The AMD case: the page's own price came out as 1.62. The close we
+    already hold is authoritative, so the scrape still succeeds."""
+    page = "AMD\nFair Value $210.00\nsome layout we can't read a price from\n"
+    result = _extract("AMD", [], page, reference_price=198.40)
+    assert result.price == 198.40
+    assert result.fair_value == 210.00
+    assert result.complete
+    assert "ref-price" in result.method
+
+
+def test_the_reference_price_wins_over_the_pages_own():
+    """Not a fallback -- an override. `_price_from_text` takes the first
+    currency-prefixed figure on the page, which is often the wrong one; the
+    close from TradingView is authoritative and is what the gate uses."""
+    result = _extract("IBM", [], IBM_PAGE, reference_price=999.0)
+    assert result.price == 999.0
+
+
+def test_a_reference_price_keeps_the_unit_guard_meaningful():
+    """Guard still fires when the fair value really is the wrong currency."""
+    page = "RR\nFair Value 14.50\n"
+    result = _extract("RR", [], page, reference_price=1413.60)
+    # No candidate is within 10x of 1413.60, so nothing is claimed at all.
+    assert result.fair_value is None
