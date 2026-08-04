@@ -16,31 +16,167 @@
 # Written by `screener fair-value SYM <value>`, which rewrites this file --
 # so any comments you add below this header will not survive that command.
 
+ACHR:
+  fair_value: 6.08
+  checked: '2026-08-04'
+  source: scraped
+AD:
+  fair_value: 39.0
+  checked: '2026-08-04'
+  source: scraped
 ADBE:
   fair_value: 380.0
+  checked: '2026-08-04'
+  source: scraped
+ADYEN:
+  fair_value: 1620.0
+  checked: '2026-08-04'
+  source: scraped
+AMAT:
+  fair_value: 520.0
+  checked: '2026-08-04'
+  source: scraped
+AMZN:
+  fair_value: 300.0
+  checked: '2026-08-04'
+  source: scraped
+BB:
+  fair_value: 5.2
+  checked: '2026-08-04'
+  source: scraped
+BESI:
+  fair_value: 265.0
+  checked: '2026-08-04'
+  source: scraped
+CHPT:
+  fair_value: 6.81
+  checked: '2026-08-04'
+  source: scraped
+CRM:
+  fair_value: 280.0
+  checked: '2026-08-04'
+  source: scraped
+CVX:
+  fair_value: 192.0
+  checked: '2026-08-04'
+  source: scraped
+DSFIR:
+  fair_value: 103.0
+  checked: '2026-08-04'
+  source: scraped
+GOOGL:
+  fair_value: 433.0
+  checked: '2026-08-04'
+  source: scraped
+GRAB:
+  fair_value: 5.6
   checked: '2026-08-04'
   source: scraped
 HD:
   fair_value: 325.0
   checked: '2026-08-04'
   source: scraped
+HEIA:
+  fair_value: 86.0
+  checked: '2026-08-04'
+  source: scraped
 IBM:
   fair_value: 225.0
+  checked: '2026-08-04'
+  source: scraped
+INTC:
+  fair_value: 105.0
+  checked: '2026-08-04'
+  source: scraped
+KPN:
+  fair_value: 3.7
+  checked: '2026-08-04'
+  source: scraped
+LCID:
+  fair_value: 14.17
+  checked: '2026-08-04'
+  source: scraped
+LLY:
+  fair_value: 900.0
+  checked: '2026-08-04'
+  source: scraped
+MA:
+  fair_value: 550.0
+  checked: '2026-08-04'
+  source: scraped
+META:
+  fair_value: 850.0
+  checked: '2026-08-04'
+  source: scraped
+MSFT:
+  fair_value: 600.0
   checked: '2026-08-04'
   source: scraped
 NFLX:
   fair_value: 80.0
   checked: '2026-08-04'
   source: scraped
+NIO:
+  fair_value: 6.5
+  checked: '2026-08-04'
+  source: scraped
+NVDA:
+  fair_value: 280.0
+  checked: '2026-08-04'
+  source: scraped
 ORCL:
   fair_value: 207.0
+  checked: '2026-08-04'
+  source: scraped
+PEP:
+  fair_value: 169.0
   checked: '2026-08-04'
   source: scraped
 PG:
   fair_value: 155.0
   checked: '2026-08-04'
   source: scraped
+PLUG:
+  fair_value: 2.18
+  checked: '2026-08-04'
+  source: scraped
+PRX:
+  fair_value: 29.0
+  checked: '2026-08-04'
+  source: scraped
+QCOM:
+  fair_value: 170.0
+  checked: '2026-08-04'
+  source: scraped
 RAND:
   fair_value: 31.5
+  checked: '2026-08-04'
+  source: scraped
+RIG:
+  fair_value: 5.29
+  checked: '2026-08-04'
+  source: scraped
+SNAP:
+  fair_value: 7.0
+  checked: '2026-08-04'
+  source: scraped
+SNDK:
+  fair_value: 1000.0
+  checked: '2026-08-04'
+  source: scraped
+TSLA:
+  fair_value: 450.0
+  checked: '2026-08-04'
+  source: scraped
+UMG:
+  fair_value: 17.0
+  checked: '2026-08-04'
+  source: scraped
+WKL:
+  fair_value: 120.0
+  checked: '2026-08-04'
+  source: scraped
+WMT:
+  fair_value: 81.0
   checked: '2026-08-04'
   source: scraped
