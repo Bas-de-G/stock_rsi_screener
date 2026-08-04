@@ -6,9 +6,11 @@ rules.
 
 ## What this is
 
-A screener that watches ~54 large-cap stocks for a double-oversold-recovery
-pattern: RSI crosses 30 upward, falls back below, and crosses up again inside 14
-days. A completed pattern is a buy signal on its own. Two independent factors
+A screener that watches ~65 tickers for a double-oversold-recovery pattern:
+RSI crosses 30 upward, falls back below, and crosses up again inside a window.
+Screened on four horizons (1h / 4h / 1d / 1w), each with its own cross window,
+valuation margin and suggested leverage, and grouped into four market filters
+(sp500 / nasdaq / europe / penny) a ticker can belong to more than one of. A completed pattern is a buy signal on its own. Two independent factors
 grade it — Morningstar fair value and YoY earnings growth — and either one
 agreeing on its own is enough to upgrade it to a strong buy (🚀 on the
 dashboard); both being known and one dissenting withholds it (the value-trap
@@ -33,6 +35,23 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/cli.py` | commands, and the glue between all of the above |
 
 ## Rules that aren't obvious from the code
+
+**Everything is scoped by horizon.** `rsi_history` and `signals` are both keyed
+`(symbol, horizon, …)`, and `rsi_series`/`all_signals`/`signal_exists` all take
+a horizon. Forgetting one silently mixes hourly and weekly bars into a single
+series. `config.Horizon` carries the three things that scale with holding
+period — `window_days`, `margin`, `leverage` — so nothing should hardcode them.
+
+**Intraday bars are keyed by timestamp, daily/weekly by date.** A 1h bar's
+label is `2026-08-04T18:49`; a daily one is `2026-08-04`. Both sort correctly
+as strings, which is what `rsi_series`'s ORDER BY relies on. Crucially,
+`date.fromisoformat` *rejects* the intraday form on every supported Python —
+use `signals._moment`, which parses both. That bug made every intraday pattern
+raise, so no intraday signal was ever recorded.
+
+**`backfill` never skips an intraday horizon.** The skip-if-seeded rule applies
+only to daily and weekly bars. An hourly history collected an hour ago is
+already missing bars, so 1h/4h always refetch; the upsert dedupes.
 
 **`fair_values.yaml` is the source of truth for fair values. SQLite is derived.**
 Never write a fair value straight to the database. The `.db` is gitignored
@@ -94,6 +113,13 @@ finds nothing. Callers must check `result.complete` — `cmd_scrape` and
 `cmd_run` both do. Trusting a half-filled result writes an ungradeable fair
 value with no price beside it and then divides by None, and `TypeError` is not
 a `MorningstarError`, so nothing catches it.
+
+**The dashboard's market filter is pure CSS, and must stay that way.** Hidden
+radio inputs sit before `.sheet`, and `#mk-x:checked ~ .sheet .card:not(.in-x)`
+hides the rest. That keeps the page working from `file://` and with JS off. The
+timeframe selector can't work the same way — each horizon has different data —
+so it's links between four separately-built pages. Adding a market means adding
+it to `config.MARKETS` and `MARKET_LABELS`; the CSS rules generate from there.
 
 **Currency is not always dollars, and identifiers differ per venue.** Every
 non-US listing needs its own `tradingview` / `yahoo` / `morningstar` /
@@ -158,11 +184,14 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 224 tests, fully offline
+python -m pytest tests/ -q          # 273 tests, fully offline
 
-python -m screener.cli backfill     # once, seeds RSI history from Yahoo
-python -m screener.cli run          # the daily job (RSI only)
-python -m screener.cli dashboard --open
+python -m screener.cli backfill              # seeds all four horizons
+python -m screener.cli run                   # the scheduled job (RSI only)
+python -m screener.cli dashboard --open      # writes all four pages
+
+# Any of them can be pinned to one timeframe:
+python -m screener.cli run --horizon 1h
 ```
 
 Fair values, which need `python -m playwright install chromium` and a one-off

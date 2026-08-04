@@ -35,7 +35,7 @@ class CrossPair:
     up1_date: str
     down_date: str
     up2_date: str
-    span_days: int
+    span_days: float   # calendar days (fractional on intraday bars)
     rsi_at_up2: float
 
 
@@ -86,22 +86,48 @@ def _find_dip(series: list[RsiPoint], first: int, second: int, threshold: float)
     return None
 
 
-def _span(series: list[RsiPoint], first: int, second: int, config: SignalConfig) -> int:
-    """Distance between the two crosses, in whichever unit is configured."""
+def _moment(label: str) -> dt.datetime:
+    """Parse a bar's label, which is a date on daily/weekly bars and a full
+    timestamp on intraday ones.
+
+    `date.fromisoformat` rejects '2026-08-04T18:49' outright on every Python
+    version this supports, so parsing as a datetime is what makes the intraday
+    horizons work at all. A bare 'yyyy-mm-dd' parses as midnight, which is
+    exactly the old behaviour.
+    """
+    return dt.datetime.fromisoformat(label)
+
+
+def _span(series: list[RsiPoint], first: int, second: int, config: SignalConfig) -> float:
+    """Distance between the two crosses, in whichever unit is configured.
+
+    Returned as a float so intraday windows keep sub-day resolution: with a
+    2-day window on hourly bars, truncating 1.9 days to 1 would quietly widen
+    the window by most of a day.
+    """
     if config.window_unit == "trading":
-        return second - first
-    d1 = dt.date.fromisoformat(series[first].date)
-    d2 = dt.date.fromisoformat(series[second].date)
-    return (d2 - d1).days
+        return float(second - first)
+    delta = _moment(series[second].date) - _moment(series[first].date)
+    return delta.total_seconds() / 86400.0
 
 
 def valuation_passes(
-    price: float | None, fair_value: float | None, config: SignalConfig
+    price: float | None,
+    fair_value: float | None,
+    config: SignalConfig,
+    margin: float = 0.0,
 ) -> tuple[bool, bool]:
     """Apply the configured valuation gate.
 
     Returns (known, confirms). `known` is False when there are no Morningstar
     figures to compare; `confirms` is only meaningful when `known` is True.
+
+    `margin` is the headroom the gate demands, as a fraction: 0.30 means fair
+    value must sit at least 30% above the price before the valuation confirms.
+    It comes from the horizon (see `config.Horizon`), because a trade held for
+    an hour and one held for a week don't deserve the same bar. At the default
+    0.0 this is exactly the old "is it below fair value" test, which is what
+    keeps the daily behaviour unchanged for anyone who zeroes the margins out.
 
     Note this answers "does the valuation agree?", not "is this a signal?" —
     see `signal_fires`. Keeping them apart is what lets an RSI pattern stand
@@ -110,9 +136,12 @@ def valuation_passes(
     if price is None or fair_value is None:
         return False, False
 
+    # Strict, so an exactly-equal pair still fails — at margin 0 this is
+    # character-for-character the original test.
     if config.valuation_rule == "fair_value_below_price":
-        return True, fair_value < price
-    return True, price < fair_value
+        # Inverted rule: fair value must sit that far *below* the price.
+        return True, fair_value * (1 + margin) < price
+    return True, price * (1 + margin) < fair_value
 
 
 def earnings_growth_passes(growth: float | None) -> tuple[bool, bool]:

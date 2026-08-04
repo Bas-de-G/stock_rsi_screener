@@ -16,6 +16,60 @@ DEFAULT_CONFIG = REPO_ROOT / "config.yaml"
 VALUATION_RULES = ("fair_value_below_price", "price_below_fair_value")
 WINDOW_UNITS = ("calendar", "trading")
 
+# Market groups the dashboard can filter by. A ticker can belong to several --
+# AAPL is both an S&P 500 constituent and Nasdaq-listed -- so `markets` on a
+# Ticker is a list, not a single value.
+MARKETS = ("sp500", "nasdaq", "europe", "penny")
+MARKET_LABELS = {
+    "sp500": "S&P 500",
+    "nasdaq": "NASDAQ",
+    "europe": "Europe",
+    "penny": "Under $10",
+}
+
+
+@dataclass(frozen=True)
+class Horizon:
+    """One RSI timeframe, and everything that scales with it.
+
+    The three tunables all move together with the holding period, which is the
+    whole point of having them per-horizon rather than global:
+
+    * `window_days` -- how long the two upward crosses may be apart. Fixed at
+      14 calendar days this only ever made sense for the daily chart: 14 days
+      is two weekly bars, so a 1w pattern could never form at all.
+    * `margin` -- how far below fair value the price must sit before the
+      valuation gate confirms. A longer hold wants more headroom.
+    * `leverage` -- the multiplier surfaced on the dashboard for this horizon.
+      A fixed number attached to the timeframe, not a calculation.
+    """
+
+    key: str
+    label: str
+    tv_interval: str      # TradingView scanner suffix: 60, 240, 1D, 1W
+    yahoo_interval: str   # Yahoo chart interval: 60m, 4h, 1d, 1wk
+    yahoo_range: str      # how much history to request when backfilling
+    window_days: int
+    margin: float
+    leverage: int
+    intraday: bool = False
+
+    @property
+    def margin_pct(self) -> str:
+        return f"{self.margin * 100:g}%"
+
+
+# Verified against both services before being wired in: TradingView serves
+# RSI|60, RSI|240, RSI and RSI|1W, and Yahoo returns ~5,000 hourly bars and
+# ~1,450 four-hour bars over a 730-day range (its intraday ceiling).
+DEFAULT_HORIZONS: tuple[Horizon, ...] = (
+    Horizon("1h", "1 hour",  "60",  "60m", "730d", window_days=2,  margin=0.10, leverage=10, intraday=True),
+    Horizon("4h", "4 hours", "240", "4h",  "730d", window_days=5,  margin=0.20, leverage=5,  intraday=True),
+    Horizon("1d", "1 day",   "1D",  "1d",  "2y",   window_days=14, margin=0.30, leverage=2),
+    Horizon("1w", "1 week",  "1W",  "1wk", "5y",   window_days=90, margin=0.50, leverage=1),
+)
+DEFAULT_HORIZON = "1d"
+
 
 @dataclass(frozen=True)
 class Ticker:
@@ -28,10 +82,13 @@ class Ticker:
     # Quote currency. Rolls-Royce trades in pence, so a bare number next to a
     # dollar price would be misleading.
     currency: str = "USD"
+    # Which dashboard market filters this ticker appears under.
+    markets: tuple[str, ...] = ()
 
     def __post_init__(self):
         if not self.yahoo:
             object.__setattr__(self, "yahoo", self.symbol)
+        object.__setattr__(self, "markets", tuple(self.markets))
 
     @property
     def morningstar_url(self) -> str:
@@ -100,6 +157,7 @@ class Config:
     storage: StorageConfig
     morningstar: MorningstarConfig
     dashboard: DashboardConfig
+    horizons: tuple[Horizon, ...] = DEFAULT_HORIZONS
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -107,6 +165,25 @@ class Config:
             if t.symbol.upper() == symbol.upper():
                 return t
         raise KeyError(f"{symbol!r} is not in {self.source_path.name}")
+
+    def horizon(self, key: str) -> Horizon:
+        for h in self.horizons:
+            if h.key == key:
+                return h
+        available = ", ".join(h.key for h in self.horizons)
+        raise KeyError(f"{key!r} is not a configured horizon (have: {available})")
+
+    def tickers_in(self, market: str) -> list[Ticker]:
+        return [t for t in self.tickers if market in t.markets]
+
+    @property
+    def active_markets(self) -> tuple[str, ...]:
+        """Markets that actually have tickers, in MARKETS order.
+
+        Filtered rather than hardcoded so an empty group never renders a
+        dashboard tab that shows nothing when clicked.
+        """
+        return tuple(m for m in MARKETS if self.tickers_in(m))
 
 
 def _resolve(path_value: str) -> Path:
@@ -127,6 +204,16 @@ def load_config(path: str | Path | None = None) -> Config:
         missing = {"symbol", "tradingview", "morningstar"} - set(entry)
         if missing:
             raise ValueError(f"Ticker {entry!r} is missing: {', '.join(sorted(missing))}")
+        raw_markets = entry.get("markets", []) or []
+        if isinstance(raw_markets, str):
+            raw_markets = [raw_markets]
+        markets = tuple(str(m).strip().lower() for m in raw_markets)
+        unknown = set(markets) - set(MARKETS)
+        if unknown:
+            raise ValueError(
+                f"Ticker {entry['symbol']!r} lists unknown market(s) "
+                f"{sorted(unknown)}; valid: {', '.join(MARKETS)}"
+            )
         tickers.append(
             Ticker(
                 symbol=str(entry["symbol"]).upper(),
@@ -134,6 +221,7 @@ def load_config(path: str | Path | None = None) -> Config:
                 morningstar=str(entry["morningstar"]).strip("/"),
                 yahoo=str(entry.get("yahoo", "") or ""),
                 currency=str(entry.get("currency", "USD")).upper(),
+                markets=markets,
             )
         )
     if not tickers:
@@ -200,6 +288,8 @@ def load_config(path: str | Path | None = None) -> Config:
     if dashboard.chart_days < 2:
         raise ValueError("dashboard.chart_days must be at least 2")
 
+    horizons = _load_horizons(raw.get("horizons", {}) or {})
+
     return Config(
         tickers=tickers,
         rsi=rsi,
@@ -207,5 +297,42 @@ def load_config(path: str | Path | None = None) -> Config:
         storage=storage,
         morningstar=morningstar,
         dashboard=dashboard,
+        horizons=horizons,
         source_path=config_path,
     )
+
+
+def _load_horizons(raw: dict) -> tuple[Horizon, ...]:
+    """Apply per-horizon overrides on top of the built-in defaults.
+
+    Only the three tunables are overridable. The interval codes are not: they
+    are what the two data sources actually accept, so a typo there would fail
+    at fetch time rather than at load time -- exactly the kind of thing this
+    loader exists to catch early.
+    """
+    unknown = set(raw) - {h.key for h in DEFAULT_HORIZONS}
+    if unknown:
+        valid = ", ".join(h.key for h in DEFAULT_HORIZONS)
+        raise ValueError(f"Unknown horizon(s) {sorted(unknown)} in config; valid: {valid}")
+
+    out = []
+    for base in DEFAULT_HORIZONS:
+        over = raw.get(base.key, {}) or {}
+        window_days = int(over.get("window_days", base.window_days))
+        margin = float(over.get("margin", base.margin))
+        leverage = int(over.get("leverage", base.leverage))
+        if window_days < 1:
+            raise ValueError(f"horizons.{base.key}.window_days must be at least 1")
+        if margin < 0:
+            raise ValueError(f"horizons.{base.key}.margin must not be negative")
+        if leverage < 1:
+            raise ValueError(f"horizons.{base.key}.leverage must be at least 1")
+        out.append(
+            Horizon(
+                key=base.key, label=base.label, tv_interval=base.tv_interval,
+                yahoo_interval=base.yahoo_interval, yahoo_range=base.yahoo_range,
+                window_days=window_days, margin=margin, leverage=leverage,
+                intraday=base.intraday,
+            )
+        )
+    return tuple(out)

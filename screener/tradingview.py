@@ -117,14 +117,20 @@ def _pick_earnings_growth(data: dict) -> tuple[float | None, str | None]:
     return None, None
 
 
-def fetch_daily_closes(yahoo_symbol: str, range_: str = "1y") -> list[tuple[str, float]]:
-    """Fetch (ISO date, close) pairs for backfilling RSI history.
+def fetch_daily_closes(
+    yahoo_symbol: str, range_: str = "1y", interval: str = "1d"
+) -> list[tuple[str, float]]:
+    """Fetch (ISO timestamp, close) pairs for backfilling RSI history.
 
     yahoo_symbol is the bare ticker (e.g. "NVDA", "IBM") — Yahoo doesn't use
     TradingView's exchange prefix.
+
+    `interval` is Yahoo's own code: 60m, 4h, 1d, 1wk. Intraday intervals return
+    a timestamp per bar rather than a date, so the label carries the time too —
+    otherwise every bar in a day would collapse onto one key.
     """
     url = _YAHOO_CHART_URL.format(symbol=yahoo_symbol)
-    params = {"range": range_, "interval": "1d"}
+    params = {"range": range_, "interval": interval}
     try:
         resp = requests.get(url, headers=_HEADERS, params=params, timeout=_TIMEOUT)
         resp.raise_for_status()
@@ -139,17 +145,28 @@ def fetch_daily_closes(yahoo_symbol: str, range_: str = "1y") -> list[tuple[str,
     except (KeyError, IndexError, TypeError) as exc:
         raise MarketDataError(f"Unexpected Yahoo response shape for {yahoo_symbol}: {payload}") from exc
 
+    intraday = interval not in ("1d", "1wk", "1mo", "5d", "3mo")
     out: list[tuple[str, float]] = []
     for ts, close in zip(timestamps, closes):
         if close is None:
             continue
-        date = _epoch_to_date(ts)
-        out.append((date, float(close)))
+        out.append((_epoch_to_label(ts, intraday), float(close)))
     return out
 
 
-def _epoch_to_date(epoch_seconds: int) -> str:
+def _epoch_to_label(epoch_seconds: int, intraday: bool = False) -> str:
+    """ISO date, plus the time when bars are finer than daily.
+
+    Both forms sort lexicographically in the same order they occur in, which is
+    what `rsi_series`'s ORDER BY relies on to return a series in time order.
+    """
     # Timezone-aware rather than utcfromtimestamp, which is deprecated in 3.12.
     import datetime as _dt
 
-    return _dt.datetime.fromtimestamp(epoch_seconds, _dt.timezone.utc).date().isoformat()
+    moment = _dt.datetime.fromtimestamp(epoch_seconds, _dt.timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M") if intraday else moment.date().isoformat()
+
+
+# Kept under the old name too: it is part of what the tests import.
+def _epoch_to_date(epoch_seconds: int) -> str:
+    return _epoch_to_label(epoch_seconds, intraday=False)

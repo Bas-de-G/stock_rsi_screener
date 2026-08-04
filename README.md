@@ -17,9 +17,10 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **54 market leaders** out of the box — 35 US names (AAPL, MSFT, NVDA,
-AMZN, IBM, JPM, XOM, LLY…), 18 Dutch ones from Euronext Amsterdam (ASML,
-Heineken, Adyen, ING, Philips…), and Rolls-Royce in London. Edit `config.yaml`
+Tracks **65 tickers** out of the box across four market groups you can switch
+between on the dashboard — **S&P 500**, **NASDAQ**, **Europe** (Amsterdam +
+London) and **Under $10**. A ticker can sit in more than one: Apple is both
+S&P 500 and Nasdaq-listed. Edit `config.yaml`
 to change the list. Every entry was checked against both data sources first,
 so none of them 404. Push a new ticker to `main` and the next scheduled run
 backfills its history automatically — nothing to run or push by hand.
@@ -58,6 +59,37 @@ wrong one by accident:
 ```
 Valuation gate: price < fair value (stock trading BELOW Morningstar fair value)
 ```
+
+---
+
+## Timeframes
+
+The same pattern is screened on four RSI horizons, each its own page on the
+dashboard. Three things scale with the holding period:
+
+| Horizon | Two crosses within | Fair value must be above price by | Suggested leverage |
+|---|---|---|---|
+| 1 hour  | 2 days  | 10% | 10x |
+| 4 hours | 5 days  | 20% | 5x  |
+| 1 day   | 14 days | 30% | 2x  |
+| 1 week  | 90 days | 50% | 1x  |
+
+The cross window has to be per-horizon or the rule stops meaning anything — a
+flat 14 days is only two weekly bars, so a 1w pattern could never form. The
+margin rises with the horizon because a longer hold wants more headroom, and
+the leverage falls for the same reason.
+
+All four are tunable in `config.yaml` under `horizons:`. Set every `margin` to
+0 and you get exactly the original "is it below fair value" gate back.
+
+> **On the leverage figure:** it's a fixed number attached to the timeframe,
+> not something calculated from the signal's quality. Leverage multiplies
+> losses exactly as readily as gains, and 10x on an hourly signal is
+> aggressive by any standard. The dashboard carries the same caveat.
+
+Data collection runs **hourly on weekdays, 13:00–21:00 UTC**. That's what makes
+the intraday horizons meaningful — a once-a-day sample of an hourly RSI is up
+to 24 hours stale by the time you read it.
 
 ---
 
@@ -165,8 +197,12 @@ No buy signals today.
 python -m screener.cli dashboard --open
 ```
 
-Writes a single self-contained `data/dashboard.html` — no JavaScript, no CDN,
-no fonts to fetch. Open it locally, mail it, drop it in Dropbox, or publish it
+Writes one self-contained page per horizon — `index.html` (1 day) plus
+`1h.html`, `4h.html` and `1w.html` — with no JavaScript, no CDN, and no fonts
+to fetch. The market filter across the top is pure CSS (hidden radio buttons),
+so it works from a `file://` URL and with JavaScript disabled; the timeframe
+selector is plain links between the four pages, because each horizon has
+genuinely different data behind it. Open it locally, mail it, drop it in Dropbox, or publish it
 (see below). Each stock gets a 90-day RSI plot with the 30 line marked, every
 upward crossing ringed and counted, and a button through to its Morningstar
 page.
@@ -544,7 +580,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 224 tests
+python -m pytest tests/ -q      # 273 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

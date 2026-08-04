@@ -16,7 +16,7 @@ import html
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Config
+from .config import DEFAULT_HORIZON, MARKET_LABELS, Config
 from .signals import earnings_growth_passes, find_upward_crosses, is_strong, valuation_passes
 from .storage import RsiPoint, Signal, Store, Valuation
 
@@ -37,6 +37,7 @@ class Row:
     valuation: Valuation | None
     signals: list[Signal]  # this symbol's patterns, ascending by date
     currency: str = "USD"
+    markets: tuple[str, ...] = ()
 
     @property
     def latest(self) -> RsiPoint | None:
@@ -95,13 +96,37 @@ class Row:
 
 
 def build_dashboard(
-    store: Store, config: Config, output: Path, standalone: bool = True
+    store: Store,
+    config: Config,
+    output: Path,
+    standalone: bool = True,
+    horizon: str = DEFAULT_HORIZON,
 ) -> Path:
-    rows = _collect(store, config)
-    html_text = render(rows, config, standalone=standalone)
+    h = config.horizon(horizon)
+    rows = _collect(store, config, h)
+    html_text = render(rows, config, h, standalone=standalone)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html_text, encoding="utf-8")
     return output
+
+
+def build_all_dashboards(store: Store, config: Config, output: Path) -> list[Path]:
+    """One page per horizon, all in the same directory.
+
+    Separate pages rather than one page carrying every horizon's chart data:
+    four timeframes across 65 tickers inline would be roughly a megabyte, and
+    the person this is built for reads it on a phone. The horizon selector is
+    plain links between the files, so switching costs a page load but the
+    market filter below it stays instant and needs no JavaScript.
+
+    The default horizon becomes index.html so the published URL keeps working.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    written = []
+    for h in config.horizons:
+        name = output.name if h.key == DEFAULT_HORIZON else f"{h.key}{output.suffix}"
+        written.append(build_dashboard(store, config, output.parent / name, horizon=h.key))
+    return written
 
 
 def _visible_crosses(full: list[RsiPoint], window: int, threshold: float) -> list[int]:
@@ -119,14 +144,15 @@ def _visible_crosses(full: list[RsiPoint], window: int, threshold: float) -> lis
     return [i - offset for i in find_upward_crosses(lead, threshold) if i - offset >= 0]
 
 
-def _collect(store: Store, config: Config) -> list[Row]:
+def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
+    horizon = horizon or config.horizon(DEFAULT_HORIZON)
     valuations = {v.symbol: v for v in store.latest_valuations()}
-    signals = store.all_signals()
+    signals = store.all_signals(horizon=horizon.key)
     window = config.dashboard.chart_days
     rows: list[Row] = []
 
     for ticker in config.tickers:
-        full = store.rsi_series(ticker.symbol)
+        full = store.rsi_series(ticker.symbol, horizon.key)
         series = full[-window:]
         # Only show signals where the pattern completed (up2_date) falls within the chart window
         chart_start = series[0].date if series else None
@@ -147,6 +173,7 @@ def _collect(store: Store, config: Config) -> list[Row]:
                 valuation=valuations.get(ticker.symbol),
                 signals=sigs,
                 currency=ticker.currency,
+                markets=ticker.markets,
             )
         )
 
@@ -277,7 +304,7 @@ def _chart_svg(row: Row, threshold: float) -> str:
 # ----------------------------------------------------------------- markup
 
 
-def _card(row: Row, config: Config) -> str:
+def _card(row: Row, config: Config, horizon) -> str:
     threshold = config.rsi.threshold
     rsi_text = f"{row.rsi:.1f}" if row.rsi is not None else "—"
     close_text = f"{row.latest.close:,.2f}" if row.latest else "—"
@@ -302,8 +329,9 @@ def _card(row: Row, config: Config) -> str:
 
     if row.valuation:
         val = row.valuation
-        _, passed = _gate(val, config)
-        verdict = "below fair value" if val.price < val.fair_value else "above fair value"
+        _, passed = _gate(val, config, horizon.margin)
+        upside = (val.fair_value / val.price - 1) * 100 if val.price else 0.0
+        verdict = f"{upside:+.0f}% to fair value"
         gate_class = "pass" if passed else "fail"
         age_text, age_class = _freshness(val)
         valuation_block = f"""
@@ -312,7 +340,8 @@ def _card(row: Row, config: Config) -> str:
           <div><dt>Price</dt><dd>{val.price:,.2f}</dd></div>
           <div><dt>Verdict</dt><dd>{verdict}</dd></div>
         </dl>
-        <p class="provenance{age_class}">{age_text}.</p>"""
+        <p class="provenance{age_class}">{age_text} · needs {horizon.margin_pct}
+           headroom on the {horizon.label} chart.</p>"""
     elif row.fired:
         valuation_block = """
         <p class="valuation pending">Buy signal on RSI alone — confirm the fair value
@@ -342,8 +371,16 @@ def _card(row: Row, config: Config) -> str:
     else:
         growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
 
+    leverage_block = ""
+    if row.fired:
+        leverage_block = (
+            f'<p class="leverage"><span class="lev">{horizon.leverage}x</span>'
+            f'<span class="lev-note">suggested for the {horizon.label} chart</span></p>'
+        )
+
     symbol = html.escape(row.symbol)
-    return f"""<article class="card state-{row.state}">
+    market_classes = " ".join(f"in-{m}" for m in row.markets)
+    return f"""<article class="card state-{row.state} {market_classes}">
   <header class="card-head">
     <div class="ident">
       <h3>{symbol}</h3>
@@ -359,6 +396,7 @@ def _card(row: Row, config: Config) -> str:
   {patterns}
   {valuation_block}
   {growth_block}
+  {leverage_block}
   <div class="actions">
     <a class="btn primary" href="{html.escape(row.morningstar_url)}"
        target="_blank" rel="noopener noreferrer">Check fair value on Morningstar</a>
@@ -370,11 +408,12 @@ def _card(row: Row, config: Config) -> str:
 </article>"""
 
 
-def _gate(val: Valuation, config: Config) -> tuple[bool, bool]:
-    return valuation_passes(val.price, val.fair_value, config.signal)
+def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bool]:
+    return valuation_passes(val.price, val.fair_value, config.signal, margin)
 
 
-def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
+def render(rows: list[Row], config: Config, horizon=None, standalone: bool = True) -> str:
+    horizon = horizon or config.horizon(DEFAULT_HORIZON)
     threshold = config.rsi.threshold
     generated = dt.datetime.now().strftime("%d %B %Y, %H:%M")
 
@@ -386,17 +425,38 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
     dated = [r.latest.date for r in rows if r.latest]
     as_of = max(dated) if dated else "—"
 
-    cards = "\n".join(_card(r, config) for r in rows)
+    cards = "\n".join(_card(r, config, horizon) for r in rows)
+
+    def page_for(h) -> str:
+        return "index.html" if h.key == DEFAULT_HORIZON else f"{h.key}.html"
+
+    horizon_links = "".join(
+        f'<a class="tf{" on" if h.key == horizon.key else ""}" '
+        f'href="{page_for(h)}">{html.escape(h.label)}</a>'
+        for h in config.horizons
+    )
+    market_tabs = '<label for="mk-all">All</label>' + "".join(
+        f'<label for="mk-{m}">{html.escape(MARKET_LABELS[m])}</label>'
+        for m in config.active_markets
+    )
+    # Radios sit ahead of the sheet so `:checked ~ .sheet .card` can reach the
+    # cards. Whole filter is CSS -- no script, works with JS disabled.
+    market_radios = '<input type="radio" name="mk" id="mk-all" checked>' + "".join(
+        f'<input type="radio" name="mk" id="mk-{m}">' for m in config.active_markets
+    )
 
     masthead = f"""<header class="masthead">
   <div class="title-block">
-    <p class="eyebrow">Relative Strength Screener</p>
+    <p class="eyebrow">Relative Strength Screener · {html.escape(horizon.label)} chart</p>
     <h1>RSI Screener</h1>
     <p class="standfirst">
       Tracking {tracked} market leaders for a double crossing of RSI
-      {threshold:g} within {config.signal.window_days} days — the entry pattern.
-      A signal whose Morningstar fair value also agrees is marked a strong buy.
+      {threshold:g} within {horizon.window_days} days on the
+      {html.escape(horizon.label)} chart — the entry pattern. A fair value at
+      least {horizon.margin_pct} above the price confirms it; this timeframe
+      suggests {horizon.leverage}x.
     </p>
+    <nav class="timeframes" aria-label="RSI timeframe">{horizon_links}</nav>
   </div>
   <dl class="aggregates">
     <div><dt>Session</dt><dd>{html.escape(as_of)}</dd></div>
@@ -408,18 +468,25 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
   </dl>
 </header>"""
 
-    body = f"""<div class="sheet">
+    body = f"""{market_radios}
+<div class="sheet">
 {masthead}
+<nav class="market-tabs" aria-label="Market">{market_tabs}</nav>
 <main class="grid">
 {cards}
 </main>
 <footer class="colophon">
-  <p>Generated {generated} · RSI ({config.rsi.period}) from TradingView, daily bars ·
-     History from Yahoo Finance · Fair value from Morningstar</p>
+  <p>Generated {generated} · RSI ({config.rsi.period}) from TradingView,
+     {html.escape(horizon.label)} bars · History from Yahoo Finance ·
+     Fair value from Morningstar</p>
+  <p class="disclaimer">Leverage figures are a fixed number attached to each
+     timeframe, not a calculation from the signal. Leverage multiplies losses
+     as readily as gains. Nothing here is financial advice.</p>
 </footer>
 </div>"""
 
-    head = f"<title>RSI Screener</title>\n<style>{_CSS}</style>"
+    head = (f"<title>RSI Screener · {html.escape(horizon.label)}</title>\n"
+            f"<style>{_CSS}</style>")
     if not standalone:
         return head + "\n" + body
     return f"""<!doctype html>
@@ -433,7 +500,6 @@ def render(rows: list[Row], config: Config, standalone: bool = True) -> str:
 {body}
 </body>
 </html>"""
-
 
 _CSS = """
 :root {
@@ -874,6 +940,82 @@ h1 {
   color: var(--ink-3);
   border-left-color: var(--rule);
 }
+
+/* ---- timeframe + market selectors ------------------------------------
+   The market filter is pure CSS: hidden radio inputs sit before .sheet, and
+   each `:checked` state hides the cards that don't carry the matching class.
+   No JavaScript, so it still works from a file:// URL or with JS disabled.
+   The timeframe selector can't work that way -- each horizon has genuinely
+   different RSI data -- so those are links to sibling pages. */
+input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
+
+.timeframes { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.timeframes .tf {
+  padding: 4px 11px;
+  font-size: 12px;
+  letter-spacing: .02em;
+  text-decoration: none;
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--card);
+}
+.timeframes .tf:hover { border-color: var(--accent); color: var(--accent); }
+.timeframes .tf.on {
+  background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600;
+}
+
+.market-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin: 0 0 14px; padding-top: 12px; border-top: 1px solid var(--rule);
+}
+.market-tabs label {
+  padding: 4px 11px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  user-select: none;
+}
+.market-tabs label:hover { border-color: var(--accent); color: var(--accent); }
+
+#mk-sp500:checked ~ .sheet .card:not(.in-sp500) { display: none; }
+#mk-sp500:checked ~ .sheet .market-tabs label[for="mk-sp500"],
+#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
+  background: var(--accent); color: var(--paper); border-color: var(--accent);
+}
+#mk-nasdaq:checked ~ .sheet .card:not(.in-nasdaq) { display: none; }
+#mk-nasdaq:checked ~ .sheet .market-tabs label[for="mk-nasdaq"],
+#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
+  background: var(--accent); color: var(--paper); border-color: var(--accent);
+}
+#mk-europe:checked ~ .sheet .card:not(.in-europe) { display: none; }
+#mk-europe:checked ~ .sheet .market-tabs label[for="mk-europe"],
+#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
+  background: var(--accent); color: var(--paper); border-color: var(--accent);
+}
+#mk-penny:checked ~ .sheet .card:not(.in-penny) { display: none; }
+#mk-penny:checked ~ .sheet .market-tabs label[for="mk-penny"],
+#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
+  background: var(--accent); color: var(--paper); border-color: var(--accent);
+}
+
+
+/* ---- leverage -------------------------------------------------------- */
+.leverage {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 0; padding: 7px 10px;
+  border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.leverage .lev {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px; font-weight: 700; color: var(--accent);
+}
+.leverage .lev-note { font-size: 11px; color: var(--ink-3); }
+
+.disclaimer { margin-top: 6px; font-size: 10.5px; color: var(--ink-3); max-width: 62ch; }
 
 .provenance { margin: -4px 0 0; font-size: 11px; color: var(--ink-3); }
 /* Past a quarter the estimate may well have been revised since. Flagged

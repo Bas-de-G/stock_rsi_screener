@@ -1,12 +1,13 @@
-name: Daily screener run
+name: Screener run
 
-# Runs the screener on GitHub's servers every weekday, commits the collected
-# history back to the repo, and publishes the dashboard to GitHub Pages — so
-# there's a live URL that stays current with nobody's laptop switched on.
+# Runs the screener on GitHub's servers hourly through the trading day,
+# commits the collected history back to the repo, and publishes the dashboards
+# to GitHub Pages — so there's a live URL that stays current with nobody's
+# laptop switched on.
 #
 # NOTE: GitHub only runs scheduled workflows from the repository's DEFAULT
 # branch. On a feature branch this file only runs via "Run workflow"; merge it
-# to main for the daily schedule to start firing.
+# to main for the schedule to start firing.
 #
 # Morningstar scraping is skipped by default: fair value is subscriber-only,
 # and a session cookie is a credential. Record fair values by hand in
@@ -15,9 +16,15 @@ name: Daily screener run
 
 on:
   schedule:
-    # 21:30 UTC on weekdays — about 30 minutes after the US market close,
-    # so the RSI reading is the settled daily bar, not an intraday value.
-    - cron: "30 21 * * 1-5"
+    # Hourly on weekdays, 13:00–21:00 UTC. That window covers the US session
+    # (13:30–20:00 UTC) plus the European afternoon, and the 21:00 run lands
+    # after the US close so the daily bar it records is the settled one.
+    #
+    # Hourly rather than daily because the 1h and 4h horizons need it: a
+    # once-a-day sample of an hourly RSI is up to 24 hours stale, which makes
+    # the intraday pages decorative. The cost is ~9 data commits a weekday
+    # instead of 1.
+    - cron: "0 13-21 * * 1-5"
   workflow_dispatch:
   push:
     # Re-publish immediately when a fair value is edited on github.com.
@@ -61,12 +68,14 @@ jobs:
       # (SanDisk, say) pick up its own history automatically instead of
       # trickling in one live row a day for months.
       - name: Backfill any tickers missing history
-        run: python -m screener.cli backfill --range 1y
+        # No --range: each horizon has its own depth (5y weekly, 730d hourly).
+        run: python -m screener.cli backfill
 
       - name: Run screener
         run: python -m screener.cli run
 
-      - name: Build dashboard
+      # Writes index.html (1d) plus 1h.html, 4h.html and 1w.html alongside it.
+      - name: Build dashboards
         run: python -m screener.cli dashboard --output site/index.html
 
       # Collected data belongs on the default branch only. Guarded rather
@@ -83,7 +92,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "Nothing changed."
           else
-            git commit -m "data: screener run $(date -u +%Y-%m-%d)"
+            git commit -m "data: screener run $(date -u +%Y-%m-%dT%H:%MZ)"
             # Another run may have pushed while this one was working.
             git pull --rebase --autostash origin "$GITHUB_REF_NAME" || true
             git push
