@@ -40,3 +40,7 @@ PG:
   fair_value: 155.0
   checked: '2026-08-04'
   source: scraped
+RAND:
+  fair_value: 31.5
+  checked: '2026-08-04'
+  source: scraped
