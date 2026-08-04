@@ -64,6 +64,48 @@ tickers:
   # Quoted in pence, not pounds -- 1413.6 means GBX 1413.6 (about GBP 14.14).
   - {symbol: RR, tradingview: "LSE:RR.", morningstar: xlon/rr., yahoo: RR.L, currency: GBX}
 
+  # --- Dutch listings (Euronext Amsterdam) ------------------------------
+  # AEX heavyweights. Three identifier quirks apply to every one of these:
+  #   TradingView  EURONEXT:<ticker>   (one prefix for all of Euronext, not a
+  #                                     per-city code -- AMS: and XAMS: 404)
+  #   Yahoo        <ticker>.AS
+  #   Morningstar  xams/<ticker>       (XAMS is the MIC for Euronext Amsterdam,
+  #                                     same convention as xnas/xnys/xlon above)
+  # All quoted in euros, so `currency: EUR` shows next to the price.
+  #
+  # Amsterdam closes 17:30 CET, hours before the 21:30 UTC scheduled run, so
+  # these are always settled daily bars -- never a mid-session RSI.
+
+  # Semiconductors -- the cluster the AEX is genuinely world-class at.
+  - {symbol: ASML,  tradingview: "EURONEXT:ASML",  morningstar: xams/asml,  yahoo: ASML.AS,  currency: EUR}
+  - {symbol: ASM,   tradingview: "EURONEXT:ASM",   morningstar: xams/asm,   yahoo: ASM.AS,   currency: EUR}
+  - {symbol: BESI,  tradingview: "EURONEXT:BESI",  morningstar: xams/besi,  yahoo: BESI.AS,  currency: EUR}
+
+  # Tech & payments
+  - {symbol: ADYEN, tradingview: "EURONEXT:ADYEN", morningstar: xams/adyen, yahoo: ADYEN.AS, currency: EUR}
+  - {symbol: PRX,   tradingview: "EURONEXT:PRX",   morningstar: xams/prx,   yahoo: PRX.AS,   currency: EUR}
+
+  # Consumer & media
+  # HEIA is the operating company. Heineken Holding (HEIO) tracks the same
+  # asset at a persistent discount, so it's left out as duplicate exposure.
+  - {symbol: HEIA,  tradingview: "EURONEXT:HEIA",  morningstar: xams/heia,  yahoo: HEIA.AS,  currency: EUR}
+  - {symbol: AD,    tradingview: "EURONEXT:AD",    morningstar: xams/ad,    yahoo: AD.AS,    currency: EUR}
+  - {symbol: UMG,   tradingview: "EURONEXT:UMG",   morningstar: xams/umg,   yahoo: UMG.AS,   currency: EUR}
+
+  # Financials
+  - {symbol: INGA,  tradingview: "EURONEXT:INGA",  morningstar: xams/inga,  yahoo: INGA.AS,  currency: EUR}
+  - {symbol: ABN,   tradingview: "EURONEXT:ABN",   morningstar: xams/abn,   yahoo: ABN.AS,   currency: EUR}
+  - {symbol: NN,    tradingview: "EURONEXT:NN",    morningstar: xams/nn,    yahoo: NN.AS,    currency: EUR}
+
+  # Health, chemicals & industrials
+  - {symbol: PHIA,  tradingview: "EURONEXT:PHIA",  morningstar: xams/phia,  yahoo: PHIA.AS,  currency: EUR}
+  - {symbol: AKZA,  tradingview: "EURONEXT:AKZA",  morningstar: xams/akza,  yahoo: AKZA.AS,  currency: EUR}
+  - {symbol: DSFIR, tradingview: "EURONEXT:DSFIR", morningstar: xams/dsfir, yahoo: DSFIR.AS, currency: EUR}
+
+  # Services & telecom
+  - {symbol: WKL,   tradingview: "EURONEXT:WKL",   morningstar: xams/wkl,   yahoo: WKL.AS,   currency: EUR}
+  - {symbol: KPN,   tradingview: "EURONEXT:KPN",   morningstar: xams/kpn,   yahoo: KPN.AS,   currency: EUR}
+
 rsi:
   # Wilder RSI, the same definition TradingView's "RSI (14)" uses.
   # TradingView only publishes periods 14 and 7.
