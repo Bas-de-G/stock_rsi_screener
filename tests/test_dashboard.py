@@ -385,3 +385,58 @@ def test_provenance_line_does_not_say_how_the_value_was_obtained(config, tmp_pat
     assert "by hand" not in text
     assert "scraped from Morningstar" not in text
     assert "Checked 2 days ago" in text
+
+
+# ------------------------------------- crosses at the chart-window left edge
+
+
+from screener.dashboard import _collect, _visible_crosses
+from screener.signals import find_upward_crosses
+
+
+def pts(*rsis):
+    return [
+        RsiPoint("X", f"2026-01-{i + 1:02d}", 100.0, v, "live:tradingview")
+        for i, v in enumerate(rsis)
+    ]
+
+
+def test_a_cross_on_the_windows_first_bar_is_still_counted():
+    """Regression: PG showed "1 upward cross of 30" directly above a completed
+    up/down/up pattern, which needs two. A cross is defined by comparing a bar
+    to its predecessor, and slicing the window threw that predecessor away --
+    so a cross landing exactly on the left edge vanished from the count."""
+    full = pts(25, 26, 28, 31, 33, 29, 35)   # crosses at index 3 and 6
+    # window=4 puts the first cross exactly on the visible slice's first bar
+    assert _visible_crosses(full, 4, 30.0) == [0, 3]
+
+
+def test_visible_crosses_matches_plain_detection_when_history_fits():
+    full = pts(25, 26, 28, 31, 33, 29, 35)
+    assert _visible_crosses(full, 99, 30.0) == find_upward_crosses(full, 30.0)
+
+
+def test_visible_crosses_excludes_crosses_before_the_window():
+    """A cross two bars before the window starts must not leak in."""
+    full = pts(25, 31, 26, 25, 24, 23, 22)   # single cross at index 1
+    assert _visible_crosses(full, 3, 30.0) == []
+
+
+def test_visible_crosses_handles_empty_and_single_point_history():
+    assert _visible_crosses([], 90, 30.0) == []
+    assert _visible_crosses(pts(25), 90, 30.0) == []
+
+
+def test_card_cross_count_agrees_with_its_pattern(config, tmp_path):
+    """End-to-end: a card showing a fired pattern must not claim fewer than
+    two crosses, since two is what forms the pattern in the first place."""
+    db = tmp_path / "t.db"
+    rsis = [40.0] * 30 + [25.0, 31.0, 27.0, 33.0]   # up/down/up at the tail
+    with Store(db) as store:
+        for i, v in enumerate(rsis):
+            import datetime as dt
+            d = (dt.date(2026, 1, 1) + dt.timedelta(days=i)).isoformat()
+            store.upsert_rsi_point(RsiPoint("IBM", d, 200.0, v, "live:tradingview"))
+        rows = {r.symbol: r for r in _collect(store, config)}
+    ibm = rows["IBM"]
+    assert len(ibm.crosses) >= 2

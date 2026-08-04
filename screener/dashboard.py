@@ -104,6 +104,21 @@ def build_dashboard(
     return output
 
 
+def _visible_crosses(full: list[RsiPoint], window: int, threshold: float) -> list[int]:
+    """Upward crosses inside the chart window, as indices into the visible slice.
+
+    Detected over one *extra* leading bar rather than the visible slice alone.
+    A cross is defined by comparing a bar against its predecessor, and for the
+    very first bar of the window that predecessor has been sliced off — so a
+    genuine cross landing exactly on the window's left edge would go uncounted.
+    That produced cards reading "1 upward cross of 30" directly above a
+    completed up/down/up pattern, which plainly needs two.
+    """
+    lead = full[-(window + 1):]
+    offset = len(lead) - min(len(full), window)
+    return [i - offset for i in find_upward_crosses(lead, threshold) if i - offset >= 0]
+
+
 def _collect(store: Store, config: Config) -> list[Row]:
     valuations = {v.symbol: v for v in store.latest_valuations()}
     signals = store.all_signals()
@@ -111,7 +126,8 @@ def _collect(store: Store, config: Config) -> list[Row]:
     rows: list[Row] = []
 
     for ticker in config.tickers:
-        series = store.rsi_series(ticker.symbol)[-window:]
+        full = store.rsi_series(ticker.symbol)
+        series = full[-window:]
         # Only show signals where the pattern completed (up2_date) falls within the chart window
         chart_start = series[0].date if series else None
         sigs = [
@@ -127,7 +143,7 @@ def _collect(store: Store, config: Config) -> list[Row]:
                     f"{ticker.tradingview.replace(':', '-')}/technicals/"
                 ),
                 series=series,
-                crosses=find_upward_crosses(series, config.rsi.threshold),
+                crosses=_visible_crosses(full, window, config.rsi.threshold),
                 valuation=valuations.get(ticker.symbol),
                 signals=sigs,
                 currency=ticker.currency,

@@ -273,3 +273,55 @@ def test_a_signed_out_page_is_not_confused_with_a_bot_challenge():
     assert not _looks_like_bot_challenge(LOGGED_OUT_PAGE)
     assert _looks_logged_out(LOGGED_OUT_PAGE)
     assert not _looks_logged_out(WAF_CHALLENGE_PAGE)
+
+
+# ------------------------------------------------- non-dollar currencies
+#
+# Regression: `_price_from_text`'s primary regex hard-required a literal "$",
+# and `_MONEY`'s optional "$" wouldn't step over a "€" either -- so price came
+# back None for every Amsterdam and London ticker while fair value parsed
+# fine. That half-filled result then flowed into the scrape as if it were
+# usable. 19 of the 54 configured tickers are non-USD.
+
+
+def euro_page(price="37.64", fair="44.00", cur="€"):
+    return f"""
+Randstad NV RAND
+Stock XAMS Rating as of Aug 3, 2026
+{cur}{price} +0.42 (1.13%)
+Previous Close Price {cur}37.22
+Price vs Fair Value
+RAND is trading within a range we consider fairly valued.
+Fair Value {cur}{fair}
+Jul 30, 2026
+Uncertainty Medium
+Price {cur}37.22
+1-Star Price {cur}59.40
+5-Star Price {cur}30.80
+Economic Moat Narrow
+"""
+
+
+@pytest.mark.parametrize("cur", ["$", "€", "£"])
+def test_price_parses_for_every_supported_currency(cur):
+    assert _price_from_text(euro_page(cur=cur)) == 37.64
+
+
+@pytest.mark.parametrize("cur", ["$", "€", "£"])
+def test_fair_value_parses_for_every_supported_currency(cur):
+    assert _fair_value_from_text(euro_page(cur=cur)) == 44.00
+
+
+@pytest.mark.parametrize("cur", ["$", "€", "£"])
+def test_extract_is_complete_for_every_supported_currency(cur):
+    r = _extract("RAND", [], euro_page(cur=cur))
+    assert r.complete, f"{cur} page produced price={r.price} fair_value={r.fair_value}"
+    assert r.fair_value_date == "Jul 30, 2026"
+
+
+def test_the_euro_page_still_avoids_the_star_price_decoys():
+    """1-Star/5-Star Price sit right below Fair Value on the card and would be
+    easy to grab by accident."""
+    r = _extract("RAND", [], euro_page())
+    assert r.fair_value == 44.00
+    assert r.fair_value not in (59.40, 30.80)
