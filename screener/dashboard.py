@@ -403,8 +403,6 @@ def _card(row: Row, config: Config, horizon) -> str:
     <a class="btn" href="{html.escape(row.tradingview_url)}"
        target="_blank" rel="noopener noreferrer">TradingView</a>
   </div>
-  <p class="record-hint"><code>screener scrape --symbols {symbol}</code>
-     or <code>screener fair-value {symbol} &lt;value&gt;</code></p>
 </article>"""
 
 
@@ -1059,15 +1057,7 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
   outline-offset: 2px;
 }
 
-.record-hint { margin: 0; font-size: 11px; color: var(--ink-3); }
 
-.record-hint code {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
-  padding: 1px 5px;
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
-  border: 1px solid var(--rule);
-}
 
 /* --------------------------------------------------------- colophon */
 

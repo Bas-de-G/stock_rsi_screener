@@ -548,3 +548,12 @@ def test_each_page_only_carries_its_own_horizons_data(tmp_path, config):
         paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
     daily = next(p for p in paths if p.name == "index.html").read_text()
     assert "2026-07-20T14:00" not in daily
+
+
+def test_cards_no_longer_carry_the_cli_hint(config):
+    """The dashboard is read by someone who never runs the CLI; a copy-paste
+    command on every card was noise."""
+    html = render([row(signals=[signal(fired=True)])], config)
+    assert "screener scrape" not in html
+    assert "screener fair-value" not in html
+    assert "record-hint" not in html

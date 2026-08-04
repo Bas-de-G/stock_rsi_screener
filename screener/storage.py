@@ -382,6 +382,30 @@ class Store:
             )
         self._conn.commit()
 
+    def update_signal_earnings_growth(
+        self, symbol: str, horizon: str, growth: float | None, known: bool, passes: bool
+    ) -> None:
+        """Re-score every recorded pattern for one symbol against the *current*
+        earnings growth.
+
+        Deliberately not pinned to the pattern's own date. Earnings growth is a
+        fundamental that describes the company now and moves quarterly, not a
+        price fact belonging to a particular bar — and the bar at a pattern's
+        second cross is almost always backfilled, which carries no growth
+        figure at all. Pinning it there left the factor permanently unknown on
+        every signal, so it never graded anything. This mirrors how the
+        valuation factor already works: `sync_fair_values` scores against the
+        latest close and today's fair value, not the values on the signal date.
+        """
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """UPDATE signals
+                      SET earnings_growth=?, earnings_growth_known=?, earnings_growth_pass=?
+                    WHERE symbol=? AND horizon=?""",
+                (growth, int(known), int(passes), symbol, horizon),
+            )
+        self._conn.commit()
+
     def manual_valuation_symbols(self) -> list[str]:
         with closing(self._conn.cursor()) as cur:
             cur.execute("SELECT DISTINCT symbol FROM valuations WHERE source='manual'")

@@ -153,6 +153,7 @@ def cmd_run(config: Config, args) -> int:
     horizons = _selected_horizons(config, args)
     with Store(config.storage.database) as store:
         recorded = sync_fair_values(store, config)
+        sync_earnings_growth(store, config)
         if recorded:
             print(f"  {recorded} hand-checked fair value(s) loaded "
                   f"from {config.storage.fair_values.name}\n")
@@ -249,6 +250,43 @@ def cmd_run(config: Config, args) -> int:
     return exit_code
 
 
+def _latest_earnings_growth(series) -> float | None:
+    """Most recent non-null earnings growth in a series.
+
+    Scans backwards rather than reading `series[-1]`: only live-fetched bars
+    carry the figure, so the newest bar is frequently a backfilled one with
+    nothing on it.
+    """
+    for point in reversed(series):
+        if point.earnings_growth is not None:
+            return point.earnings_growth
+    return None
+
+
+def sync_earnings_growth(store: Store, config: Config) -> int:
+    """Re-score every recorded signal against the current earnings growth.
+
+    The counterpart to `sync_fair_values`, and for the same reason: both
+    grading factors describe the company as it is now, so both have to be
+    refreshed on every run rather than frozen at the moment a pattern
+    completed.
+    """
+    applied = 0
+    for ticker in config.tickers:
+        for horizon in config.horizons:
+            series = store.rsi_series(ticker.symbol, horizon.key)
+            if not series:
+                continue
+            growth = _latest_earnings_growth(series)
+            known, confirms = earnings_growth_passes(growth)
+            store.update_signal_earnings_growth(
+                ticker.symbol, horizon.key, growth, known, confirms
+            )
+            if known:
+                applied += 1
+    return applied
+
+
 def _detect_and_record(
     store: Store, config: Config, announce: bool, horizons=None
 ) -> list[Signal]:
@@ -268,7 +306,6 @@ def _detect_and_record(
             series = store.rsi_series(symbol, horizon.key)
             if not series:
                 continue
-            rsi_by_date = {p.date: p for p in series}
             for pair in find_cross_pairs(series, config.rsi.threshold, window):
                 if store.signal_exists(symbol, pair.up2_date, horizon.key):
                     continue
@@ -280,10 +317,9 @@ def _detect_and_record(
                     price, fair_value, config.signal, horizon.margin
                 )
 
-                # Only ever populated on a live-fetched row (see RsiPoint), so
-                # an up2_date that was backfilled rather than observed live
-                # comes back unknown here — same as an unchecked fair value.
-                growth = rsi_by_date[pair.up2_date].earnings_growth
+                # The *current* growth, not the value on the pattern's own
+                # bar. See `Store.update_signal_earnings_growth` for why.
+                growth = _latest_earnings_growth(series)
                 eg_known, eg_confirms = earnings_growth_passes(growth)
 
                 signal = Signal(
@@ -738,6 +774,7 @@ def cmd_dashboard(config: Config, args) -> int:
     output = Path(args.output) if args.output else config.dashboard.output
     with Store(config.storage.database) as store:
         sync_fair_values(store, config, quiet=True)
+        sync_earnings_growth(store, config)
         if args.horizon:
             paths = [build_dashboard(store, config, output, horizon=args.horizon)]
         else:

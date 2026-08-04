@@ -585,7 +585,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 294 tests
+python -m pytest tests/ -q      # 301 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

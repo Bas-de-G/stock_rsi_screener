@@ -158,6 +158,15 @@ slug can't be verified from a script (their CDN returns HTTP 202 with an empty
 body for valid *and* bogus URLs alike), so follow the MIC-code convention and
 accept that a wrong slug means a dead dashboard button, nothing worse.
 
+**Both grading factors are scored from *current* data, never from the signal
+date.** `sync_fair_values` uses the latest close and today's fair value;
+`sync_earnings_growth` is its counterpart and must be called alongside it.
+Earnings growth used to be read from the bar at the pattern's own second
+cross — which is almost always backfilled and carries no figure — so the
+factor came back unknown on every signal and silently graded nothing: 0 of 72
+on the live database. Both are quarterly fundamentals describing the company
+now, not properties of one historical bar.
+
 **Earnings growth only exists on live-fetched rows.** `rsi_history.earnings_growth`
 comes from TradingView's scanner alongside RSI (`tradingview.fetch_live_rsi`) —
 backfill has no historical source for it, so a signal whose `up2_date` was
@@ -216,7 +225,7 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 294 tests, fully offline
+python -m pytest tests/ -q          # 301 tests, fully offline
 
 python -m screener.cli backfill              # seeds all four horizons
 python -m screener.cli run                   # the scheduled job (RSI only)

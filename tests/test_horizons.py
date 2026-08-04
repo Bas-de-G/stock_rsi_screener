@@ -325,3 +325,122 @@ def test_markets_constant_matches_what_config_accepts():
 
 def test_default_horizon_is_one_of_the_configured_ones():
     assert DEFAULT_HORIZON in [h.key for h in DEFAULT_HORIZONS]
+
+
+# ------------------------------------------- earnings growth is graded live
+
+
+from screener.cli import _latest_earnings_growth, sync_earnings_growth
+
+
+def test_latest_earnings_growth_skips_backfilled_bars():
+    """Only live bars carry the figure, and the newest bar is frequently a
+    backfilled one -- so this scans back rather than reading series[-1]."""
+    series = [
+        RsiPoint("X", "2026-08-01", 100.0, 45.0, "live:tradingview", 12.5, "ttm"),
+        RsiPoint("X", "2026-08-02", 100.0, 45.0, "backfill:yahoo"),
+        RsiPoint("X", "2026-08-03", 100.0, 45.0, "backfill:yahoo"),
+    ]
+    assert _latest_earnings_growth(series) == 12.5
+
+
+def test_latest_earnings_growth_prefers_the_most_recent_reading():
+    series = [
+        RsiPoint("X", "2026-08-01", 100.0, 45.0, "live:tradingview", 12.5, "ttm"),
+        RsiPoint("X", "2026-08-02", 100.0, 45.0, "live:tradingview", -3.0, "ttm"),
+    ]
+    assert _latest_earnings_growth(series) == -3.0
+
+
+def test_latest_earnings_growth_is_none_when_nothing_is_live():
+    series = [RsiPoint("X", "2026-08-01", 100.0, 45.0, "backfill:yahoo")]
+    assert _latest_earnings_growth(series) is None
+    assert _latest_earnings_growth([]) is None
+
+
+def test_a_signal_on_a_backfilled_bar_still_grades_on_earnings(config, tmp_path):
+    """Regression: earnings growth was read from the bar at the pattern's own
+    second cross. That bar is almost always backfilled and carries no figure,
+    so the factor came back unknown on every signal and never graded anything
+    -- 0 of 72 signals on the live database. It's a quarterly fundamental
+    describing the company now, not a property of one historical bar."""
+    import dataclasses
+
+    cfg = dataclasses.replace(
+        config, storage=dataclasses.replace(config.storage, database=tmp_path / "eg.db")
+    )
+    with Store(cfg.storage.database) as store:
+        # pattern completes on a backfilled bar...
+        store.upsert_rsi_point(
+            RsiPoint("AAPL", "2026-04-30", 100.0, 33.0, "backfill:yahoo", horizon="1d")
+        )
+        # ...and a much later live bar carries the growth figure
+        store.upsert_rsi_point(
+            RsiPoint("AAPL", "2026-08-04", 110.0, 58.0, "live:tradingview", 32.6, "ttm",
+                     horizon="1d")
+        )
+        store.record_signal(Signal(
+            "AAPL", "2026-04-21", "2026-04-25", "2026-04-30",
+            None, None, False, False, True, "now", horizon="1d",
+        ))
+        assert store.all_signals("AAPL", "1d")[0].earnings_growth_known is False
+
+        sync_earnings_growth(store, cfg)
+
+        sig = store.all_signals("AAPL", "1d")[0]
+        assert sig.earnings_growth_known is True
+        assert sig.earnings_growth == 32.6
+        assert sig.earnings_growth_pass is True
+
+
+def test_shrinking_earnings_withhold_the_rocket_after_sync(config, tmp_path):
+    """The LCID case: fair value confirms, but earnings are shrinking, so the
+    two known factors disagree and the signal stays a plain buy."""
+    import dataclasses
+
+    from screener.signals import is_strong
+
+    cfg = dataclasses.replace(
+        config, storage=dataclasses.replace(config.storage, database=tmp_path / "eg.db")
+    )
+    with Store(cfg.storage.database) as store:
+        store.upsert_rsi_point(
+            RsiPoint("AAPL", "2026-08-04", 7.62, 58.0, "live:tradingview", -8.5, "ttm",
+                     horizon="1d")
+        )
+        store.record_signal(Signal(
+            "AAPL", "2026-04-21", "2026-04-25", "2026-04-30",
+            7.0, 12.0, True, True, True, "now", horizon="1d",
+        ))
+        before = store.all_signals("AAPL", "1d")[0]
+        assert is_strong((before.valuation_known, before.valuation_pass),
+                         (before.earnings_growth_known, before.earnings_growth_pass))
+
+        sync_earnings_growth(store, cfg)
+
+        after = store.all_signals("AAPL", "1d")[0]
+        assert after.earnings_growth_pass is False
+        assert not is_strong((after.valuation_known, after.valuation_pass),
+                             (after.earnings_growth_known, after.earnings_growth_pass))
+
+
+def test_sync_earnings_growth_is_scoped_per_horizon(config, tmp_path):
+    import dataclasses
+
+    cfg = dataclasses.replace(
+        config, storage=dataclasses.replace(config.storage, database=tmp_path / "eg.db")
+    )
+    with Store(cfg.storage.database) as store:
+        store.upsert_rsi_point(
+            RsiPoint("AAPL", "2026-08-04", 100.0, 45.0, "live:tradingview", 20.0, "ttm",
+                     horizon="1d")
+        )
+        for hz in ("1d", "1w"):
+            store.record_signal(Signal(
+                "AAPL", "2026-04-21", "2026-04-25", "2026-04-30",
+                None, None, False, False, True, "now", horizon=hz,
+            ))
+        sync_earnings_growth(store, cfg)
+        by_hz = {s.horizon: s for s in store.all_signals("AAPL")}
+        assert by_hz["1d"].earnings_growth_known is True
+        assert by_hz["1w"].earnings_growth_known is False, "1w has no bars, so nothing to grade on"
