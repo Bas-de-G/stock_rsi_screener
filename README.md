@@ -17,8 +17,8 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **52 market leaders** out of the box — 35 US names (AAPL, MSFT, NVDA,
-AMZN, IBM, JPM, XOM, LLY…), 16 Dutch ones from Euronext Amsterdam (ASML,
+Tracks **54 market leaders** out of the box — 35 US names (AAPL, MSFT, NVDA,
+AMZN, IBM, JPM, XOM, LLY…), 18 Dutch ones from Euronext Amsterdam (ASML,
 Heineken, Adyen, ING, Philips…), and Rolls-Royce in London. Edit `config.yaml`
 to change the list. Every entry was checked against both data sources first,
 so none of them 404. Push a new ticker to `main` and the next scheduled run

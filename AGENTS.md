@@ -6,7 +6,7 @@ rules.
 
 ## What this is
 
-A screener that watches ~52 large-cap stocks for a double-oversold-recovery
+A screener that watches ~54 large-cap stocks for a double-oversold-recovery
 pattern: RSI crosses 30 upward, falls back below, and crosses up again inside 14
 days. A completed pattern is a buy signal on its own. Two independent factors
 grade it — Morningstar fair value and YoY earnings growth — and either one

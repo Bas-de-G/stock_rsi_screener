@@ -96,6 +96,9 @@ tickers:
   - {symbol: INGA,  tradingview: "EURONEXT:INGA",  morningstar: xams/inga,  yahoo: INGA.AS,  currency: EUR}
   - {symbol: ABN,   tradingview: "EURONEXT:ABN",   morningstar: xams/abn,   yahoo: ABN.AS,   currency: EUR}
   - {symbol: NN,    tradingview: "EURONEXT:NN",    morningstar: xams/nn,    yahoo: NN.AS,    currency: EUR}
+  # Aegon re-domiciled to Bermuda in 2023 but still trades in Amsterdam in
+  # euros and remains an AEX constituent, so nothing here changes.
+  - {symbol: AGN,   tradingview: "EURONEXT:AGN",   morningstar: xams/agn,   yahoo: AGN.AS,   currency: EUR}
 
   # Health, chemicals & industrials
   - {symbol: PHIA,  tradingview: "EURONEXT:PHIA",  morningstar: xams/phia,  yahoo: PHIA.AS,  currency: EUR}
@@ -105,6 +108,7 @@ tickers:
   # Services & telecom
   - {symbol: WKL,   tradingview: "EURONEXT:WKL",   morningstar: xams/wkl,   yahoo: WKL.AS,   currency: EUR}
   - {symbol: KPN,   tradingview: "EURONEXT:KPN",   morningstar: xams/kpn,   yahoo: KPN.AS,   currency: EUR}
+  - {symbol: RAND,  tradingview: "EURONEXT:RAND",  morningstar: xams/rand,  yahoo: RAND.AS,  currency: EUR}
 
 rsi:
   # Wilder RSI, the same definition TradingView's "RSI (14)" uses.
