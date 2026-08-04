@@ -60,13 +60,23 @@ class Horizon:
 
 
 # Verified against both services before being wired in: TradingView serves
-# RSI|60, RSI|240, RSI and RSI|1W, and Yahoo returns ~5,000 hourly bars and
-# ~1,450 four-hour bars over a 730-day range (its intraday ceiling).
+# RSI|60, RSI|240, RSI and RSI|1W, and Yahoo serves all four intervals.
+#
+# The ranges are sized to what actually gets used, not to what Yahoo will hand
+# over. Only `dashboard.chart_days` (90) bars are ever plotted, plus 15 to seed
+# Wilder's RSI and one lead-in bar for cross detection -- about 105. Each range
+# below lands at 2.4-2.8x that, which is comfortable headroom for a thinly
+# traded ticker without hoarding.
+#
+# This matters more than it looks: the database is committed to git on every
+# scheduled run. Asking Yahoo for its full 730-day intraday depth gave 5,000
+# hourly bars a ticker -- a 54 MB database to display 2.8 MB worth, growing the
+# repository by gigabytes a month. These ranges make it ~7 MB.
 DEFAULT_HORIZONS: tuple[Horizon, ...] = (
-    Horizon("1h", "1 hour",  "60",  "60m", "730d", window_days=2,  margin=0.10, leverage=10, intraday=True),
-    Horizon("4h", "4 hours", "240", "4h",  "730d", window_days=5,  margin=0.20, leverage=5,  intraday=True),
-    Horizon("1d", "1 day",   "1D",  "1d",  "2y",   window_days=14, margin=0.30, leverage=2),
-    Horizon("1w", "1 week",  "1W",  "1wk", "5y",   window_days=90, margin=0.50, leverage=1),
+    Horizon("1h", "1 hour",  "60",  "60m", "2mo", window_days=2,  margin=0.10, leverage=10, intraday=True),
+    Horizon("4h", "4 hours", "240", "4h",  "6mo", window_days=5,  margin=0.20, leverage=5,  intraday=True),
+    Horizon("1d", "1 day",   "1D",  "1d",  "1y",  window_days=14, margin=0.30, leverage=2),
+    Horizon("1w", "1 week",  "1W",  "1wk", "5y",  window_days=90, margin=0.50, leverage=1),
 )
 DEFAULT_HORIZON = "1d"
 

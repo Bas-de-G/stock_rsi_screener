@@ -29,15 +29,21 @@ signal:
   window_unit: calendar
   valuation_rule: price_below_fair_value
   fire_without_valuation: true
-storage: {database: data/t.db, csv_dir: data}
-dashboard: {output: data/t.html, chart_days: 90}
+storage:
+  database: TMP/t.db
+  csv_dir: TMP
+  fair_values: TMP/fair_values.yaml
+dashboard: {output: TMP/t.html, chart_days: 90}
 """
 
 
 @pytest.fixture()
 def config(tmp_path):
+    # Every storage path is templated to tmp_path. Without an explicit
+    # `fair_values` key the loader falls back to the repository's own
+    # fair_values.yaml, and tests that write one would clobber real data.
     path = tmp_path / "config.yaml"
-    path.write_text(CONFIG_YAML)
+    path.write_text(CONFIG_YAML.replace("TMP", str(tmp_path)))
     return load_config(path)
 
 
@@ -164,3 +170,92 @@ def test_an_unknown_symbol_is_reported_and_skipped(store, config, capsys):
 def test_symbols_flag_beats_all_flag(store, config):
     targets = _resolve_scrape_targets(store, config, args(all=True, symbols="IBM"))
     assert [t.symbol for t in targets] == ["IBM"]
+
+
+# ------------------------------------------- skip fair values already fresh
+
+
+import datetime as dt
+
+from screener.cli import (
+    DEFAULT_MAX_FAIR_VALUE_AGE_DAYS,
+    _drop_recently_checked,
+    _fresh_fair_values,
+)
+from screener.fairvalues import save_fair_value
+
+
+def days_ago(n):
+    return (dt.date.today() - dt.timedelta(days=n)).isoformat()
+
+
+def scrape_args(force=False, max_age=None):
+    return argparse.Namespace(force=force, max_age=max_age)
+
+
+def test_a_value_checked_today_is_fresh(config):
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(0))
+    assert _fresh_fair_values(config, 14) == {"IBM": 0}
+
+
+def test_a_value_checked_within_the_window_is_fresh(config):
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(13))
+    assert _fresh_fair_values(config, 14) == {"IBM": 13}
+
+
+def test_a_value_older_than_the_window_is_stale(config):
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(14))
+    assert _fresh_fair_values(config, 14) == {}
+
+
+def test_a_value_with_no_checked_date_counts_as_stale(config):
+    """Hand-written without a date — re-reading beats assuming it's current."""
+    config.storage.fair_values.write_text("IBM: 225.0\n")
+    assert _fresh_fair_values(config, 14) == {}
+
+
+def test_an_unparseable_checked_date_counts_as_stale(config):
+    config.storage.fair_values.write_text("IBM:\n  fair_value: 225.0\n  checked: last Tuesday\n")
+    assert _fresh_fair_values(config, 14) == {}
+
+
+def test_a_broken_yaml_file_does_not_crash_the_filter(config):
+    config.storage.fair_values.write_text("IBM: [unclosed\n")
+    assert _fresh_fair_values(config, 14) == {}
+
+
+def test_fresh_tickers_are_dropped_from_the_scrape_list(config):
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(3))
+    tickers = [config.ticker("IBM"), config.ticker("NVDA")]
+    kept, skipped = _drop_recently_checked(config, tickers, scrape_args())
+    assert [t.symbol for t in kept] == ["NVDA"]
+    assert skipped == [("IBM", 3)]
+
+
+def test_force_keeps_everything(config):
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(1))
+    tickers = [config.ticker("IBM")]
+    kept, skipped = _drop_recently_checked(config, tickers, scrape_args(force=True))
+    assert [t.symbol for t in kept] == ["IBM"]
+    assert skipped == []
+
+
+def test_max_age_narrows_the_window(config):
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(5))
+    tickers = [config.ticker("IBM")]
+    assert _drop_recently_checked(config, tickers, scrape_args(max_age=3))[0] != []
+    assert _drop_recently_checked(config, tickers, scrape_args(max_age=10))[0] == []
+
+
+def test_the_default_window_is_two_weeks():
+    assert DEFAULT_MAX_FAIR_VALUE_AGE_DAYS == 14
+
+
+def test_the_freshness_filter_is_separate_from_symbol_resolution(store, config):
+    """A typo and a still-fresh value must stay distinguishable: the first is
+    a non-zero exit, the second is the feature doing its job."""
+    save_fair_value(config.storage.fair_values, "IBM", 225.0, checked=days_ago(1))
+    resolved = _resolve_scrape_targets(store, config, args(symbols="IBM"))
+    assert [t.symbol for t in resolved] == ["IBM"], "resolution ignores freshness"
+    kept, skipped = _drop_recently_checked(config, resolved, scrape_args())
+    assert kept == [] and skipped == [("IBM", 1)]
