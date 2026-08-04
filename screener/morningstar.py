@@ -48,7 +48,10 @@ SIGNIN_URL = "https://www.morningstar.com/sign-in"
 _FAIR_VALUE_KEYS = ("fairValue", "fairValueEstimate", "fvEstimate", "qualFairValue", "fairValueUSD")
 _PRICE_KEYS = ("lastPrice", "closePrice", "regularMarketLastPrice", "last", "price")
 
-_MONEY = r"\$?\s*([0-9][0-9,]*\.?[0-9]*)"
+# Not just dollars: Amsterdam quotes in euros and London in pounds/pence, and
+# a regex that hard-requires "$" silently returns None for every one of them.
+_CURRENCY = r"[$€£]"
+_MONEY = rf"{_CURRENCY}?\s*([0-9][0-9,]*\.?[0-9]*)"
 
 
 class MorningstarError(RuntimeError):
@@ -433,7 +436,7 @@ def _price_from_text(text: str) -> float | None:
     (on the IBM page it read $214.19 while the live quote was $217.24), and the
     current price is what's wanted here. The card row is the fallback.
     """
-    header = re.search(r"\$([0-9][0-9,]*\.[0-9]{2})", text)
+    header = re.search(rf"{_CURRENCY}\s*([0-9][0-9,]*\.[0-9]{{2}})", text)
     if header:
         value = _coerce_number(header.group(1))
         if value is not None:
@@ -445,7 +448,9 @@ def _price_from_text(text: str) -> float | None:
 
 
 def _fair_value_date_from_text(text: str) -> str | None:
-    match = re.search(r"Fair Value\s*\$?[0-9,.]+\s*([A-Z][a-z]{2} \d{1,2}, \d{4})", text)
+    match = re.search(
+        rf"Fair Value\s*{_CURRENCY}?\s*[0-9,.]+\s*([A-Z][a-z]{{2}} \d{{1,2}}, \d{{4}})", text
+    )
     return match.group(1) if match else None
 
 

@@ -180,6 +180,14 @@ def cmd_run(config: Config, args) -> int:
                         print(f"  {ticker.symbol}: {error}")
                         exit_code = 1
                         continue
+                    # Same guard as `cmd_scrape` -- see the comment there.
+                    if not result.complete:
+                        print(
+                            f"  {ticker.symbol}: page loaded but nothing usable came out "
+                            f"(price={result.price}, fair_value={result.fair_value})"
+                        )
+                        exit_code = 1
+                        continue
                     save_fair_value(
                         config.storage.fair_values,
                         ticker.symbol,
@@ -472,6 +480,21 @@ def cmd_scrape(config: Config, args) -> int:
             nonlocal recorded, failed
             if error is not None:
                 print(f"  {ticker.symbol}: {error}")
+                failed += 1
+                return
+            # A page can load fine, not be a bot challenge and not look logged
+            # out, yet still yield nothing usable -- an unfamiliar layout, or a
+            # name Morningstar publishes no fair value for. Treat that as a
+            # failure rather than trusting the half-filled result: writing a
+            # fair value with no price to compare it against would put an
+            # ungradeable entry in the YAML, and computing the gap would divide
+            # by a None.
+            if not result.complete:
+                print(
+                    f"  {ticker.symbol}: page loaded but nothing usable came out "
+                    f"(price={result.price}, fair_value={result.fair_value}) — "
+                    f"see debug/ for what was actually served"
+                )
                 failed += 1
                 return
             save_fair_value(

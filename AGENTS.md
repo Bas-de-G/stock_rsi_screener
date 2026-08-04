@@ -79,6 +79,22 @@ filters on `up2_date >= ` the first date in the visible series, and
 `cli._signalled_symbols` mirrors that rule so an aged-off signal doesn't trigger
 a scrape. Change one, change the other.
 
+**Cross detection needs one bar of lead-in.** A cross compares a bar against
+its predecessor, so slicing the visible window throws away the predecessor of
+its first bar — a cross landing exactly on the left edge then goes uncounted.
+`dashboard._visible_crosses` detects over `window + 1` bars and shifts the
+indices back. Without it, cards showed "1 upward cross of 30" directly above a
+completed up/down/up pattern, which by definition needs two. Any future code
+that counts crosses over a slice has the same trap.
+
+**A scrape result can be incomplete without raising.** `_scrape_on_page`
+returns a `ScrapeResult` with `price=None` or `fair_value=None` when the page
+loads fine, isn't a bot challenge and isn't signed out, but extraction still
+finds nothing. Callers must check `result.complete` — `cmd_scrape` and
+`cmd_run` both do. Trusting a half-filled result writes an ungradeable fair
+value with no price beside it and then divides by None, and `TypeError` is not
+a `MorningstarError`, so nothing catches it.
+
 **Currency is not always dollars, and identifiers differ per venue.** Every
 non-US listing needs its own `tradingview` / `yahoo` / `morningstar` /
 `currency` fields, because all four differ:
@@ -142,7 +158,7 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 204 tests, fully offline
+python -m pytest tests/ -q          # 224 tests, fully offline
 
 python -m screener.cli backfill     # once, seeds RSI history from Yahoo
 python -m screener.cli run          # the daily job (RSI only)
