@@ -17,16 +17,26 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **36 market leaders** out of the box (AAPL, MSFT, NVDA, AMZN, IBM, JPM,
-XOM, LLY, Rolls-Royce and more) — edit `config.yaml` to change the list. Every
-entry was checked against both data sources first, so none of them 404. Push a
-new ticker to `main` and the next scheduled run backfills its history
-automatically — nothing to run or push by hand.
+Tracks **54 market leaders** out of the box — 35 US names (AAPL, MSFT, NVDA,
+AMZN, IBM, JPM, XOM, LLY…), 18 Dutch ones from Euronext Amsterdam (ASML,
+Heineken, Adyen, ING, Philips…), and Rolls-Royce in London. Edit `config.yaml`
+to change the list. Every entry was checked against both data sources first,
+so none of them 404. Push a new ticker to `main` and the next scheduled run
+backfills its history automatically — nothing to run or push by hand.
 
-Non-US listings work too, they just need their own identifiers. Rolls-Royce is
-the worked example: `LSE:RR.` on TradingView (trailing dot), `RR.L` on Yahoo,
-`xlon/rr.` on Morningstar, and quoted in **pence** — so it carries a `currency:
-GBX` label that the dashboard shows next to the price.
+Non-US listings work too, they just need their own identifiers:
+
+| Market | TradingView | Yahoo | Morningstar | Currency |
+|---|---|---|---|---|
+| US | `NASDAQ:` / `NYSE:` | bare ticker | `xnas/` / `xnys/` | USD |
+| Amsterdam | `EURONEXT:ASML` | `ASML.AS` | `xams/asml` | EUR |
+| London | `LSE:RR.` | `RR.L` | `xlon/rr.` | **GBX** |
+
+Two traps worth knowing about. TradingView uses one `EURONEXT:` prefix for the
+whole exchange group rather than a per-city code — `AMS:` and `XAMS:` both
+404. And Rolls-Royce is quoted in **pence**, not pounds, which is why
+`currency` exists at all: a bare `1413.6` next to a dollar price would be
+wildly misleading, so the dashboard prints the `GBX` label alongside it.
 
 ---
 

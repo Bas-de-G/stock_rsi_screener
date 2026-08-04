@@ -6,7 +6,7 @@ rules.
 
 ## What this is
 
-A screener that watches ~36 large-cap stocks for a double-oversold-recovery
+A screener that watches ~54 large-cap stocks for a double-oversold-recovery
 pattern: RSI crosses 30 upward, falls back below, and crosses up again inside 14
 days. A completed pattern is a buy signal on its own. Two independent factors
 grade it — Morningstar fair value and YoY earnings growth — and either one
@@ -79,11 +79,26 @@ filters on `up2_date >= ` the first date in the visible series, and
 `cli._signalled_symbols` mirrors that rule so an aged-off signal doesn't trigger
 a scrape. Change one, change the other.
 
-**Currency is not always dollars.** Rolls-Royce (`RR`) is quoted in pence on LSE
-and has a different identifier on all three services — `LSE:RR.` / `RR.L` /
-`xlon/rr.`. `morningstar.check_units` rejects a price/fair-value pair more than
-10× apart, which is what catches a pence-vs-pounds mix-up before it reaches the
-gate.
+**Currency is not always dollars, and identifiers differ per venue.** Every
+non-US listing needs its own `tradingview` / `yahoo` / `morningstar` /
+`currency` fields, because all four differ:
+
+- Amsterdam: `EURONEXT:ASML` / `ASML.AS` / `xams/asml` / EUR. TradingView uses
+  one `EURONEXT:` prefix for the whole exchange group — `AMS:` and `XAMS:`
+  both 404.
+- London: `LSE:RR.` (trailing dot) / `RR.L` / `xlon/rr.` / **GBX**.
+
+Rolls-Royce is the dangerous one: quoted in pence, not pounds.
+`morningstar.check_units` rejects a price/fair-value pair more than 10× apart,
+which is what catches a pence-vs-pounds mix-up before it reaches the gate.
+Euro-quoted names don't trip it — EUR and USD are the same order of magnitude.
+
+When adding a ticker, verify it against **both** TradingView and Yahoo before
+committing, and check the two prices agree — that's what proves you've got the
+same listing rather than a same-named symbol on another venue. The Morningstar
+slug can't be verified from a script (their CDN returns HTTP 202 with an empty
+body for valid *and* bogus URLs alike), so follow the MIC-code convention and
+accept that a wrong slug means a dead dashboard button, nothing worse.
 
 **Earnings growth only exists on live-fetched rows.** `rsi_history.earnings_growth`
 comes from TradingView's scanner alongside RSI (`tradingview.fetch_live_rsi`) —
