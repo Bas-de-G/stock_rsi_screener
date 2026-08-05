@@ -451,7 +451,7 @@ def cmd_fair_value(config: Config, args) -> int:
         print(f"  ({config.signal.describe_rule()})")
         print(f"  saved to {config.storage.fair_values.name} ({count} recorded in total)")
 
-        updated = _apply_valuation_to_pending_signals(store, config, symbol, price, args.value)
+        updated = _rescore_signals(store, config, symbol, price, args.value)
         if updated:
             plural = "pattern" if updated == 1 else "patterns"
             print(f"  applied to {updated} pending {plural} for {symbol}")
@@ -499,36 +499,36 @@ def sync_fair_values(store: Store, config: Config, quiet: bool = False) -> int:
                 source="manual",
             )
         )
-        # Re-score per horizon: the same fair value clears 1h's 10% margin
-        # while failing 1w's 50%, so `confirms` genuinely differs by horizon.
-        for horizon in config.horizons:
-            known, confirms = valuation_passes(
-                latest.close, entry.fair_value, config.signal, horizon.margin
-            )
-            fired = signal_fires(confirms, config.signal)
-            for signal in store.all_signals(symbol, horizon.key):
-                store.update_signal_valuation(
-                    symbol, signal.up2_date, latest.close, entry.fair_value,
-                    known, confirms, fired, horizon.key,
-                )
+        _rescore_signals(store, config, symbol, latest.close, entry.fair_value)
         applied += 1
     return applied
 
 
-def _apply_valuation_to_pending_signals(
+def _rescore_signals(
     store: Store, config: Config, symbol: str, price: float, fair_value: float
 ) -> int:
-    """Re-score every recorded pattern for `symbol` against one fair value."""
+    """Re-score every recorded pattern for `symbol` against one fair value.
+
+    Loops horizon *and* direction, because the gate depends on both. The same
+    fair value clears 1h's 10% margin while failing 1w's 50%, so `confirms`
+    genuinely differs by horizon; and a sell is graded against the mirrored
+    rule, so it differs by direction too. Scoring once with the buy rule and
+    writing it everywhere left every sell permanently unvalued — and with
+    `fire_without_valuation` set, that meant every sell pattern fired ungraded.
+    """
     updated = 0
     for horizon in config.horizons:
-        known, confirms = valuation_passes(price, fair_value, config.signal, horizon.margin)
-        fired = signal_fires(confirms, config.signal)
-        for signal in store.all_signals(symbol, horizon.key):
-            store.update_signal_valuation(
-                symbol, signal.up2_date, price, fair_value,
-                known, confirms, fired, horizon.key,
+        for direction in (BUY, SELL):
+            known, confirms = valuation_passes(
+                price, fair_value, _gate_for(config.signal, direction), horizon.margin
             )
-            updated += 1
+            fired = signal_fires(confirms, config.signal)
+            for signal in store.all_signals(symbol, horizon.key, direction):
+                store.update_signal_valuation(
+                    symbol, signal.up2_date, price, fair_value,
+                    known, confirms, fired, horizon.key, direction,
+                )
+                updated += 1
     return updated
 
 
