@@ -16,15 +16,30 @@ name: Screener run
 
 on:
   schedule:
-    # Hourly on weekdays, 13:00–21:00 UTC. That window covers the US session
-    # (13:30–20:00 UTC) plus the European afternoon, and the 21:00 run lands
-    # after the US close so the daily bar it records is the settled one.
+    # Every 30 minutes on weekdays, 13:00–20:30 UTC, then a single run at
+    # 21:00. That window covers the US session (13:30–20:00 UTC) plus the
+    # European afternoon, and the 21:00 run lands after the US close so the
+    # daily bar it records is the settled one.
     #
-    # Hourly rather than daily because the 1h and 4h horizons need it: a
-    # once-a-day sample of an hourly RSI is up to 24 hours stale, which makes
-    # the intraday pages decorative. The cost is ~9 data commits a weekday
-    # instead of 1.
-    - cron: "0 13-21 * * 1-5"
+    # Sub-hourly rather than hourly because the 1h page is the one that goes
+    # stale fastest. Note the 4h/1d/1w pages gain nothing from it: their bars
+    # are keyed by date and simply get overwritten in place, so the extra runs
+    # only sharpen the intraday view.
+    #
+    # Hour 21 deliberately has exactly ONE slot. The commit guard below defers
+    # the database snapshot on any scheduled run outside hour 21, so a second
+    # slot in that hour would commit the binary database twice a day instead
+    # of once. The guard matches on the hour rather than the exact minute
+    # because GitHub delays scheduled runs under load — a run that slips to
+    # 21:07 must still commit, or the day's history is lost.
+    #
+    # GitHub's scheduler is best-effort on public repos: expect some of these
+    # to arrive late or be skipped entirely under load. Minutes themselves are
+    # free here (public repository), so the real costs are TradingView request
+    # volume — 130 tickers x 4 horizons = 520 requests per run — and intraday
+    # rows accumulating at twice the previous rate.
+    - cron: "0,30 13-20 * * 1-5"
+    - cron: "0 21 * * 1-5"
   workflow_dispatch:
   push:
     # Re-publish immediately when a fair value is edited on github.com.
