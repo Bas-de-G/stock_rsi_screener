@@ -242,13 +242,19 @@ def signal_is_live(
 
     Two conditions, both from the strategy as specified:
 
-    * Both crosses fall inside the lookback window measured back from the most
-      recent bar — not merely inside the window measured between themselves.
-      A pattern that completed in March is a matter of record, not a signal
-      you can act on in August.
+    * The pattern *completed* inside the lookback window measured back from
+      the most recent bar. A pattern that completed in March is a matter of
+      record, not a signal you can act on in August.
     * Current RSI is still on the signalling side of the threshold. A buy
       setup whose RSI has fallen back under 30 has not resolved; it's a stock
       still falling.
+
+    Age is measured from `up2_date`, not `up1_date`, because that is when the
+    pattern came into existence — the second cross is what makes it a signal.
+    Measuring from the first cross charges the pattern's own span against its
+    freshness, so visibility becomes `window_days - span`: a one-day pattern
+    showed for thirteen days while a fourteen-day one — just as valid by the
+    detection rule — was stale the moment it completed.
 
     Kept separate from detection on purpose: `signals` remains a complete
     historical log of every pattern ever found, and liveness is applied when
@@ -258,7 +264,7 @@ def signal_is_live(
         return False
     latest = series[-1]
     horizon_start = _moment(latest.date) - dt.timedelta(days=config.window_days)
-    if _moment(signal.up1_date) < horizon_start:
+    if _moment(signal.up2_date) < horizon_start:
         return False
     if signal.direction == "sell":
         return latest.rsi < threshold
