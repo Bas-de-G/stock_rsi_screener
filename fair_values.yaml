@@ -232,6 +232,10 @@ SNDK:
   fair_value: 1000.0
   checked: '2026-08-04'
   source: scraped
+SOUN:
+  fair_value: 7.88
+  checked: '2026-08-05'
+  source: scraped
 TSLA:
   fair_value: 450.0
   checked: '2026-08-04'
