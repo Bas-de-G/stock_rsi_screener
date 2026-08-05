@@ -354,6 +354,46 @@ def test_a_pattern_older_than_the_lookback_is_not_live():
     assert not signal_is_live(live_signal(), series_, config(window_days=14), 30.0)
 
 
+def pattern(up1, up2, direction=BUY):
+    """A signal with an explicit span, for the freshness boundary tests."""
+    return Signal(
+        "X", up1, up1, up2, None, None, False, False,
+        True, "now", direction=direction,
+    )
+
+
+def held(*, up1, up2, latest, window=14):
+    """Is a pattern spanning up1->up2 still live on the bar dated `latest`?"""
+    span = (dt.date.fromisoformat(latest) - dt.date.fromisoformat("2026-01-10")).days
+    series_ = bars(*([40] * (span + 1)))
+    assert series_[-1].date == latest
+    return signal_is_live(pattern(up1, up2), series_, config(window_days=window), 30.0)
+
+
+def test_freshness_is_measured_from_the_second_cross():
+    """The pattern does not exist until it completes, so that is when its
+    clock starts. Here the first cross is outside the 14-day window and the
+    second is inside: the signal completed 8 days ago and is still live."""
+    assert held(up1="2026-01-10", up2="2026-01-20", latest="2026-01-28")
+
+
+def test_a_pattern_whose_completion_aged_out_is_not_live():
+    """The other side of the same boundary -- up2 itself is now too old."""
+    assert not held(up1="2026-01-10", up2="2026-01-20", latest="2026-02-04")
+
+
+def test_a_wide_pattern_gets_the_same_visibility_as_a_narrow_one():
+    """A pattern's own span must not be charged against its freshness.
+
+    Both of these completed on the same day; one took 13 days to form and the
+    other 1. Measuring from the first cross made the wide one stale on
+    arrival while the narrow one showed for nearly a fortnight.
+    """
+    wide = held(up1="2026-01-10", up2="2026-01-23", latest="2026-02-01")
+    narrow = held(up1="2026-01-22", up2="2026-01-23", latest="2026-02-01")
+    assert wide is narrow is True
+
+
 def test_a_buy_whose_rsi_fell_back_under_the_line_is_not_live():
     """A setup that hasn't resolved -- the stock is still falling."""
     series_ = bars(25, 34, 27, 22)
