@@ -15,6 +15,7 @@ import pytest
 from screener.config import (
     DEFAULT_HORIZON,
     DEFAULT_HORIZONS,
+    MARKET_LABELS,
     MARKETS,
     SignalConfig,
     load_config,
@@ -320,7 +321,12 @@ def test_an_unknown_market_tag_is_rejected(tmp_path):
 
 
 def test_markets_constant_matches_what_config_accepts():
-    assert MARKETS == ("sp500", "nasdaq", "europe", "penny")
+    assert MARKETS == ("sp500", "nasdaq", "europe", "asia", "penny")
+
+
+def test_every_market_has_a_dashboard_label():
+    """A market with no label renders a KeyError instead of a filter chip."""
+    assert set(MARKET_LABELS) == set(MARKETS)
 
 
 def test_default_horizon_is_one_of_the_configured_ones():
