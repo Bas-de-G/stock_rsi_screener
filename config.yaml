@@ -67,9 +67,11 @@ tickers:
   - {symbol: ABBV,  tradingview: "NYSE:ABBV",    morningstar: xnys/abbv, markets: [sp500]}
   - {symbol: TMO,   tradingview: "NYSE:TMO",     morningstar: xnys/tmo, markets: [sp500]}
   - {symbol: ABT,   tradingview: "NYSE:ABT",     morningstar: xnys/abt, markets: [sp500]}
-  # Merck's 2021 women's-health spinoff. Mid-cap, so it sits outside the
-  # index groups above -- reachable from All.
-  - {symbol: OGN,   tradingview: "NYSE:OGN",     morningstar: xnys/ogn, markets: []}
+  # Merck's 2021 women's-health spinoff. Filed under sp500 as the large-cap US
+  # group rather than a strict index claim -- Organon is a mid-cap and may sit
+  # in the S&P MidCap 400. Every ticker must carry at least one market (CI
+  # enforces it) or it is unreachable from every filter but All.
+  - {symbol: OGN,   tradingview: "NYSE:OGN",     morningstar: xnys/ogn, markets: [sp500]}
 
   # --- Consumer & industrial ------------------------------------------
   - {symbol: WMT,   tradingview: "NASDAQ:WMT",   morningstar: xnas/wmt, markets: [sp500, nasdaq]}

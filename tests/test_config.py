@@ -138,3 +138,58 @@ def test_morningstar_headless_defaults_to_false(tmp_path):
 def test_morningstar_headless_can_be_enabled_explicitly(tmp_path):
     config = load_config(write(tmp_path, VALID + "\nmorningstar:\n  headless: true\n"))
     assert config.morningstar.headless is True
+
+
+# --------------------------------------------- the repo's own config.yaml
+#
+# These mirror the invariants `.github/workflows/tests.yml` asserts after the
+# suite runs. Duplicated here on purpose: a check that lives only in CI fails
+# ten minutes after a green local `pytest`, which is how an untagged ticker
+# reached a pull request. Read-only — the conftest guard covers the rest.
+
+
+def _repo_config():
+    from pathlib import Path
+
+    return load_config(Path(__file__).resolve().parent.parent / "config.yaml")
+
+
+def test_the_repo_config_loads():
+    assert _repo_config().tickers
+
+
+def test_no_duplicate_symbols():
+    symbols = [t.symbol for t in _repo_config().tickers]
+    dupes = sorted({s for s in symbols if symbols.count(s) > 1})
+    assert not dupes, f"duplicate symbols: {dupes}"
+
+
+def test_every_ticker_carries_a_market():
+    """A ticker with no market is unreachable from every filter except All."""
+    untagged = sorted(t.symbol for t in _repo_config().tickers if not t.markets)
+    assert not untagged, f"tickers with no market tag: {untagged}"
+
+
+def test_every_market_used_is_a_known_one():
+    from screener.config import MARKETS
+
+    used = {m for t in _repo_config().tickers for m in t.markets}
+    assert used <= set(MARKETS), f"unknown markets in use: {sorted(used - set(MARKETS))}"
+
+
+def test_every_market_has_at_least_one_ticker():
+    """An empty market would render a filter chip that shows nothing."""
+    config = _repo_config()
+    from screener.config import MARKETS
+
+    empty = [m for m in MARKETS if not config.tickers_in(m)]
+    assert not empty, f"markets with no tickers: {empty}"
+
+
+def test_non_usd_tickers_declare_their_own_yahoo_symbol():
+    """Yahoo needs a suffix (.AS, .L, .HK) that TradingView's prefix doesn't
+    carry, so a non-dollar listing defaulting to the bare symbol resolves to
+    the wrong exchange -- or to a US listing of the same name."""
+    for t in _repo_config().tickers:
+        if t.currency != "USD":
+            assert t.yahoo != t.symbol, f"{t.symbol} ({t.currency}) has no yahoo symbol"
