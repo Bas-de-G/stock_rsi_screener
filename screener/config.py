@@ -19,11 +19,12 @@ WINDOW_UNITS = ("calendar", "trading")
 # Market groups the dashboard can filter by. A ticker can belong to several --
 # AAPL is both an S&P 500 constituent and Nasdaq-listed -- so `markets` on a
 # Ticker is a list, not a single value.
-MARKETS = ("sp500", "nasdaq", "europe", "penny")
+MARKETS = ("sp500", "nasdaq", "europe", "asia", "penny")
 MARKET_LABELS = {
     "sp500": "S&P 500",
     "nasdaq": "NASDAQ",
     "europe": "Europe",
+    "asia": "Asia",
     "penny": "Under $10",
 }
 

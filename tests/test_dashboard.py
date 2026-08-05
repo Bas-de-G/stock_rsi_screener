@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from screener.config import load_config
+from screener.config import MARKETS, load_config
 from screener.dashboard import Row, build_dashboard, render
 from screener.storage import RsiPoint, Signal, Store, Valuation
 
@@ -471,6 +471,25 @@ def test_every_active_market_gets_a_radio_and_a_tab(config):
         assert f'id="mk-{m}"' in html
         assert f'for="mk-{m}"' in html
     assert 'id="mk-all"' in html
+
+
+def test_every_market_has_a_hide_rule_behind_its_chip(config):
+    """A chip with no CSS rule behind it silently shows every card.
+
+    The chips are generated from MARKETS but the rules used to be hand-written,
+    so adding a market produced a filter that looked real and did nothing.
+    """
+    html = render([row(markets=("sp500",))], config)
+    for m in MARKETS:
+        assert f"#mk-{m}:checked ~ .sheet .card:not(.in-{m})" in html, (
+            f"market {m!r} renders a chip with no hide rule"
+        )
+
+
+def test_the_all_chip_highlights_without_hiding_anything(config):
+    html = render([row(markets=("sp500",))], config)
+    assert '#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"]' in html
+    assert "#mk-all:checked ~ .sheet .card:not(" not in html
 
 
 def test_the_horizon_selector_links_to_every_page(config):

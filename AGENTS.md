@@ -10,11 +10,14 @@ A screener that watches ~65 tickers for a double-crossing pattern in both
 directions: **buy** on two upward crosses of RSI 30, **sell** on two downward
 crosses of 70. Screened on four horizons (1h / 4h / 1d / 1w), each with its own
 cross window, valuation margin and suggested leverage, and grouped into four
-market filters (sp500 / nasdaq / europe / penny) a ticker can belong to more
-than one of.
+market filters (sp500 / nasdaq / europe / asia / penny) a ticker can belong to
+more than one of.
 
-A pattern only counts as a *live* signal while both crosses sit inside the
-horizon's lookback from now and RSI is still on the signalling side. Morningstar
+A pattern only counts as a *live* signal while its **second** cross sits inside
+the horizon's lookback from now and RSI is still on the signalling side. Age is
+measured from the completing cross, not the first one: the pattern doesn't
+exist until it completes, and measuring from the start charged a pattern's own
+span against its freshness. Morningstar
 fair value then grades it — required for the rocket — and earnings growth acts
 as a veto on top (the value-trap case: cheap, but earnings shrinking).
 

@@ -35,11 +35,41 @@ tickers:
   - {symbol: JPM,   tradingview: "NYSE:JPM",     morningstar: xnys/jpm, markets: [sp500]}
   - {symbol: V,     tradingview: "NYSE:V",       morningstar: xnys/v, markets: [sp500]}
   - {symbol: MA,    tradingview: "NYSE:MA",      morningstar: xnys/ma, markets: [sp500]}
+  - {symbol: BAC,   tradingview: "NYSE:BAC",     morningstar: xnys/bac, markets: [sp500]}
+  - {symbol: WFC,   tradingview: "NYSE:WFC",     morningstar: xnys/wfc, markets: [sp500]}
+  - {symbol: GS,    tradingview: "NYSE:GS",      morningstar: xnys/gs, markets: [sp500]}
+  - {symbol: MS,    tradingview: "NYSE:MS",      morningstar: xnys/ms, markets: [sp500]}
+  - {symbol: AXP,   tradingview: "NYSE:AXP",     morningstar: xnys/axp, markets: [sp500]}
+  # Class B. The A shares trade near $800k apiece, which no chart needs.
+  - {symbol: BRK.B, tradingview: "NYSE:BRK.B",   morningstar: xnys/brk.b, yahoo: BRK-B, markets: [sp500]}
+  # Fiserv kept the FISV ticker on TradingView; NYSE:FI and NASDAQ:FI both 404.
+  - {symbol: FISV,  tradingview: "NASDAQ:FISV",  morningstar: xnas/fisv, markets: [sp500, nasdaq]}
+
+  # --- Industrials, transport & defence --------------------------------
+  - {symbol: CAT,   tradingview: "NYSE:CAT",     morningstar: xnys/cat, markets: [sp500]}
+  - {symbol: DE,    tradingview: "NYSE:DE",      morningstar: xnys/de, markets: [sp500]}
+  - {symbol: BA,    tradingview: "NYSE:BA",      morningstar: xnys/ba, markets: [sp500]}
+  - {symbol: LMT,   tradingview: "NYSE:LMT",     morningstar: xnys/lmt, markets: [sp500]}
+  - {symbol: RTX,   tradingview: "NYSE:RTX",     morningstar: xnys/rtx, markets: [sp500]}
+  - {symbol: GE,    tradingview: "NYSE:GE",      morningstar: xnys/ge, markets: [sp500]}
+  - {symbol: UPS,   tradingview: "NYSE:UPS",     morningstar: xnys/ups, markets: [sp500]}
+  - {symbol: UNP,   tradingview: "NYSE:UNP",     morningstar: xnys/unp, markets: [sp500]}
+  - {symbol: XYL,   tradingview: "NYSE:XYL",     morningstar: xnys/xyl, markets: [sp500]}
+  # Honeywell is Nasdaq-listed, not NYSE -- same trap as WMT above.
+  - {symbol: HON,   tradingview: "NASDAQ:HON",   morningstar: xnas/hon, markets: [sp500, nasdaq]}
 
   # --- Healthcare ----------------------------------------------------
   - {symbol: JNJ,   tradingview: "NYSE:JNJ",     morningstar: xnys/jnj, markets: [sp500]}
   - {symbol: UNH,   tradingview: "NYSE:UNH",     morningstar: xnys/unh, markets: [sp500]}
   - {symbol: LLY,   tradingview: "NYSE:LLY",     morningstar: xnys/lly, markets: [sp500]}
+  - {symbol: PFE,   tradingview: "NYSE:PFE",     morningstar: xnys/pfe, markets: [sp500]}
+  - {symbol: MRK,   tradingview: "NYSE:MRK",     morningstar: xnys/mrk, markets: [sp500]}
+  - {symbol: ABBV,  tradingview: "NYSE:ABBV",    morningstar: xnys/abbv, markets: [sp500]}
+  - {symbol: TMO,   tradingview: "NYSE:TMO",     morningstar: xnys/tmo, markets: [sp500]}
+  - {symbol: ABT,   tradingview: "NYSE:ABT",     morningstar: xnys/abt, markets: [sp500]}
+  # Merck's 2021 women's-health spinoff. Mid-cap, so it sits outside the
+  # index groups above -- reachable from All.
+  - {symbol: OGN,   tradingview: "NYSE:OGN",     morningstar: xnys/ogn, markets: []}
 
   # --- Consumer & industrial ------------------------------------------
   - {symbol: WMT,   tradingview: "NASDAQ:WMT",   morningstar: xnas/wmt, markets: [sp500, nasdaq]}
@@ -49,10 +79,45 @@ tickers:
   - {symbol: KO,    tradingview: "NYSE:KO",      morningstar: xnys/ko, markets: [sp500]}
   - {symbol: HD,    tradingview: "NYSE:HD",      morningstar: xnys/hd, markets: [sp500]}
   - {symbol: DIS,   tradingview: "NYSE:DIS",     morningstar: xnys/dis, markets: [sp500]}
+  - {symbol: MCD,   tradingview: "NYSE:MCD",     morningstar: xnys/mcd, markets: [sp500]}
+  - {symbol: NKE,   tradingview: "NYSE:NKE",     morningstar: xnys/nke, markets: [sp500]}
+  - {symbol: TGT,   tradingview: "NYSE:TGT",     morningstar: xnys/tgt, markets: [sp500]}
+  - {symbol: LOW,   tradingview: "NYSE:LOW",     morningstar: xnys/low, markets: [sp500]}
+  - {symbol: CL,    tradingview: "NYSE:CL",      morningstar: xnys/cl, markets: [sp500]}
+  - {symbol: MO,    tradingview: "NYSE:MO",      morningstar: xnys/mo, markets: [sp500]}
+  - {symbol: PM,    tradingview: "NYSE:PM",      morningstar: xnys/pm, markets: [sp500]}
+  - {symbol: LULU,  tradingview: "NASDAQ:LULU",  morningstar: xnas/lulu, markets: [sp500, nasdaq]}
+  # Grain and oilseed processing -- agriculture rather than retail.
+  - {symbol: ADM,   tradingview: "NYSE:ADM",     morningstar: xnys/adm, markets: [sp500]}
 
   # --- Energy ---------------------------------------------------------
   - {symbol: XOM,   tradingview: "NYSE:XOM",     morningstar: xnys/xom, markets: [sp500]}
   - {symbol: CVX,   tradingview: "NYSE:CVX",     morningstar: xnys/cvx, markets: [sp500]}
+  - {symbol: COP,   tradingview: "NYSE:COP",     morningstar: xnys/cop, markets: [sp500]}
+  - {symbol: SLB,   tradingview: "NYSE:SLB",     morningstar: xnys/slb, markets: [sp500]}
+
+  # --- Utilities ------------------------------------------------------
+  # Rate-sensitive and low-beta: these spend far more time near RSI 50 than
+  # the tech names do, so expect fewer patterns and treat one as meaningful.
+  - {symbol: NEE,   tradingview: "NYSE:NEE",     morningstar: xnys/nee, markets: [sp500]}
+  - {symbol: DUK,   tradingview: "NYSE:DUK",     morningstar: xnys/duk, markets: [sp500]}
+  - {symbol: SO,    tradingview: "NYSE:SO",      morningstar: xnys/so, markets: [sp500]}
+
+  # --- Telecom --------------------------------------------------------
+  - {symbol: T,     tradingview: "NYSE:T",       morningstar: xnys/t, markets: [sp500]}
+  - {symbol: VZ,    tradingview: "NYSE:VZ",      morningstar: xnys/vz, markets: [sp500]}
+
+  # --- Materials ------------------------------------------------------
+  - {symbol: SHW,   tradingview: "NYSE:SHW",     morningstar: xnys/shw, markets: [sp500]}
+  - {symbol: NUE,   tradingview: "NYSE:NUE",     morningstar: xnys/nue, markets: [sp500]}
+  - {symbol: FCX,   tradingview: "NYSE:FCX",     morningstar: xnys/fcx, markets: [sp500]}
+  # Linde is Nasdaq-listed after the Praxair merger.
+  - {symbol: LIN,   tradingview: "NASDAQ:LIN",   morningstar: xnas/lin, markets: [sp500, nasdaq]}
+
+  # --- Real estate (REITs) ---------------------------------------------
+  - {symbol: AMT,   tradingview: "NYSE:AMT",     morningstar: xnys/amt, markets: [sp500]}
+  - {symbol: PLD,   tradingview: "NYSE:PLD",     morningstar: xnys/pld, markets: [sp500]}
+  - {symbol: O,     tradingview: "NYSE:O",       morningstar: xnys/o, markets: [sp500]}
 
   # --- UK listing ------------------------------------------------------
   # Rolls-Royce Holdings (the aero-engine maker; Rolls-Royce Motor Cars is
@@ -110,13 +175,44 @@ tickers:
   - {symbol: KPN,   tradingview: "EURONEXT:KPN",   morningstar: xams/kpn,   yahoo: KPN.AS,   currency: EUR, markets: [europe]}
   - {symbol: RAND,  tradingview: "EURONEXT:RAND",  morningstar: xams/rand,  yahoo: RAND.AS,  currency: EUR, markets: [europe]}
 
+  # Industrials, investment vehicles & market makers
+  - {symbol: AALB,  tradingview: "EURONEXT:AALB",  morningstar: xams/aalb,  yahoo: AALB.AS,  currency: EUR, markets: [europe]}
+  # Exor is the Agnelli family holding company (Ferrari, Stellantis, CNH).
+  # Domiciled in the Netherlands and listed in Amsterdam, not Milan.
+  - {symbol: EXO,   tradingview: "EURONEXT:EXO",   morningstar: xams/exo,   yahoo: EXO.AS,   currency: EUR, markets: [europe]}
+  - {symbol: FLOW,  tradingview: "EURONEXT:FLOW",  morningstar: xams/flow,  yahoo: FLOW.AS,  currency: EUR, markets: [europe]}
+  # Geo-data and offshore survey. Trades under EUR 10, but the Under $10
+  # group is priced in dollars, so it stays in Europe to keep that bucket
+  # unambiguous.
+  - {symbol: FUR,   tradingview: "EURONEXT:FUR",   morningstar: xams/fur,   yahoo: FUR.AS,   currency: EUR, markets: [europe]}
+
+  # --- Other European listings, traded in New York ----------------------
+  # Novo Nordisk is Danish, but this is the NYSE ADR: quoted in dollars and
+  # covered by Morningstar's US site, which avoids the pence/pounds class of
+  # unit mismatch that the Rolls-Royce entry above documents.
+  - {symbol: NVO,   tradingview: "NYSE:NVO",     morningstar: xnys/nvo, markets: [europe]}
+  # Bending Spoons (Evernote, WeTransfer, Meetup) listed on Nasdaq as BSP.
+  - {symbol: BSP,   tradingview: "NASDAQ:BSP",   morningstar: xnas/bsp, markets: [europe, nasdaq]}
+
+  # --- Asia -------------------------------------------------------------
+  # BYD's Hong Kong primary listing, quoted in Hong Kong dollars. The US
+  # ADR (BYDDY) also resolves, but it's thinly traded OTC; the HK line is
+  # the real price. Hong Kong closes 08:00 UTC, well before the earliest
+  # scheduled run, so these are always settled daily bars.
+  - {symbol: BYD,   tradingview: "HKEX:1211", morningstar: xhkg/01211, yahoo: 1211.HK, currency: HKD, markets: [asia]}
+  - {symbol: XIAOMI, tradingview: "HKEX:1810", morningstar: xhkg/01810, yahoo: 1810.HK, currency: HKD, markets: [asia]}
+
   # --- Under $10 -------------------------------------------------------
   # Curated rather than filtered on price: a dynamic cutoff would silently
   # change the group's membership day to day. If one of these runs above $10,
   # drop it from here by hand.
   #
   # Morningstar's fair-value coverage thins out at this end of the market, so
-  # expect several of these to grade on RSI and earnings growth alone.
+  # expect several of these to grade on RSI and earnings growth alone. The
+  # established names at the bottom of this list are the exception -- Nokia
+  # and Lloyds are covered as thoroughly as any large cap.
+  #
+  # Prices were checked on 2026-08-05; the whole group sat under $10 then.
   - {symbol: SNAP,  tradingview: "NYSE:SNAP",   morningstar: xnys/snap, markets: [penny]}
   - {symbol: NIO,   tradingview: "NYSE:NIO",    morningstar: xnys/nio,  markets: [penny]}
   - {symbol: RIG,   tradingview: "NYSE:RIG",    morningstar: xnys/rig,  markets: [penny]}
@@ -128,6 +224,24 @@ tickers:
   - {symbol: GRAB,  tradingview: "NASDAQ:GRAB", morningstar: xnas/grab, markets: [penny, nasdaq]}
   - {symbol: LCID,  tradingview: "NASDAQ:LCID", morningstar: xnas/lcid, markets: [penny, nasdaq]}
   - {symbol: SOUN,  tradingview: "NASDAQ:SOUN", morningstar: xnas/soun, markets: [penny, nasdaq]}
+  - {symbol: BLNK,  tradingview: "NASDAQ:BLNK", morningstar: xnas/blnk, markets: [penny, nasdaq]}
+  - {symbol: OPEN,  tradingview: "NASDAQ:OPEN", morningstar: xnas/open, markets: [penny, nasdaq]}
+  - {symbol: PTON,  tradingview: "NASDAQ:PTON", morningstar: xnas/pton, markets: [penny, nasdaq]}
+  - {symbol: CLOV,  tradingview: "NASDAQ:CLOV", morningstar: xnas/clov, markets: [penny, nasdaq]}
+  - {symbol: FVRR,  tradingview: "NYSE:FVRR",   morningstar: xnys/fvrr, markets: [penny]}
+  # Oil and gas in the DJ Basin. Sub-dollar, so a few cents' move is a big
+  # percentage -- the RSI here is noisier than anything else on this list.
+  - {symbol: PROP,  tradingview: "NASDAQ:PROP", morningstar: xnas/prop, markets: [penny, nasdaq]}
+
+  # Established businesses that simply trade cheap per share -- banks,
+  # telecoms, brewers and oil rather than the pre-revenue names above. These
+  # are where the valuation gate has the best chance of meaning something,
+  # because Morningstar actually covers them.
+  - {symbol: NOK,   tradingview: "NYSE:NOK",    morningstar: xnys/nok,  markets: [penny]}
+  - {symbol: LYG,   tradingview: "NYSE:LYG",    morningstar: xnys/lyg,  markets: [penny]}
+  - {symbol: ITUB,  tradingview: "NYSE:ITUB",   morningstar: xnys/itub, markets: [penny]}
+  - {symbol: ABEV,  tradingview: "NYSE:ABEV",   morningstar: xnys/abev, markets: [penny]}
+  - {symbol: KOS,   tradingview: "NYSE:KOS",    morningstar: xnys/kos,  markets: [penny]}
 
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView

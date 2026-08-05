@@ -16,7 +16,7 @@ import html
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .config import DEFAULT_HORIZON, MARKET_LABELS, Config
+from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config
 from .signals import (
     BUY,
     SELL,
@@ -1038,26 +1038,7 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
 }
 .market-tabs label:hover { border-color: var(--accent); color: var(--accent); }
 
-#mk-sp500:checked ~ .sheet .card:not(.in-sp500) { display: none; }
-#mk-sp500:checked ~ .sheet .market-tabs label[for="mk-sp500"],
-#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
-  background: var(--accent); color: var(--paper); border-color: var(--accent);
-}
-#mk-nasdaq:checked ~ .sheet .card:not(.in-nasdaq) { display: none; }
-#mk-nasdaq:checked ~ .sheet .market-tabs label[for="mk-nasdaq"],
-#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
-  background: var(--accent); color: var(--paper); border-color: var(--accent);
-}
-#mk-europe:checked ~ .sheet .card:not(.in-europe) { display: none; }
-#mk-europe:checked ~ .sheet .market-tabs label[for="mk-europe"],
-#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
-  background: var(--accent); color: var(--paper); border-color: var(--accent);
-}
-#mk-penny:checked ~ .sheet .card:not(.in-penny) { display: none; }
-#mk-penny:checked ~ .sheet .market-tabs label[for="mk-penny"],
-#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {
-  background: var(--accent); color: var(--paper); border-color: var(--accent);
-}
+/* The per-market rules are appended below, generated from MARKETS. */
 
 
 /* ---- leverage -------------------------------------------------------- */
@@ -1135,3 +1116,29 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
   * { transition: none !important; animation: none !important; }
 }
 """
+
+
+def _market_filter_css() -> str:
+    """The `:checked` rules behind the market filter, one pair per market.
+
+    Generated rather than hand-written because the chips already come from
+    `MARKETS` (see `_page`). When the two were maintained separately, adding a
+    market rendered a chip with no matching rule behind it — and a filter with
+    no hide rule doesn't fail loudly, it just quietly shows everything.
+    """
+    highlight = (
+        "  background: var(--accent); color: var(--paper); "
+        "border-color: var(--accent);\n}"
+    )
+    blocks = [
+        '#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {\n' + highlight
+    ]
+    blocks += [
+        f"#mk-{m}:checked ~ .sheet .card:not(.in-{m}) {{ display: none; }}\n"
+        f'#mk-{m}:checked ~ .sheet .market-tabs label[for="mk-{m}"] {{\n' + highlight
+        for m in MARKETS
+    ]
+    return "\n".join(blocks)
+
+
+_CSS += "\n" + _market_filter_css()
