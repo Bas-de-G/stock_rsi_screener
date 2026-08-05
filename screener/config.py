@@ -108,7 +108,8 @@ class Ticker:
 @dataclass(frozen=True)
 class RsiConfig:
     period: int = 14
-    threshold: float = 30.0
+    threshold: float = 30.0          # oversold line, for buy signals
+    overbought: float = 70.0         # overbought line, for sell signals
     interval: str = "1D"
 
 
@@ -241,8 +242,14 @@ def load_config(path: str | Path | None = None) -> Config:
     rsi = RsiConfig(
         period=int(rsi_raw.get("period", 14)),
         threshold=float(rsi_raw.get("threshold", 30)),
+        overbought=float(rsi_raw.get("overbought", 70)),
         interval=str(rsi_raw.get("interval", "1D")),
     )
+    if rsi.overbought <= rsi.threshold:
+        raise ValueError(
+            f"rsi.overbought ({rsi.overbought:g}) must be above rsi.threshold "
+            f"({rsi.threshold:g}) -- they are the two ends of the same scale"
+        )
     if rsi.period < 2:
         raise ValueError("rsi.period must be at least 2")
     # Backfill can compute any period locally, but the daily live reading comes

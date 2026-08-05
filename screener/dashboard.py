@@ -13,11 +13,19 @@ from __future__ import annotations
 
 import datetime as dt
 import html
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .config import DEFAULT_HORIZON, MARKET_LABELS, Config
-from .signals import earnings_growth_passes, find_upward_crosses, is_strong, valuation_passes
+from .signals import (
+    BUY,
+    SELL,
+    earnings_growth_passes,
+    find_upward_crosses,
+    is_strong,
+    signal_is_live,
+    valuation_passes,
+)
 from .storage import RsiPoint, Signal, Store, Valuation
 
 # Plot geometry, in SVG user units.
@@ -48,8 +56,30 @@ class Row:
         return self.latest.rsi if self.latest else None
 
     @property
+    def buys(self) -> list[Signal]:
+        return [s for s in self.signals if s.direction == BUY]
+
+    @property
+    def sells(self) -> list[Signal]:
+        return [s for s in self.signals if s.direction == SELL]
+
+    @property
     def fired(self) -> bool:
-        return any(s.fired for s in self.signals)
+        return any(s.fired for s in self.buys)
+
+    @property
+    def sell_fired(self) -> bool:
+        return any(s.fired for s in self.sells)
+
+    @property
+    def sell_strong(self) -> bool:
+        return any(
+            s.fired and is_strong(
+                (s.valuation_known, s.valuation_pass),
+                (s.earnings_growth_known, s.earnings_growth_pass),
+            )
+            for s in self.sells
+        )
 
     @property
     def strong(self) -> bool:
@@ -66,7 +96,7 @@ class Row:
                 (s.valuation_known, s.valuation_pass),
                 (s.earnings_growth_known, s.earnings_growth_pass),
             )
-            for s in self.signals
+            for s in self.buys
         )
 
     @property
@@ -81,8 +111,14 @@ class Row:
         if self.fired:
             # A fired signal whose valuation was checked and disagreed is
             # still a signal — the fair value only grades it.
-            checked = any(s.fired and s.valuation_known for s in self.signals)
+            checked = any(s.fired and s.valuation_known for s in self.buys)
             return "signal_checked" if checked else "signal"
+        # Sells rank below buys: this is a screener for entries, and an exit
+        # only matters for something already held.
+        if self.sell_strong:
+            return "sell_strong"
+        if self.sell_fired:
+            return "sell"
         latest = self.latest_signal
         if latest is not None:
             return "rejected"
@@ -154,11 +190,18 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     for ticker in config.tickers:
         full = store.rsi_series(ticker.symbol, horizon.key)
         series = full[-window:]
-        # Only show signals where the pattern completed (up2_date) falls within the chart window
-        chart_start = series[0].date if series else None
+        # A recorded pattern is history; a *live* one is a setup you could act
+        # on now. Both crosses must sit inside the horizon's lookback measured
+        # back from the latest bar, and RSI must still be on the signalling
+        # side of the line. See `signals.signal_is_live`.
+        liveness = replace(config.signal, window_days=horizon.window_days)
         sigs = [
             s for s in signals
-            if s.symbol == ticker.symbol and (not chart_start or s.up2_date >= chart_start)
+            if s.symbol == ticker.symbol
+            and signal_is_live(
+                s, full, liveness,
+                config.rsi.threshold if s.direction == BUY else config.rsi.overbought,
+            )
         ]
         rows.append(
             Row(
@@ -180,8 +223,9 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     # Most actionable first: confirmed signals, then patterns awaiting a
     # fair-value check, then how oversold things currently are.
     order = {
-        "strong": 0, "signal": 1, "signal_checked": 2, "rejected": 3,
-        "oversold": 4, "watch": 5, "neutral": 6, "nodata": 7,
+        "strong": 0, "signal": 1, "signal_checked": 2,
+        "sell_strong": 3, "sell": 4, "rejected": 5,
+        "oversold": 6, "watch": 7, "neutral": 8, "nodata": 9,
     }
     rows.sort(key=lambda r: (order[r.state], r.rsi if r.rsi is not None else 999))
     return rows
@@ -314,6 +358,8 @@ def _card(row: Row, config: Config, horizon) -> str:
         "strong": "Strong buy 🚀",
         "signal": "Buy signal",
         "signal_checked": "Buy signal",
+        "sell_strong": "Strong sell 🔻",
+        "sell": "Sell signal",
         "rejected": "Pattern, gate failed",
         "oversold": "Oversold",
         "watch": "Near threshold",
@@ -342,10 +388,11 @@ def _card(row: Row, config: Config, horizon) -> str:
         </dl>
         <p class="provenance{age_class}">{age_text} · needs {horizon.margin_pct}
            headroom on the {horizon.label} chart.</p>"""
-    elif row.fired:
-        valuation_block = """
-        <p class="valuation pending">Buy signal on RSI alone — confirm the fair value
-        for a strong buy.</p>"""
+    elif row.fired or row.sell_fired:
+        side = "sell" if row.sell_fired and not row.fired else "buy"
+        valuation_block = f"""
+        <p class="valuation pending">{side.capitalize()} signal on RSI alone — confirm the
+        fair value for a strong {side}.</p>"""
     else:
         valuation_block = """
         <p class="valuation none">No fair value recorded yet.</p>"""
@@ -354,6 +401,7 @@ def _card(row: Row, config: Config, horizon) -> str:
     if row.signals:
         marks = ", ".join(
             f"{html.escape(s.up2_date)}"
+            + ("↓" if s.direction == SELL else "")
             + (" ✓" if s.fired else " ✗" if s.valuation_known else "")
             for s in row.signals[-3:]
         )
@@ -372,7 +420,7 @@ def _card(row: Row, config: Config, horizon) -> str:
         growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
 
     leverage_block = ""
-    if row.fired:
+    if row.fired or row.sell_fired:
         leverage_block = (
             f'<p class="leverage"><span class="lev">{horizon.leverage}x</span>'
             f'<span class="lev-note">suggested for the {horizon.label} chart</span></p>'
@@ -420,6 +468,7 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     patterns = sum(len(r.signals) for r in rows)
     strong = sum(1 for r in rows if r.strong)
     fired = sum(1 for r in rows if r.fired)
+    sells = sum(1 for r in rows if r.sell_fired)
     dated = [r.latest.date for r in rows if r.latest]
     as_of = max(dated) if dated else "—"
 
@@ -448,11 +497,13 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     <p class="eyebrow">Relative Strength Screener · {html.escape(horizon.label)} chart</p>
     <h1>RSI Screener</h1>
     <p class="standfirst">
-      Tracking {tracked} market leaders for a double crossing of RSI
-      {threshold:g} within {horizon.window_days} days on the
-      {html.escape(horizon.label)} chart — the entry pattern. A fair value at
-      least {horizon.margin_pct} above the price confirms it; this timeframe
-      suggests {horizon.leverage}x.
+      Tracking {tracked} market leaders on the {html.escape(horizon.label)}
+      chart. <strong>Buy</strong> on two upward crossings of RSI {threshold:g},
+      <strong>sell</strong> on two downward crossings of
+      {config.rsi.overbought:g} — both within {horizon.window_days} days of now,
+      with RSI still on the signalling side. A fair value at least
+      {horizon.margin_pct} away confirms; this timeframe suggests
+      {horizon.leverage}x.
     </p>
     <nav class="timeframes" aria-label="RSI timeframe">{horizon_links}</nav>
   </div>
@@ -463,6 +514,7 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     <div><dt>Patterns</dt><dd>{patterns}</dd></div>
     <div><dt>Signals</dt><dd class="{'warn' if fired else ''}">{fired}</dd></div>
     <div><dt>Strong 🚀</dt><dd class="{'good' if strong else ''}">{strong}</dd></div>
+    <div><dt>Sells 🔻</dt><dd class="{'hot' if sells else ''}">{sells}</dd></div>
   </dl>
 </header>"""
 
@@ -712,7 +764,15 @@ h1 {
 .card.state-strong   { border-top: 3px solid var(--green); }
 .card.state-signal,
 .card.state-signal_checked { border-top: 3px solid var(--accent); }
-.card.state-rejected { border-top: 3px dashed var(--ink-3); }
+.card.card.state-sell_strong { border-left-color: var(--crimson); }
+.card.state-sell        { border-left-color: var(--crimson); }
+.state-sell_strong .pill, .state-sell .pill {
+  background: color-mix(in srgb, var(--crimson) 12%, transparent);
+  color: var(--crimson);
+  border-color: color-mix(in srgb, var(--crimson) 40%, transparent);
+}
+
+.state-rejected { border-top: 3px dashed var(--ink-3); }
 .card.state-oversold { border-top: 3px solid var(--crimson); }
 .card.state-watch    { border-top: 3px solid color-mix(in srgb, var(--accent) 55%, var(--ink-3)); }
 

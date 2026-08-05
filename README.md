@@ -1,13 +1,21 @@
 # Stock RSI screener
 
-Watches a list of stocks every day and flags a buy signal when a specific
-pattern appears:
+Watches a list of stocks and flags a signal when a double crossing appears:
 
-> RSI drops below 30, climbs back through 30, drops below 30 again, and climbs
-> back through 30 a second time — with both crossings inside a 14-day window.
+> **Buy** — RSI drops below 30, climbs back through it, drops below again, and
+> climbs back through a second time.
+>
+> **Sell** — the mirror: RSI rises above 70, falls back through it, rises
+> above again, and falls back through a second time.
 
-Morningstar's fair value then grades it: a signal trading below fair value is
-flagged a **strong buy 🚀**.
+A signal counts as **live** only while both crossings sit inside the
+timeframe's lookback measured from *now*, and RSI is still on the signalling
+side of the line. A pattern that completed in March is history, not something
+you can act on in August — the `signals` table keeps every one ever found, but
+the dashboard shows only what's actionable.
+
+Morningstar's fair value then grades it: a live signal far enough from fair
+value is flagged a **strong buy 🚀** (or **strong sell 🔻**).
 
 Data comes from two places:
 
@@ -99,12 +107,17 @@ An RSI pattern is a **buy signal on its own** — no fair value needed. Two
 independent factors then *grade* it, and either can upgrade it to a
 **strong buy 🚀** on its own:
 
-- **Morningstar fair value** — is the price below what Morningstar thinks
-  it's worth? Checked by hand or via `screener scrape`.
-- **Earnings growth** — is YoY EPS growing? Pulled automatically from
-  TradingView's own scanner (the same free endpoint RSI comes from — no
-  Morningstar login needed for this one), so it's always there once a
-  ticker has a live reading.
+- **Morningstar fair value** — *required* for a rocket. It's the thesis: the
+  reason to think the stock is worth more than it costs. A signal nobody has
+  valued is never strong, however well the company is doing.
+- **Earnings growth** — a **veto**, not a second opinion. Pulled automatically
+  from TradingView's scanner. Unknown costs nothing; known-and-disagreeing
+  withholds the rocket. On a sell it inverts: shrinking earnings *back* the
+  sell.
+
+That asymmetry is deliberate. Earnings growth exists to catch the value trap —
+cheap by fair value, but earnings shrinking — not to promote a stock nobody
+has valued.
 
 Neither factor is required to fire a signal — that's still the RSI pattern
 alone (or `fire_without_valuation: false` for strict mode, below). They only
@@ -112,8 +125,9 @@ decide how much conviction the dashboard shows:
 
 | On the dashboard | What it means |
 |---|---|
-| **Strong buy 🚀** | Pattern completed, and *every* factor that's been checked agrees. One checked factor confirming is enough if the other isn't known yet. |
-| **Buy signal** | Pattern completed; nothing checked disagrees, but nothing confirms it either — or one known factor disagrees while fired stays true |
+| **Strong buy 🚀** | Live pattern, **and** the fair value confirms, **and** nothing else known contradicts it |
+| **Buy signal** | Live pattern, but no fair value recorded — or one that disagrees |
+| **Strong sell 🔻** / **Sell signal** | The same two tiers on the overbought side |
 | **Pattern, gate failed** | Only in strict mode (below) |
 | Oversold / Near threshold / Neutral | No pattern; just where RSI sits now |
 
@@ -585,7 +599,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 301 tests
+python -m pytest tests/ -q      # 313 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

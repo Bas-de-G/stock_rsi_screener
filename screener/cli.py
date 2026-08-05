@@ -27,6 +27,8 @@ from .morningstar import (
 from .notify import format_signal, send_webhook
 from .rsi import wilder_rsi_series
 from .signals import (
+    BUY,
+    SELL,
     earnings_growth_passes,
     find_cross_pairs,
     is_strong,
@@ -250,6 +252,35 @@ def cmd_run(config: Config, args) -> int:
     return exit_code
 
 
+def _gate_for(signal_config, direction: str):
+    """The valuation rule for one side of the trade.
+
+    A sell is the mirror of a buy: what argues for buying is the price sitting
+    below fair value, so what argues for selling is it sitting that far above.
+    Flipping the configured rule keeps one setting meaningful for both.
+    """
+    if direction == BUY:
+        return signal_config
+    flipped = (
+        "fair_value_below_price"
+        if signal_config.valuation_rule == "price_below_fair_value"
+        else "price_below_fair_value"
+    )
+    return replace(signal_config, valuation_rule=flipped)
+
+
+def _growth_for(growth: float | None, direction: str) -> tuple[bool, bool]:
+    """Earnings growth as a veto, oriented to the trade direction.
+
+    Growing earnings argue against selling exactly as strongly as they argue
+    for buying, so the sell side inverts.
+    """
+    known, confirms = earnings_growth_passes(growth)
+    if known and direction == SELL:
+        return known, not confirms
+    return known, confirms
+
+
 def _latest_earnings_growth(series) -> float | None:
     """Most recent non-null earnings growth in a series.
 
@@ -292,13 +323,21 @@ def _detect_and_record(
 ) -> list[Signal]:
     """Scan stored history for the pattern and record anything new.
 
-    Runs per horizon: each has its own bar series, its own cross-spacing
-    window, and its own valuation margin, so the same symbol can legitimately
-    have a fired 1h signal and no 1w signal at the same moment.
+    Runs per horizon and per direction: each horizon has its own bar series,
+    cross-spacing window and valuation margin, so the same symbol can
+    legitimately have a fired 1h signal and no 1w signal at the same moment.
+
+    Everything found is recorded. Whether a pattern is still a *tradeable*
+    setup is a separate question, answered by `signals.signal_is_live` at
+    display time — this table stays a complete historical log.
     """
     new_signals: list[Signal] = []
     now = dt.datetime.now().isoformat(timespec="seconds")
     horizons = horizons if horizons is not None else list(config.horizons)
+
+    # Buy off the oversold line, sell off the overbought one: the same shape,
+    # mirrored, with a move back across the line in between.
+    directions = ((BUY, config.rsi.threshold), (SELL, config.rsi.overbought))
 
     for horizon in horizons:
         window = replace(config.signal, window_days=horizon.window_days)
@@ -306,41 +345,42 @@ def _detect_and_record(
             series = store.rsi_series(symbol, horizon.key)
             if not series:
                 continue
-            for pair in find_cross_pairs(series, config.rsi.threshold, window):
-                if store.signal_exists(symbol, pair.up2_date, horizon.key):
-                    continue
+            growth = _latest_earnings_growth(series)
 
-                valuation = store.valuation(symbol, pair.up2_date)
-                price = valuation.price if valuation else None
-                fair_value = valuation.fair_value if valuation else None
-                known, confirms = valuation_passes(
-                    price, fair_value, config.signal, horizon.margin
-                )
+            for direction, line in directions:
+                gate = _gate_for(config.signal, direction)
+                for pair in find_cross_pairs(series, line, window, direction):
+                    if store.signal_exists(symbol, pair.up2_date, horizon.key, direction):
+                        continue
 
-                # The *current* growth, not the value on the pattern's own
-                # bar. See `Store.update_signal_earnings_growth` for why.
-                growth = _latest_earnings_growth(series)
-                eg_known, eg_confirms = earnings_growth_passes(growth)
+                    valuation = store.valuation(symbol, pair.up2_date)
+                    price = valuation.price if valuation else None
+                    fair_value = valuation.fair_value if valuation else None
+                    known, confirms = valuation_passes(
+                        price, fair_value, gate, horizon.margin
+                    )
+                    eg_known, eg_confirms = _growth_for(growth, direction)
 
-                signal = Signal(
-                    symbol=symbol,
-                    up1_date=pair.up1_date,
-                    down_date=pair.down_date,
-                    up2_date=pair.up2_date,
-                    price=price,
-                    fair_value=fair_value,
-                    valuation_known=known,
-                    valuation_pass=confirms,
-                    fired=signal_fires(confirms, config.signal),
-                    recorded_at=now,
-                    earnings_growth=growth,
-                    earnings_growth_known=eg_known,
-                    earnings_growth_pass=eg_confirms,
-                    horizon=horizon.key,
-                )
-                store.record_signal(signal)
-                append_signal_csv(config.storage.csv_dir, signal)
-                new_signals.append(signal)
+                    signal = Signal(
+                        symbol=symbol,
+                        up1_date=pair.up1_date,
+                        down_date=pair.down_date,
+                        up2_date=pair.up2_date,
+                        price=price,
+                        fair_value=fair_value,
+                        valuation_known=known,
+                        valuation_pass=confirms,
+                        fired=signal_fires(confirms, config.signal),
+                        recorded_at=now,
+                        earnings_growth=growth,
+                        earnings_growth_known=eg_known,
+                        earnings_growth_pass=eg_confirms,
+                        horizon=horizon.key,
+                        direction=direction,
+                    )
+                    store.record_signal(signal)
+                    append_signal_csv(config.storage.csv_dir, signal)
+                    new_signals.append(signal)
 
     if announce:
         fired = [s for s in new_signals if s.fired]

@@ -250,14 +250,15 @@ def test_nothing_known_is_never_strong():
     assert is_strong((False, False), (False, False)) is False
 
 
-def test_a_single_known_factor_confirming_is_enough():
-    """A fresh pattern with no fair value yet can still be strong on
-    earnings growth alone -- and vice versa."""
-    assert is_strong((False, False), (True, True)) is True
+def test_the_valuation_is_required_and_vetoes_are_not_substitutes():
+    """Fair value is the thesis, not a peer of the other factors. A confirming
+    veto cannot carry a signal on its own -- a stock nobody has valued is
+    never a strong buy, however well the company is doing."""
+    assert is_strong((False, False), (True, True)) is False
     assert is_strong((True, True), (False, False)) is True
 
 
-def test_a_single_known_factor_denying_blocks_it():
+def test_a_denying_factor_blocks_it():
     assert is_strong((False, False), (True, False)) is False
     assert is_strong((True, False), (False, False)) is False
 
@@ -273,8 +274,103 @@ def test_both_known_but_disagreeing_is_not_strong():
     assert is_strong((True, False), (True, True)) is False
 
 
-def test_is_strong_accepts_any_number_of_factors():
+def test_is_strong_accepts_any_number_of_vetoes():
     """Extensible to a third factor later without changing the call shape."""
     assert is_strong((True, True), (True, True), (True, True)) is True
     assert is_strong((True, True), (True, True), (True, False)) is False
-    assert is_strong((False, False), (False, False), (True, True)) is True
+    # ...but still never without the valuation itself confirming.
+    assert is_strong((False, False), (True, True), (True, True)) is False
+
+
+# ------------------------------------------------- sell side & liveness
+
+
+from screener.signals import BUY, SELL, find_downward_crosses, signal_is_live
+from screener.storage import Signal
+
+
+def test_finds_simple_downward_cross():
+    assert find_downward_crosses(series(80, 75, 65), 70.0) == [2]
+
+
+def test_touching_overbought_exactly_counts_as_a_cross():
+    """Mirror of the buy side: landing exactly on the line from above counts."""
+    assert find_downward_crosses(series(80, 70.0), 70.0) == [1]
+
+
+def test_upward_cross_is_not_a_downward_cross():
+    assert find_downward_crosses(series(20, 80), 70.0) == []
+
+
+def test_the_sell_pattern_is_the_mirror_of_the_buy():
+    """Above 70, down through, back above, down again."""
+    points = series(80, 66, 74, 65)
+    pairs = find_cross_pairs(points, 70.0, config(), SELL)
+    assert len(pairs) == 1
+    assert pairs[0].direction == SELL
+    assert (pairs[0].up1_date, pairs[0].down_date, pairs[0].up2_date) == (
+        "2026-01-06", "2026-01-07", "2026-01-08",
+    )
+
+
+def test_a_sell_window_is_enforced_like_a_buy_window():
+    points = series(80, 66, *([74] * 18), 65)
+    assert find_cross_pairs(points, 70.0, config(), SELL) == []
+
+
+def test_buy_detection_ignores_the_overbought_line():
+    """Two directions over the same series must not contaminate each other."""
+    points = series(80, 66, 74, 65)
+    assert find_cross_pairs(points, THRESHOLD, config(), BUY) == []
+
+
+# --- liveness -----------------------------------------------------------
+
+
+def live_signal(up1="2026-01-10", direction=BUY):
+    return Signal(
+        "X", up1, "2026-01-11", "2026-01-12", None, None, False, False,
+        True, "now", direction=direction,
+    )
+
+
+def bars(*rsis, start="2026-01-10"):
+    base = dt.date.fromisoformat(start)
+    return [
+        RsiPoint("X", (base + dt.timedelta(days=i)).isoformat(), 100.0, r, "t")
+        for i, r in enumerate(rsis)
+    ]
+
+
+def test_a_recent_pattern_with_rsi_above_the_line_is_live():
+    series_ = bars(25, 34, 27, 36)
+    assert signal_is_live(live_signal(), series_, config(window_days=14), 30.0)
+
+
+def test_a_pattern_older_than_the_lookback_is_not_live():
+    """The core of the freshness rule: a pattern from March is a matter of
+    record, not something you can act on in August."""
+    series_ = bars(25, 34, 27, *([40] * 40))
+    assert not signal_is_live(live_signal(), series_, config(window_days=14), 30.0)
+
+
+def test_a_buy_whose_rsi_fell_back_under_the_line_is_not_live():
+    """A setup that hasn't resolved -- the stock is still falling."""
+    series_ = bars(25, 34, 27, 22)
+    assert not signal_is_live(live_signal(), series_, config(window_days=14), 30.0)
+
+
+def test_a_sell_is_live_while_rsi_stays_under_the_overbought_line():
+    series_ = bars(80, 66, 74, 65)
+    sig = live_signal(direction=SELL)
+    assert signal_is_live(sig, series_, config(window_days=14), 70.0)
+
+
+def test_a_sell_whose_rsi_climbed_back_over_the_line_is_not_live():
+    series_ = bars(80, 66, 74, 78)
+    sig = live_signal(direction=SELL)
+    assert not signal_is_live(sig, series_, config(window_days=14), 70.0)
+
+
+def test_liveness_on_an_empty_series_is_false():
+    assert not signal_is_live(live_signal(), [], config(), 30.0)
