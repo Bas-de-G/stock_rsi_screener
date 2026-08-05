@@ -90,12 +90,12 @@ def test_contradicting_fair_value_leaves_it_a_plain_buy_signal():
     assert r.strong is False
 
 
-def test_earnings_growth_alone_makes_it_a_strong_buy():
-    """No fair value recorded yet, but earnings growth alone confirms —
-    same lenient rule the dashboard already used for fair value by itself."""
+def test_earnings_growth_alone_is_not_enough_for_a_rocket():
+    """Earnings growth is a veto, not a substitute for the fair value. A stock
+    nobody has valued is never a strong buy, however well it is trading."""
     r = row(signals=[signal(known=False, fired=True, eg_known=True, eg_confirms=True)])
-    assert r.state == "strong"
-    assert r.strong is True
+    assert r.state == "signal"
+    assert r.strong is False
 
 
 def test_both_factors_confirming_is_strong():
@@ -203,7 +203,7 @@ def test_morningstar_button_points_at_the_right_ticker(config):
 def test_unconfirmed_signal_invites_a_fair_value_check(config):
     html = render([row(signals=[signal(known=False, fired=True)])], config)
     assert "Buy signal" in html
-    assert "confirm the fair value" in html.lower()
+    assert "confirm the\n        fair value" in html or "confirm the fair value" in html.lower()
 
 
 def test_strong_buy_card_carries_the_rocket(config):
@@ -548,3 +548,12 @@ def test_each_page_only_carries_its_own_horizons_data(tmp_path, config):
         paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
     daily = next(p for p in paths if p.name == "index.html").read_text()
     assert "2026-07-20T14:00" not in daily
+
+
+def test_cards_no_longer_carry_the_cli_hint(config):
+    """The dashboard is read by someone who never runs the CLI; a copy-paste
+    command on every card was noise."""
+    html = render([row(signals=[signal(fired=True)])], config)
+    assert "screener scrape" not in html
+    assert "screener fair-value" not in html
+    assert "record-hint" not in html

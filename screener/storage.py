@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS signals (
     fired              INTEGER NOT NULL,  -- 1 if this counts as an actual buy signal
     recorded_at        TEXT NOT NULL,     -- when this row was written
     horizon            TEXT NOT NULL DEFAULT '1d',
-    PRIMARY KEY (symbol, horizon, up2_date)
+    direction          TEXT NOT NULL DEFAULT 'buy',  -- 'buy' | 'sell'
+    PRIMARY KEY (symbol, horizon, direction, up2_date)
 );
 """
 
@@ -130,6 +131,7 @@ class Signal:
     earnings_growth_known: bool = False
     earnings_growth_pass: bool = False
     horizon: str = "1d"
+    direction: str = "buy"
 
 
 class Store:
@@ -184,20 +186,36 @@ class Store:
             # intact rather than starting over.
             self._add_horizon_column(cur, "rsi_history", _RSI_HISTORY_DDL)
             self._add_horizon_column(cur, "signals", _SIGNALS_DDL)
+            # Sell signals widened the key again. Everything recorded before
+            # they existed was a buy.
+            self._widen_key(cur, "signals", "direction", "buy", _SIGNALS_DDL)
 
     @staticmethod
     def _add_horizon_column(cur, table: str, create_ddl: str) -> None:
+        Store._widen_key(cur, table, "horizon", "1d", create_ddl)
+
+    @staticmethod
+    def _widen_key(cur, table: str, column: str, default: str, create_ddl: str) -> None:
+        """Add a column that belongs in the primary key.
+
+        SQLite cannot ALTER a primary key, so the table is rebuilt: rename the
+        old one aside, create the current shape, copy every existing row across
+        with `default` filled in for the new column, drop the original. Used
+        twice now -- once for `horizon`, once for `direction` -- and it keeps
+        collected history intact rather than forcing a rebuild from scratch.
+        """
         columns = [r["name"] for r in cur.execute(f"PRAGMA table_info({table})")]
-        if not columns or "horizon" in columns:
+        if not columns or column in columns:
             return
         carried = ", ".join(columns)
-        cur.execute(f"ALTER TABLE {table} RENAME TO {table}_pre_horizon")
+        aside = f"{table}_pre_{column}"
+        cur.execute(f"ALTER TABLE {table} RENAME TO {aside}")
         cur.executescript(create_ddl)
         cur.execute(
-            f"INSERT INTO {table} ({carried}, horizon) "
-            f"SELECT {carried}, '1d' FROM {table}_pre_horizon"
+            f"INSERT INTO {table} ({carried}, {column}) "
+            f"SELECT {carried}, '{default}' FROM {aside}"
         )
-        cur.execute(f"DROP TABLE {table}_pre_horizon")
+        cur.execute(f"DROP TABLE {aside}")
 
     def close(self) -> None:
         self._conn.close()
@@ -314,11 +332,14 @@ class Store:
 
     # -- signals -----------------------------------------------------------
 
-    def signal_exists(self, symbol: str, up2_date: str, horizon: str = "1d") -> bool:
+    def signal_exists(
+        self, symbol: str, up2_date: str, horizon: str = "1d", direction: str = "buy"
+    ) -> bool:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                "SELECT 1 FROM signals WHERE symbol=? AND horizon=? AND up2_date=?",
-                (symbol, horizon, up2_date),
+                "SELECT 1 FROM signals WHERE symbol=? AND horizon=? AND direction=? "
+                "AND up2_date=?",
+                (symbol, horizon, direction, up2_date),
             )
             return cur.fetchone() is not None
 
@@ -329,8 +350,8 @@ class Store:
                      (symbol, up1_date, down_date, up2_date, price, fair_value,
                       valuation_known, valuation_pass, earnings_growth,
                       earnings_growth_known, earnings_growth_pass, fired,
-                      recorded_at, horizon)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      recorded_at, horizon, direction)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     sig.symbol,
                     sig.up1_date,
@@ -346,6 +367,7 @@ class Store:
                     int(sig.fired),
                     sig.recorded_at,
                     sig.horizon,
+                    sig.direction,
                 ),
             )
         self._conn.commit()
@@ -360,6 +382,7 @@ class Store:
         confirms: bool,
         fired: bool,
         horizon: str = "1d",
+        direction: str = "buy",
     ) -> None:
         """Re-score an existing pattern once a fair value becomes available.
 
@@ -376,9 +399,34 @@ class Store:
             cur.execute(
                 """UPDATE signals
                       SET price=?, fair_value=?, valuation_known=?, valuation_pass=?, fired=?
-                    WHERE symbol=? AND horizon=? AND up2_date=?""",
+                    WHERE symbol=? AND horizon=? AND direction=? AND up2_date=?""",
                 (price, fair_value, int(known), int(confirms), int(fired),
-                 symbol, horizon, up2_date),
+                 symbol, horizon, direction, up2_date),
+            )
+        self._conn.commit()
+
+    def update_signal_earnings_growth(
+        self, symbol: str, horizon: str, growth: float | None, known: bool,
+        passes: bool, direction: str = "buy",
+    ) -> None:
+        """Re-score every recorded pattern for one symbol against the *current*
+        earnings growth.
+
+        Deliberately not pinned to the pattern's own date. Earnings growth is a
+        fundamental that describes the company now and moves quarterly, not a
+        price fact belonging to a particular bar — and the bar at a pattern's
+        second cross is almost always backfilled, which carries no growth
+        figure at all. Pinning it there left the factor permanently unknown on
+        every signal, so it never graded anything. This mirrors how the
+        valuation factor already works: `sync_fair_values` scores against the
+        latest close and today's fair value, not the values on the signal date.
+        """
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """UPDATE signals
+                      SET earnings_growth=?, earnings_growth_known=?, earnings_growth_pass=?
+                    WHERE symbol=? AND horizon=? AND direction=?""",
+                (growth, int(known), int(passes), symbol, horizon, direction),
             )
         self._conn.commit()
 
@@ -424,12 +472,17 @@ class Store:
             )
             return [r["symbol"] for r in cur.fetchall()]
 
-    def all_signals(self, symbol: str | None = None, horizon: str | None = None) -> list[Signal]:
+    def all_signals(
+        self, symbol: str | None = None, horizon: str | None = None,
+        direction: str | None = None,
+    ) -> list[Signal]:
         clauses, params = [], []
         if symbol:
             clauses.append("symbol=?"); params.append(symbol)
         if horizon:
             clauses.append("horizon=?"); params.append(horizon)
+        if direction:
+            clauses.append("direction=?"); params.append(direction)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with closing(self._conn.cursor()) as cur:
             cur.execute(f"SELECT * FROM signals {where} ORDER BY up2_date ASC", params)
@@ -440,7 +493,7 @@ class Store:
                 r["price"], r["fair_value"], bool(r["valuation_known"]),
                 bool(r["valuation_pass"]), bool(r["fired"]), r["recorded_at"],
                 r["earnings_growth"], bool(r["earnings_growth_known"]),
-                bool(r["earnings_growth_pass"]), r["horizon"],
+                bool(r["earnings_growth_pass"]), r["horizon"], r["direction"],
             )
             for r in rows
         ]
@@ -490,7 +543,7 @@ _SIGNAL_CSV_FIELDS = [
     "symbol", "up1_date", "down_date", "up2_date",
     "price", "fair_value", "valuation_known", "valuation_pass",
     "earnings_growth", "earnings_growth_known", "earnings_growth_pass",
-    "fired", "recorded_at",
+    "fired", "recorded_at", "horizon", "direction",
 ]
 
 
@@ -509,6 +562,8 @@ def _signal_csv_row(sig: Signal) -> dict:
         "earnings_growth_pass": sig.earnings_growth_pass,
         "fired": sig.fired,
         "recorded_at": sig.recorded_at,
+        "horizon": sig.horizon,
+        "direction": sig.direction,
     }
 
 

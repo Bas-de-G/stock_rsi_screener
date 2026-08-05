@@ -307,6 +307,7 @@ def test_appending_a_signal_preserves_rows_written_under_an_older_header(tmp_pat
         "symbol", "up1_date", "down_date", "up2_date", "price", "fair_value",
         "valuation_known", "valuation_pass", "earnings_growth",
         "earnings_growth_known", "earnings_growth_pass", "fired", "recorded_at",
+        "horizon", "direction",
     ]
     assert len(lines) == 3  # header + old row + new row
     assert lines[1].startswith("AAPL,")

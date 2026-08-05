@@ -28,15 +28,24 @@ from .config import SignalConfig
 from .storage import RsiPoint
 
 
+BUY, SELL = "buy", "sell"
+
+
 @dataclass(frozen=True)
 class CrossPair:
-    """A completed up/down/up pattern, before the valuation gate is applied."""
+    """A completed cross/retrace/cross pattern, before the valuation gate.
+
+    Field names read from the buy side (`up1`, `down`, `up2`) because that's
+    the pattern this started as; on the sell side they mean the mirror --
+    first downward cross, the rebound between, second downward cross.
+    """
 
     up1_date: str
     down_date: str
     up2_date: str
     span_days: float   # calendar days (fractional on intraday bars)
     rsi_at_up2: float
+    direction: str = BUY
 
 
 def find_upward_crosses(series: list[RsiPoint], threshold: float) -> list[int]:
@@ -48,15 +57,36 @@ def find_upward_crosses(series: list[RsiPoint], threshold: float) -> list[int]:
     return crosses
 
 
+def find_downward_crosses(series: list[RsiPoint], threshold: float) -> list[int]:
+    """Indices where RSI crossed from above the threshold to at/below it.
+
+    The exact mirror of `find_upward_crosses`, including the boundary: landing
+    exactly on 70 from above counts, just as landing exactly on 30 from below
+    does.
+    """
+    crosses = []
+    for i in range(1, len(series)):
+        if series[i - 1].rsi > threshold >= series[i].rsi:
+            crosses.append(i)
+    return crosses
+
+
 def find_cross_pairs(
-    series: list[RsiPoint], threshold: float, config: SignalConfig
+    series: list[RsiPoint], threshold: float, config: SignalConfig,
+    direction: str = BUY,
 ) -> list[CrossPair]:
-    """Find every consecutive pair of upward crosses that fits the window."""
-    crosses = find_upward_crosses(series, threshold)
+    """Find every consecutive pair of crosses that fits the window.
+
+    `direction` picks which way the crosses go: BUY looks for two upward
+    crosses of the oversold line with a dip between, SELL for two downward
+    crosses of the overbought line with a rebound between.
+    """
+    finder = find_upward_crosses if direction == BUY else find_downward_crosses
+    crosses = finder(series, threshold)
     pairs: list[CrossPair] = []
 
     for first, second in zip(crosses, crosses[1:]):
-        dip = _find_dip(series, first, second, threshold)
+        dip = _find_dip(series, first, second, threshold, direction)
         if dip is None:
             # Can't happen given the cross definition, but if the series ever
             # gains a gap we'd rather skip than record a malformed pattern.
@@ -73,15 +103,25 @@ def find_cross_pairs(
                 up2_date=series[second].date,
                 span_days=span,
                 rsi_at_up2=series[second].rsi,
+                direction=direction,
             )
         )
     return pairs
 
 
-def _find_dip(series: list[RsiPoint], first: int, second: int, threshold: float) -> int | None:
-    """Index of the last day between the two crosses where RSI sat below the threshold."""
+def _find_dip(
+    series: list[RsiPoint], first: int, second: int, threshold: float,
+    direction: str = BUY,
+) -> int | None:
+    """Index of the last bar between the crosses on the far side of the line.
+
+    For a buy that's the dip back under 30; for a sell, the rebound back over
+    70. Either way it's what makes the shape a genuine double cross rather
+    than one cross recorded twice.
+    """
     for i in range(second - 1, first - 1, -1):
-        if series[i].rsi < threshold:
+        beyond = series[i].rsi < threshold if direction == BUY else series[i].rsi > threshold
+        if beyond:
             return i
     return None
 
@@ -175,15 +215,51 @@ def signal_fires(confirms: bool, config: SignalConfig) -> bool:
     return confirms or config.fire_without_valuation
 
 
-def is_strong(*factors: tuple[bool, bool]) -> bool:
-    """A strong buy: every grading factor that's known agrees.
+def is_strong(valuation: tuple[bool, bool], *vetoes: tuple[bool, bool]) -> bool:
+    """A strong buy: the valuation confirms, and nothing else known contradicts it.
 
-    Each factor is a (known, confirms) pair — one from `valuation_passes`, one
-    from `earnings_growth_passes`, or any later addition. A factor nobody's
-    checked yet doesn't count against the signal (a fresh pattern with no
-    fair value recorded can still be strong once earnings growth alone
-    confirms it), but with *nothing* known at all, this is never strong —
-    that would be calling a coin flip a conviction.
+    The factors are deliberately *not* peers. Fair value is the thesis — the
+    reason to think the stock is worth more than it costs — so it is required:
+    a signal nobody has checked a fair value for is never strong, however well
+    the company is doing.
+
+    Everything after it is a veto. A veto that's unknown costs nothing; a veto
+    that's known and disagrees withholds the rocket. That's what makes earnings
+    growth a filter on the valuation rather than a substitute for it — the
+    value-trap case (cheap by fair value, but earnings shrinking) is exactly
+    what it exists to catch.
     """
-    known = [confirms for known, confirms in factors if known]
-    return bool(known) and all(known)
+    known, confirms = valuation
+    if not (known and confirms):
+        return False
+    return all(agrees for is_known, agrees in vetoes if is_known)
+
+
+def signal_is_live(
+    signal, series: list[RsiPoint], config: SignalConfig, threshold: float
+) -> bool:
+    """Whether a recorded pattern is still a tradeable setup *right now*.
+
+    Two conditions, both from the strategy as specified:
+
+    * Both crosses fall inside the lookback window measured back from the most
+      recent bar — not merely inside the window measured between themselves.
+      A pattern that completed in March is a matter of record, not a signal
+      you can act on in August.
+    * Current RSI is still on the signalling side of the threshold. A buy
+      setup whose RSI has fallen back under 30 has not resolved; it's a stock
+      still falling.
+
+    Kept separate from detection on purpose: `signals` remains a complete
+    historical log of every pattern ever found, and liveness is applied when
+    deciding what to *show* and what to scrape.
+    """
+    if not series:
+        return False
+    latest = series[-1]
+    horizon_start = _moment(latest.date) - dt.timedelta(days=config.window_days)
+    if _moment(signal.up1_date) < horizon_start:
+        return False
+    if signal.direction == "sell":
+        return latest.rsi < threshold
+    return latest.rsi > threshold

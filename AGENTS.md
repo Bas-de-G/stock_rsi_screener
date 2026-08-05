@@ -6,15 +6,17 @@ rules.
 
 ## What this is
 
-A screener that watches ~65 tickers for a double-oversold-recovery pattern:
-RSI crosses 30 upward, falls back below, and crosses up again inside a window.
-Screened on four horizons (1h / 4h / 1d / 1w), each with its own cross window,
-valuation margin and suggested leverage, and grouped into four market filters
-(sp500 / nasdaq / europe / penny) a ticker can belong to more than one of. A completed pattern is a buy signal on its own. Two independent factors
-grade it — Morningstar fair value and YoY earnings growth — and either one
-agreeing on its own is enough to upgrade it to a strong buy (🚀 on the
-dashboard); both being known and one dissenting withholds it (the value-trap
-case: cheap and oversold, but earnings shrinking).
+A screener that watches ~65 tickers for a double-crossing pattern in both
+directions: **buy** on two upward crosses of RSI 30, **sell** on two downward
+crosses of 70. Screened on four horizons (1h / 4h / 1d / 1w), each with its own
+cross window, valuation margin and suggested leverage, and grouped into four
+market filters (sp500 / nasdaq / europe / penny) a ticker can belong to more
+than one of.
+
+A pattern only counts as a *live* signal while both crosses sit inside the
+horizon's lookback from now and RSI is still on the signalling side. Morningstar
+fair value then grades it — required for the rocket — and earnings growth acts
+as a veto on top (the value-trap case: cheap, but earnings shrinking).
 
 The RSI half, and earnings growth alongside it, run themselves on GitHub
 Actions — both come from TradingView's free scanner endpoint, no login needed.
@@ -83,20 +85,31 @@ than overwrite it. Fix: discard it, don't merge it — it's fully regenerable �
   With `fire_without_valuation: true` the RSI pattern stands alone. Deliberately
   takes only the valuation's `confirms` — earnings growth never gates firing,
   only grading, so a soft quarter can't silently suppress a signal.
-- `is_strong(*factors)` → whether it earns the rocket. Takes any number of
-  `(known, confirms)` pairs — one per grading factor — and requires every
-  factor that's *known* to agree. A factor nobody's checked doesn't count
-  against the signal, but with nothing known at all, it's never strong.
+- `is_strong(valuation, *vetoes)` → whether it earns the rocket. The factors
+  are **not** peers: the valuation is required (unknown or disagreeing means
+  never strong), and everything after it can only veto. That's what keeps
+  earnings growth a filter on the thesis rather than a substitute for it.
+- `signal_is_live(signal, series, config, threshold)` → whether a recorded
+  pattern is still tradeable: both crosses inside the lookback measured back
+  from the latest bar, and RSI still on the signalling side. Detection records
+  everything; liveness decides what gets shown and scraped.
 
 Collapsing these back into one function breaks the "fire on the pattern, grade
 on independent factors" behaviour the dashboard is built around. Adding a third
 grading factor later is just another `(known, confirms)` pair passed to
 `is_strong` — the signature doesn't need to change.
 
-**The dashboard only shows signals inside the chart window.** `dashboard._collect`
-filters on `up2_date >= ` the first date in the visible series, and
-`cli._signalled_symbols` mirrors that rule so an aged-off signal doesn't trigger
-a scrape. Change one, change the other.
+**`signals` is a complete log; the dashboard shows only live ones.** Detection
+records every pattern it ever finds, both directions, all horizons — that's
+the historical record. `signals.signal_is_live` decides what's actionable now,
+and `dashboard._collect` filters through it. Don't conflate the two: dropping
+a pattern at detection time would lose history you can't recover.
+
+**Buy and sell are mirrors, and the mirroring is not just the crosses.** The
+valuation rule flips (`cli._gate_for`) — what argues for buying is price below
+fair value, so what argues for selling is price above it. Earnings growth
+flips too (`cli._growth_for`): growing earnings argue *against* a sell. Get
+either wrong and the sell side silently grades backwards.
 
 **Cross detection needs one bar of lead-in.** A cross compares a bar against
 its predecessor, so slicing the visible window throws away the predecessor of
@@ -158,6 +171,15 @@ slug can't be verified from a script (their CDN returns HTTP 202 with an empty
 body for valid *and* bogus URLs alike), so follow the MIC-code convention and
 accept that a wrong slug means a dead dashboard button, nothing worse.
 
+**Both grading factors are scored from *current* data, never from the signal
+date.** `sync_fair_values` uses the latest close and today's fair value;
+`sync_earnings_growth` is its counterpart and must be called alongside it.
+Earnings growth used to be read from the bar at the pattern's own second
+cross — which is almost always backfilled and carries no figure — so the
+factor came back unknown on every signal and silently graded nothing: 0 of 72
+on the live database. Both are quarterly fundamentals describing the company
+now, not properties of one historical bar.
+
 **Earnings growth only exists on live-fetched rows.** `rsi_history.earnings_growth`
 comes from TradingView's scanner alongside RSI (`tradingview.fetch_live_rsi`) —
 backfill has no historical source for it, so a signal whose `up2_date` was
@@ -216,7 +238,7 @@ locally on purpose.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q          # 294 tests, fully offline
+python -m pytest tests/ -q          # 313 tests, fully offline
 
 python -m screener.cli backfill              # seeds all four horizons
 python -m screener.cli run                   # the scheduled job (RSI only)
