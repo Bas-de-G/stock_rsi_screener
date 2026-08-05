@@ -43,7 +43,12 @@ from .storage import (
     append_signal_csv,
     export_csv_snapshot,
 )
-from .tradingview import MarketDataError, fetch_daily_closes, fetch_live_rsi
+from .tradingview import (
+    MarketDataError,
+    NoHistoryYet,
+    fetch_daily_closes,
+    fetch_live_rsi,
+)
 
 
 def _load_dotenv() -> None:
@@ -174,6 +179,14 @@ def cmd_run(config: Config, args) -> int:
                         period=config.rsi.period,
                         interval=horizon.tv_interval,
                     )
+                except NoHistoryYet as exc:
+                    # Expected for a recent listing, and it fixes itself as the
+                    # bars accumulate. Not a failure: letting it set exit_code
+                    # meant one young ticker turned the whole scheduled run red
+                    # and skipped the commit and publish steps behind it, so
+                    # the other 129 tickers never reached the dashboard.
+                    print(f"  {ticker.symbol}: no {horizon.label} RSI yet — {exc}")
+                    continue
                 except MarketDataError as exc:
                     print(f"  {ticker.symbol}: RSI unavailable — {exc}")
                     exit_code = 1

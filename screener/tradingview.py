@@ -24,6 +24,20 @@ class MarketDataError(RuntimeError):
     """Raised when TradingView or Yahoo doesn't return usable data."""
 
 
+class NoHistoryYet(MarketDataError):
+    """The symbol resolved, but this interval has no RSI to give yet.
+
+    A 14-period weekly RSI needs fifteen weekly bars, so a stock that listed
+    two months ago has a perfectly good 1h and 1d RSI and a null 1W one. That
+    is a fact about the listing's age, not a fetch failure, and it resolves
+    itself as the bars accumulate.
+
+    A subclass of MarketDataError so every existing `except MarketDataError`
+    still catches it; callers that want to treat "too young" differently from
+    "the request broke" catch this first.
+    """
+
+
 @dataclass(frozen=True)
 class LiveQuote:
     symbol: str
@@ -92,6 +106,14 @@ def fetch_live_rsi(tv_symbol: str, period: int = 14, interval: str = "1D") -> Li
         raise MarketDataError(f"TradingView request failed for {tv_symbol}: {exc}") from exc
 
     if data.get(rsi_field) is None or data.get(close_field) is None:
+        # A price with no RSI means the symbol is real and simply too young for
+        # this interval's lookback -- distinguished from a broken response so
+        # one recently listed ticker can't fail an otherwise healthy run.
+        if data.get(close_field) is not None:
+            raise NoHistoryYet(
+                f"{tv_symbol} has no {rsi_field} yet — not enough {interval} bars "
+                f"for a {period}-period RSI (close is {data[close_field]})"
+            )
         raise MarketDataError(
             f"TradingView returned no {rsi_field}/{close_field} for {tv_symbol}: {data}"
         )
