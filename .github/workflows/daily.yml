@@ -16,10 +16,25 @@ name: Screener run
 
 on:
   schedule:
-    # Every 30 minutes on weekdays, 13:00–20:30 UTC, then a single run at
-    # 21:00. That window covers the US session (13:30–20:00 UTC) plus the
-    # European afternoon, and the 21:00 run lands after the US close so the
-    # daily bar it records is the settled one.
+    # Every 30 minutes on weekdays from the European open to the US close,
+    # then a single run at 21:00.
+    #
+    # The window is 07:00–20:30 UTC because the watchlist is no longer
+    # US-only. In August (summer time) the sessions are:
+    #
+    #   HKEX          01:30–08:00 UTC     2 tickers  (BYD, XIAOMI)
+    #   Euronext/LSE  07:00–15:30 UTC    25 tickers  (AEX, Rolls-Royce, ...)
+    #   US            13:30–20:00 UTC   103 tickers
+    #
+    # The old 13:00 start was written when every ticker was American. It
+    # covered the US session fully but caught only the last 2.5 hours of the
+    # European one and none of Asia, so 27 tickers were never sampled live
+    # while they were actually trading. Their charts stayed complete either
+    # way -- `backfill` reads the full session from Yahoo afterwards -- but
+    # the live TradingView reading on the card was always a stale close.
+    #
+    # The 21:00 run lands after the US close so the daily bar it records is
+    # the settled one.
     #
     # Sub-hourly rather than hourly because the 1h page is the one that goes
     # stale fastest. Note the 4h/1d/1w pages gain nothing from it: their bars
@@ -38,7 +53,12 @@ on:
     # free here (public repository), so the real costs are TradingView request
     # volume — 130 tickers x 4 horizons = 520 requests per run — and intraday
     # rows accumulating at twice the previous rate.
-    - cron: "0,30 13-20 * * 1-5"
+    # Two probes during the Hong Kong session. Only two tickers trade then, so
+    # this is deliberately sparse rather than half-hourly.
+    - cron: "0 3,6 * * 1-5"
+    # European open through the US close.
+    - cron: "0,30 7-20 * * 1-5"
+    # After the US close. Exactly ONE slot in hour 21 -- see the commit guard.
     - cron: "0 21 * * 1-5"
   workflow_dispatch:
   push:
