@@ -78,11 +78,29 @@ permissions:
 
 concurrency:
   group: daily-screener
-  cancel-in-progress: false
+  # Let a new run evict a stuck one, rather than queueing behind it forever.
+  #
+  # With `false` the group admits one running plus one *pending* run, and any
+  # further arrival cancels whichever run was pending. On 2026-08-06 a run
+  # entered the `waiting` state at 17:46 and never left it, so it held the
+  # group and every scheduled run after it queued, got evicted by the next
+  # one, and never executed -- three in a row cancelled at exactly the moment
+  # its successor arrived. The screener silently stopped publishing for
+  # fourteen hours while every run still appeared to be "scheduled".
+  #
+  # `true` makes that self-healing: the next slot displaces the jam. Safe for
+  # this workload because a run takes 3-4 minutes and the slots are 30 minutes
+  # apart, so a cancellation only ever happens when something is genuinely
+  # stuck -- and the work is idempotent, so the next run redoes it anyway.
+  cancel-in-progress: true
 
 jobs:
   screen:
     runs-on: ubuntu-latest
+    # A healthy run is 3-4 minutes. This is a backstop so a hung step dies on
+    # its own instead of occupying the concurrency group; it does not cover a
+    # run stuck in `waiting` before the job starts -- cancel-in-progress does.
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
