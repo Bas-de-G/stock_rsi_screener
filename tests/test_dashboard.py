@@ -576,3 +576,25 @@ def test_cards_no_longer_carry_the_cli_hint(config):
     assert "screener scrape" not in html
     assert "screener fair-value" not in html
     assert "record-hint" not in html
+
+
+def test_a_buy_signal_is_green_not_blue(config):
+    """Buy states share a colour family with the strong buy, differing in
+    weight rather than hue: they are the same call at different conviction,
+    and the blue accent read as a third, unrelated category."""
+    html = render([row(signals=[signal(known=False, fired=True)])], config)
+    assert "state-signal_checked { border-top: 3px solid var(--green-soft); }" in html
+    assert "state-signal_checked .pill { color: var(--accent)" not in html
+
+
+def test_the_strong_buy_keeps_the_darker_green(config):
+    html = render([row(signals=[signal(known=True, confirms=True, fired=True)])], config)
+    assert "state-strong   { border-top: 3px solid var(--green); }" in html
+    assert "background: var(--green);" in html
+
+
+def test_soft_green_is_defined_in_every_palette(config):
+    """A token defined in only some blocks renders unstyled in the theme that
+    misses it — light, system-dark, and both explicit data-theme overrides."""
+    html = render([row()], config)
+    assert html.count("--green-soft:") == 4

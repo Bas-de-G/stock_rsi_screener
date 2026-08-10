@@ -647,6 +647,7 @@ _CSS = """
   --accent:     #0E4C75;
   --crimson:    #A8231B;
   --green:      #14624A;
+  --green-soft: #3F9A72;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
   --warn:       #8A6100;
@@ -666,6 +667,7 @@ _CSS = """
     --accent:     #6FB3E0;
     --crimson:    #E0736A;
     --green:      #4FBE92;
+    --green-soft: #8FD9B6;
     --line:       #6FB3E0;
     --band:       rgba(224, 115, 106, .10);
   --warn:       #D9A441;
@@ -685,6 +687,7 @@ _CSS = """
   --accent:     #6FB3E0;
   --crimson:    #E0736A;
   --green:      #4FBE92;
+  --green-soft: #8FD9B6;
   --line:       #6FB3E0;
   --band:       rgba(224, 115, 106, .10);
   --warn:       #D9A441;
@@ -703,6 +706,7 @@ _CSS = """
   --accent:     #0E4C75;
   --crimson:    #A8231B;
   --green:      #14624A;
+  --green-soft: #3F9A72;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
   --warn:       #8A6100;
@@ -822,7 +826,7 @@ h1 {
 }
 
 .aggregates dd.hot { color: var(--crimson); font-weight: 600; }
-.aggregates dd.warn { color: var(--accent); font-weight: 600; }
+.aggregates dd.warn { color: var(--green-soft); font-weight: 600; }
 .aggregates dd.good { color: var(--green); font-weight: 600; }
 
 /* -------------------------------------------------------------- grid */
@@ -845,8 +849,11 @@ h1 {
 }
 
 .card.state-strong   { border-top: 3px solid var(--green); }
+/* Buy signals are the lighter green; a confirmed one (state-strong, above)
+   keeps the dark saturated green. Same colour family on purpose -- the two
+   differ in conviction, not in kind, and blue read as a third category. */
 .card.state-signal,
-.card.state-signal_checked { border-top: 3px solid var(--accent); }
+.card.state-signal_checked { border-top: 3px solid var(--green-soft); }
 .card.card.state-sell_strong { border-left-color: var(--crimson); }
 .card.state-sell        { border-left-color: var(--crimson); }
 .state-sell_strong .pill, .state-sell .pill {
@@ -894,7 +901,11 @@ h1 {
   border-color: var(--green);
 }
 .state-signal   .pill,
-.state-signal_checked .pill { color: var(--accent); }
+.state-signal_checked .pill {
+  color: var(--green-soft);
+  background: color-mix(in srgb, var(--green-soft) 12%, transparent);
+  border-color: color-mix(in srgb, var(--green-soft) 40%, transparent);
+}
 .state-rejected .pill { color: var(--ink-3); }
 .state-oversold .pill { color: var(--crimson); }
 .state-watch    .pill { color: var(--accent); }

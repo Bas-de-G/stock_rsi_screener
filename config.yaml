@@ -15,6 +15,8 @@ tickers:
   - {symbol: META,  tradingview: "NASDAQ:META",  morningstar: xnas/meta, markets: [sp500, nasdaq]}
   - {symbol: TSLA,  tradingview: "NASDAQ:TSLA",  morningstar: xnas/tsla, markets: [sp500, nasdaq]}
   - {symbol: NFLX,  tradingview: "NASDAQ:NFLX",  morningstar: xnas/nflx, markets: [sp500, nasdaq]}
+  - {symbol: PLTR,  tradingview: "NASDAQ:PLTR",  morningstar: xnas/pltr, markets: [sp500, nasdaq]}
+  - {symbol: UBER,  tradingview: "NYSE:UBER",    morningstar: xnys/uber, markets: [sp500]}
   - {symbol: ADBE,  tradingview: "NASDAQ:ADBE",  morningstar: xnas/adbe, markets: [sp500, nasdaq]}
   - {symbol: CRM,   tradingview: "NYSE:CRM",     morningstar: xnys/crm, markets: [sp500]}
   - {symbol: ORCL,  tradingview: "NYSE:ORCL",    morningstar: xnys/orcl, markets: [sp500]}
@@ -226,6 +228,10 @@ tickers:
   - {symbol: GRAB,  tradingview: "NASDAQ:GRAB", morningstar: xnas/grab, markets: [penny, nasdaq]}
   - {symbol: LCID,  tradingview: "NASDAQ:LCID", morningstar: xnas/lcid, markets: [penny, nasdaq]}
   - {symbol: SOUN,  tradingview: "NASDAQ:SOUN", morningstar: xnas/soun, markets: [penny, nasdaq]}
+  # Pony AI: Chinese robotaxi operator, but this is the Nasdaq ADR in dollars.
+  # Tagged asia as well because that is where you would look for the company,
+  # the same reasoning as Novo Nordisk sitting under europe on its NYSE line.
+  - {symbol: PONY,  tradingview: "NASDAQ:PONY", morningstar: xnas/pony, markets: [penny, nasdaq, asia]}
   - {symbol: BLNK,  tradingview: "NASDAQ:BLNK", morningstar: xnas/blnk, markets: [penny, nasdaq]}
   - {symbol: OPEN,  tradingview: "NASDAQ:OPEN", morningstar: xnas/open, markets: [penny, nasdaq]}
   - {symbol: PTON,  tradingview: "NASDAQ:PTON", morningstar: xnas/pton, markets: [penny, nasdaq]}
