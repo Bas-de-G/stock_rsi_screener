@@ -19,6 +19,21 @@ DEFAULT_CONFIG = REPO_ROOT / "config.yaml"
 # `window_days` answers the looser "is this still a valid setup".
 FRESH_BARS = 2
 
+# ...but never a shorter span than the page takes to rebuild.
+#
+# Two bars of the 1h chart is two hours, and the screener publishes every three
+# hours at the median -- up to six on a busy weekday, because GitHub delivers
+# only some of the scheduled runs. A window narrower than that cadence is a
+# promise the page cannot keep: a pattern completing just after one run is
+# already expired by the next, so it is never once shown as fresh. PTON did
+# exactly this on 2026-08-10, completing at 17:30 and first appearing on the
+# 20:12 page at two hours forty-two, silently past the line.
+#
+# You cannot claim finer resolution than you publish at, so the window is
+# floored at one comfortable publish cycle. This binds on the 1h chart alone;
+# every other horizon's two bars already exceed it.
+FRESH_FLOOR_HOURS = 6.0
+
 VALUATION_RULES = ("fair_value_below_price", "price_below_fair_value")
 WINDOW_UNITS = ("calendar", "trading")
 
@@ -72,14 +87,20 @@ class Horizon:
         return f"{self.margin * 100:g}%"
 
     @property
+    def fresh_hours(self) -> float:
+        """The freshness span in hours: two bars, or one publish cycle if
+        that is longer. See FRESH_FLOOR_HOURS."""
+        return max(self.bar_hours * FRESH_BARS, FRESH_FLOOR_HOURS)
+
+    @property
     def fresh_within(self) -> dt.timedelta:
         """How recently the second cross must have landed to count as fresh."""
-        return dt.timedelta(hours=self.bar_hours * FRESH_BARS)
+        return dt.timedelta(hours=self.fresh_hours)
 
     @property
     def fresh_label(self) -> str:
-        """Human phrasing for that span — '8 hours', '2 days', '2 weeks'."""
-        hours = self.bar_hours * FRESH_BARS
+        """Human phrasing for that span — '6 hours', '8 hours', '2 weeks'."""
+        hours = self.fresh_hours
         if hours < 24:
             return f"{hours:g} hours"
         days = hours / 24
