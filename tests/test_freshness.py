@@ -192,19 +192,40 @@ def test_a_stale_buy_is_not_a_candidate(config):
 
 
 def test_an_unvalued_buy_is_not_a_candidate(config):
-    """Fresh but unpriced is timely, not a known discount."""
-    r = row(config.horizon("4h"), [signal(up2_hours_ago=4, known=False, confirms=False)])
+    """Fresh but unpriced cannot be ranked, so it cannot win."""
+    r = row(config.horizon("4h"),
+            [signal(up2_hours_ago=4, known=False, confirms=False, price=None, fair=None)])
     assert r.deal_discount is None
 
 
-def test_a_buy_the_valuation_contradicts_is_not_a_candidate(config):
-    r = row(config.horizon("4h"), [signal(up2_hours_ago=4, confirms=False)])
+def test_a_buy_trading_above_fair_value_is_not_a_candidate(config):
+    """A gap running the wrong way is timely, but it is not a deal."""
+    r = row(config.horizon("4h"),
+            [signal(up2_hours_ago=4, confirms=False, price=150.0, fair=100.0)])
     assert r.deal_discount is None
 
 
-def test_declining_earnings_veto_a_candidate(config):
+def test_the_deal_ignores_the_margin_and_the_earnings_veto(config):
+    """The deal is the pick of what fired, not a second rocket.
+
+    Both of these would withhold the 🚀 -- declining earnings veto it, and a
+    50% gap does not clear the 4h chart's own bar in every case -- but neither
+    should stop a fresh buy from being the best of today's crop. Gating the
+    deal on the rocket made it a strict subset of the rockets, which is how it
+    stayed empty for weeks.
+    """
     r = row(config.horizon("4h"), [signal(up2_hours_ago=4, eg_known=True, eg_pass=False)])
-    assert r.deal_discount is None
+    assert r.deal_discount == pytest.approx(0.5)
+    assert r.strong is False, "still no rocket -- that logic is untouched"
+
+
+def test_a_deal_below_the_strong_buy_margin_still_qualifies(config):
+    """5% below fair value misses the 4h chart's 20% bar by a wide mile, and
+    is still a perfectly good pick if nothing beat it."""
+    h = config.horizon("4h")
+    r = row(h, [signal(up2_hours_ago=4, price=100.0, fair=105.0)], price=100.0, fair=105.0)
+    assert r.deal_discount == pytest.approx(0.05)
+    assert 0.05 < h.margin, "the margin is deliberately not consulted here"
 
 
 # --------------------------------------------------------- the rendered pick
@@ -240,7 +261,7 @@ def test_nothing_qualifying_says_so_rather_than_vanishing(config):
     out = _deal_of_the_day(rows, h, 30.0)
     assert "No deal today" in out
     assert "lead-quiet" in out
-    assert "10%" in out             # the margin a deal would have to clear
+    assert "price below fair value" in out
 
 
 def test_the_empty_state_counts_what_did_fire(config):

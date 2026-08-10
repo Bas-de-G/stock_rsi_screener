@@ -55,7 +55,7 @@ def test_the_four_horizons_are_configured():
 
 @pytest.mark.parametrize(
     "key,margin,leverage",
-    [("1h", 0.05, 10), ("4h", 0.10, 5), ("1d", 0.15, 2), ("1w", 0.25, 1)],
+    [("1h", 0.10, 10), ("4h", 0.20, 5), ("1d", 0.30, 2), ("1w", 0.50, 1)],
 )
 def test_margin_and_leverage_ladder(config, key, margin, leverage):
     h = config.horizon(key)
@@ -108,13 +108,13 @@ def test_nonsensical_horizon_values_are_rejected(tmp_path, field, bad):
 
 
 def test_the_margin_ladder_filters_a_single_fair_value(config):
-    """One stock 20% below fair value clears the short horizons and fails the
-    longest -- the whole point of a per-horizon margin."""
+    """One stock 25% below fair value clears the short horizons and fails the
+    long ones -- the whole point of a per-horizon margin."""
     verdicts = {}
     for h in config.horizons:
-        _, confirms = valuation_passes(100.0, 120.0, config.signal, h.margin)
+        _, confirms = valuation_passes(100.0, 125.0, config.signal, h.margin)
         verdicts[h.key] = confirms
-    assert verdicts == {"1h": True, "4h": True, "1d": True, "1w": False}
+    assert verdicts == {"1h": True, "4h": True, "1d": False, "1w": False}
 
 
 def test_a_zero_margin_reproduces_the_original_gate(config):
