@@ -13,7 +13,7 @@ import datetime as dt
 
 import pytest
 
-from screener.config import DEFAULT_HORIZONS, FRESH_BARS, load_config
+from screener.config import DEFAULT_HORIZONS, FRESH_BARS, FRESH_FLOOR_HOURS, load_config
 from screener.dashboard import Row, _deal_of_the_day, render
 from screener.signals import signal_age, signal_is_fresh
 from screener.storage import RsiPoint, Signal, Valuation
@@ -83,12 +83,32 @@ def test_each_horizon_knows_how_long_one_bar_lasts():
 
 
 @pytest.mark.parametrize(
-    "key,expected", [("1h", "2 hours"), ("4h", "8 hours"), ("1d", "2 days"), ("1w", "2 weeks")]
+    "key,expected", [("1h", "6 hours"), ("4h", "8 hours"), ("1d", "2 days"), ("1w", "2 weeks")]
 )
 def test_freshness_window_scales_with_the_timeframe(key, expected):
     horizon = next(h for h in DEFAULT_HORIZONS if h.key == key)
     assert horizon.fresh_label == expected
-    assert horizon.fresh_within == dt.timedelta(hours=horizon.bar_hours * FRESH_BARS)
+    assert horizon.fresh_within == dt.timedelta(
+        hours=max(horizon.bar_hours * FRESH_BARS, FRESH_FLOOR_HOURS)
+    )
+
+
+def test_the_window_never_undercuts_the_publish_cadence():
+    """The page rebuilds every three hours at the median. A two-hour window on
+    the 1h chart was a promise it could not keep: a pattern completing just
+    after one run had already expired by the next, so it was never once shown
+    as fresh. PTON did exactly that on 2026-08-10."""
+    hourly = next(h for h in DEFAULT_HORIZONS if h.key == "1h")
+    assert hourly.bar_hours * FRESH_BARS == 2, "two bars is still two hours"
+    assert hourly.fresh_hours == FRESH_FLOOR_HOURS, "but the floor takes over"
+
+
+def test_the_floor_does_not_stretch_the_longer_horizons():
+    """It binds on the 1h chart alone; the rest already exceed it."""
+    for h in DEFAULT_HORIZONS:
+        if h.key == "1h":
+            continue
+        assert h.fresh_hours == h.bar_hours * FRESH_BARS
 
 
 def test_a_horizons_override_does_not_reset_the_bar_length(tmp_path):
