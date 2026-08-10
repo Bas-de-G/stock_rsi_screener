@@ -404,23 +404,56 @@ def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
     """
     candidates = [r for r in rows if r.deal_discount is not None]
     if not candidates:
-        return ""
+        return _no_deal(rows, horizon, threshold)
+
     best = max(candidates, key=lambda r: r.deal_discount)
     val = best.valuation
     price = f"{val.price:,.2f}" if val else "—"
     fair = f"{val.fair_value:,.2f}" if val else "—"
     ccy = "" if best.currency == "USD" else f" {html.escape(best.currency)}"
     return f"""
-<section class="deal" aria-label="Deal of the day">
-  <p class="deal-kicker">Deal of the day</p>
-  <div class="deal-body">
-    <h2>{html.escape(best.symbol)}</h2>
-    <p class="deal-discount"><strong>{best.deal_discount * 100:.0f}%</strong> below fair value</p>
+<section class="lead" aria-label="Deal of the day">
+  <p class="lead-kicker">Deal of the day</p>
+  <div class="lead-line">
+    <h2 class="lead-symbol">{html.escape(best.symbol)}</h2>
+    <span class="lead-leader" aria-hidden="true"></span>
+    <p class="lead-figure">{best.deal_discount * 100:.0f}<span class="lead-unit">%</span></p>
   </div>
-  <p class="deal-note">Second cross of {threshold:g} within the last
-     {html.escape(horizon.fresh_label)}, price {price}{ccy} against a
-     {fair}{ccy} fair value, and nothing known arguing against it.
-     {horizon.leverage}x suggested on the {html.escape(horizon.label)} chart.</p>
+  <p class="lead-note">Below fair value, and the pattern is hours old rather
+     than days: second cross of {threshold:g} within the last
+     {html.escape(horizon.fresh_label)}, {price}{ccy} against a {fair}{ccy}
+     fair value, nothing known arguing against it.
+     <span class="lead-lev">{horizon.leverage}× suggested</span></p>
+</section>"""
+
+
+def _no_deal(rows: list[Row], horizon, threshold: float) -> str:
+    """What the page says on the days nothing qualifies — which is most of them.
+
+    Rendering nothing at all was the first instinct and it is the wrong one: an
+    absent block is indistinguishable from a broken one, and the reader is left
+    wondering whether the screener looked. This says it looked, says what the
+    bar is, and says how close today came.
+
+    Deliberately monochrome. The moment an empty state borrows the accent
+    colour it starts competing with the real thing, and the whole point of one
+    pick a day is that its absence is information too.
+    """
+    fresh = sum(1 for r in rows if r.fresh)
+    if fresh:
+        near = (
+            f"{fresh} pattern{'' if fresh == 1 else 's'} fired in the last "
+            f"{html.escape(horizon.fresh_label)}, "
+            "but none was a buy with a fair value confirming it."
+        )
+    else:
+        near = f"Nothing has fired in the last {html.escape(horizon.fresh_label)}."
+    return f"""
+<section class="lead lead-quiet" aria-label="No deal today">
+  <p class="lead-kicker">No deal today</p>
+  <p class="lead-note">{near} A deal needs all three at once: a second cross of
+     {threshold:g}, a fair value at least {horizon.margin_pct} above the price,
+     and the cross landing within the last {html.escape(horizon.fresh_label)}.</p>
 </section>"""
 
 
@@ -1206,41 +1239,101 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
 
 .colophon p { margin: 0; }
 
-/* ---- deal of the day + freshness ------------------------------------
-   One pick, above the market filter, so it is the first thing read on a
-   phone. Absent entirely on the days nothing qualifies. */
-.deal {
-  margin: 0 0 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--green);
-  border-left: 4px solid var(--green);
-  background: color-mix(in srgb, var(--green) 7%, transparent);
+/* ---- the lead, and the freshness marker -----------------------------
+   Set as a front-page lead rather than a callout box: kicker in small caps,
+   ticker in the masthead's serif, and the figure in the same tabular mono
+   every other number on the page uses. The dotted leader between them is
+   borrowed from a printed price list -- it is the one flourish here, and it
+   costs nothing but a border. */
+.lead {
+  margin: 18px 0 16px;
+  padding: 16px 18px 14px;
+  border-top: 2px solid var(--green);
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--green) 4%, transparent);
 }
-.deal-kicker {
-  margin: 0 0 6px;
+.lead-kicker {
+  margin: 0;
   font-size: 11px;
-  letter-spacing: .12em;
+  font-weight: 600;
+  letter-spacing: .16em;
   text-transform: uppercase;
   color: var(--green);
-  font-weight: 700;
 }
-.deal-body { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-.deal-body h2 { margin: 0; font-size: 30px; letter-spacing: .01em; }
-.deal-discount { margin: 0; font-size: 15px; color: var(--ink-2); }
-.deal-discount strong { font-size: 22px; color: var(--green); }
-.deal-note { margin: 8px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.lead-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin-top: 4px;
+}
+.lead-symbol {
+  margin: 0;
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-weight: 400;
+  font-size: clamp(30px, 5.5vw, 46px);
+  letter-spacing: -.015em;
+  line-height: 1.05;
+}
+/* Grows to fill whatever the symbol and figure leave behind. */
+.lead-leader {
+  flex: 1 1 auto;
+  min-width: 24px;
+  margin: 0 10px 8px;
+  border-bottom: 2px dotted color-mix(in srgb, var(--green) 45%, transparent);
+}
+.lead-figure {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(30px, 5.5vw, 46px);
+  line-height: 1.05;
+  font-weight: 600;
+  color: var(--green);
+  white-space: nowrap;
+}
+.lead-unit { font-size: .5em; margin-left: 2px; vertical-align: .55em; }
+.lead-note {
+  margin: 6px 0 0;
+  max-width: 74ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.lead-lev {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--green);
+}
 
+/* The empty state. Monochrome on purpose: the day there is no deal, this must
+   not read as though there were one. */
+.lead-quiet {
+  border-top-color: var(--rule);
+  background: none;
+  padding-bottom: 12px;
+}
+.lead-quiet .lead-kicker { color: var(--ink-3); }
+
+/* Freshness rides alongside the state pill, so it has to stay quieter than
+   one: no fill, a single dot, and the same tracked small caps as the eyebrow.
+   A filled badge here read as a second status and fought the first. */
 .fresh {
-  margin-left: 6px;
-  padding: 1px 7px;
+  margin-left: 8px;
   font-size: 10px;
-  letter-spacing: .08em;
+  font-weight: 600;
+  letter-spacing: .14em;
   text-transform: uppercase;
-  font-weight: 700;
-  color: var(--paper);
-  background: var(--accent);
-  border-radius: 999px;
-  vertical-align: 2px;
+  color: var(--green-soft);
+  white-space: nowrap;
+}
+.fresh::before {
+  content: "";
+  display: inline-block;
+  width: 5px; height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--green-soft);
+  vertical-align: .12em;
 }
 
 @media (prefers-reduced-motion: reduce) {

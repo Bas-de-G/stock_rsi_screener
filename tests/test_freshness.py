@@ -218,7 +218,7 @@ def test_the_biggest_fresh_discount_wins(config):
     ]
     out = _deal_of_the_day(rows, h, 30.0)
     assert "CHEAP" in out and "OKAY" not in out
-    assert "90%" in out
+    assert ">90<" in out            # the figure, set on its own
 
 
 def test_a_stale_bargain_loses_to_a_fresh_smaller_one(config):
@@ -232,24 +232,53 @@ def test_a_stale_bargain_loses_to_a_fresh_smaller_one(config):
     assert "FRESH" in out and "STALE" not in out
 
 
-def test_nothing_qualifying_renders_nothing(config):
+def test_nothing_qualifying_says_so_rather_than_vanishing(config):
+    """An absent block is indistinguishable from a broken one. The empty state
+    has to say the screener looked, and what the bar is."""
     h = config.horizon("4h")
     rows = [row(h, [signal(up2_hours_ago=4, direction="sell")])]
-    assert _deal_of_the_day(rows, h, 30.0) == ""
+    out = _deal_of_the_day(rows, h, 30.0)
+    assert "No deal today" in out
+    assert "lead-quiet" in out
+    assert "20%" in out             # the margin a deal would have to clear
+
+
+def test_the_empty_state_counts_what_did_fire(config):
+    """One fresh sell is worth saying out loud — it explains the absence."""
+    h = config.horizon("4h")
+    rows = [row(h, [signal(up2_hours_ago=4, direction="sell")])]
+    out = _deal_of_the_day(rows, h, 30.0)
+    assert "1 pattern fired in the last 8 hours" in out
+
+
+def test_the_empty_state_says_when_nothing_fired_at_all(config):
+    h = config.horizon("4h")
+    rows = [row(h, [signal(up2_hours_ago=99, direction="sell")])]
+    out = _deal_of_the_day(rows, h, 30.0)
+    assert "Nothing has fired in the last 8 hours" in out
+
+
+def test_the_empty_state_stays_monochrome(config):
+    """The day there is no deal, this must not read as though there were one."""
+    h = config.horizon("4h")
+    out = render([row(h, [signal(up2_hours_ago=99)])], config, h)
+    assert ".lead-quiet .lead-kicker { color: var(--ink-3); }" in out
+    assert "lead-figure" not in out.split('class="lead lead-quiet"')[1][:600]
 
 
 def test_the_page_carries_the_deal_and_the_badge(config):
     h = config.horizon("4h")
     out = render([row(h, [signal(up2_hours_ago=4)])], config, h)
-    assert '<section class="deal"' in out
+    assert '<section class="lead"' in out
     assert "Deal of the day" in out
     assert 'class="fresh"' in out
 
 
-def test_the_page_omits_the_deal_when_none_qualifies(config):
+def test_the_page_shows_the_empty_state_when_none_qualifies(config):
     h = config.horizon("4h")
     out = render([row(h, [signal(up2_hours_ago=40)])], config, h)
-    assert '<section class="deal"' not in out
+    assert "No deal today" in out
+    assert "Deal of the day" not in out
     assert 'class="fresh"' not in out
 
 
@@ -258,4 +287,6 @@ def test_every_fresh_badge_has_a_style_rule(config):
     h = config.horizon("4h")
     out = render([row(h, [signal(up2_hours_ago=4)])], config, h)
     assert ".fresh {" in out
-    assert ".deal {" in out
+    assert ".fresh::before {" in out      # the dot, not a filled badge
+    assert ".lead {" in out
+    assert ".lead-leader {" in out        # the dotted price-list rule
