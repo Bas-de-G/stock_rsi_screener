@@ -368,6 +368,10 @@ PEP:
   fair_value: 169.0
   checked: '2026-08-04'
   source: scraped
+PFE:
+  fair_value: 32.0
+  checked: '2026-08-10'
+  source: scraped
 PG:
   fair_value: 155.0
   checked: '2026-08-04'
