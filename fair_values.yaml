@@ -168,6 +168,10 @@ DE:
   fair_value: 600.0
   checked: '2026-08-05'
   source: scraped
+DIS:
+  fair_value: 125.0
+  checked: '2026-08-10'
+  source: scraped
 DSFIR:
   fair_value: 103.0
   checked: '2026-08-04'
@@ -380,6 +384,10 @@ PLD:
   fair_value: 140.0
   checked: '2026-08-05'
   source: scraped
+PLTR:
+  fair_value: 153.0
+  checked: '2026-08-10'
+  source: scraped
 PLUG:
   fair_value: 2.18
   checked: '2026-08-04'
@@ -387,6 +395,10 @@ PLUG:
 PM:
   fair_value: 185.0
   checked: '2026-08-05'
+  source: scraped
+PONY:
+  fair_value: 9.93
+  checked: '2026-08-10'
   source: scraped
 PRX:
   fair_value: 29.0
@@ -455,6 +467,10 @@ TSLA:
 TXN:
   fair_value: 325.0
   checked: '2026-08-05'
+  source: scraped
+UBER:
+  fair_value: 76.0
+  checked: '2026-08-10'
   source: scraped
 UMG:
   fair_value: 17.0
