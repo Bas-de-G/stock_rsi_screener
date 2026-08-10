@@ -5,6 +5,7 @@ Credentials never live here — they come from the environment (see .env.example
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,6 +13,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = REPO_ROOT / "config.yaml"
+
+# How many bars of its own timeframe a pattern may be old and still count as
+# "just fired". Two is deliberately tight: this badge answers "act now", while
+# `window_days` answers the looser "is this still a valid setup".
+FRESH_BARS = 2
 
 VALUATION_RULES = ("fair_value_below_price", "price_below_fair_value")
 WINDOW_UNITS = ("calendar", "trading")
@@ -54,10 +60,32 @@ class Horizon:
     margin: float
     leverage: int
     intraday: bool = False
+    # How long one bar of this timeframe lasts. Used to decide whether a
+    # pattern *just* completed, which is a different question from whether it
+    # is still live: `window_days` keeps a 1d signal actionable for a
+    # fortnight, so a pattern that closed yesterday and one that closed
+    # thirteen days ago look identical without this.
+    bar_hours: float = 24.0
 
     @property
     def margin_pct(self) -> str:
         return f"{self.margin * 100:g}%"
+
+    @property
+    def fresh_within(self) -> dt.timedelta:
+        """How recently the second cross must have landed to count as fresh."""
+        return dt.timedelta(hours=self.bar_hours * FRESH_BARS)
+
+    @property
+    def fresh_label(self) -> str:
+        """Human phrasing for that span — '8 hours', '2 days', '2 weeks'."""
+        hours = self.bar_hours * FRESH_BARS
+        if hours < 24:
+            return f"{hours:g} hours"
+        days = hours / 24
+        if days < 14:
+            return f"{days:g} day" + ("s" if days != 1 else "")
+        return f"{days / 7:g} weeks"
 
 
 # Verified against both services before being wired in: TradingView serves
@@ -74,10 +102,10 @@ class Horizon:
 # hourly bars a ticker -- a 54 MB database to display 2.8 MB worth, growing the
 # repository by gigabytes a month. These ranges make it ~7 MB.
 DEFAULT_HORIZONS: tuple[Horizon, ...] = (
-    Horizon("1h", "1 hour",  "60",  "60m", "2mo", window_days=2,  margin=0.10, leverage=10, intraday=True),
-    Horizon("4h", "4 hours", "240", "4h",  "6mo", window_days=5,  margin=0.20, leverage=5,  intraday=True),
-    Horizon("1d", "1 day",   "1D",  "1d",  "1y",  window_days=14, margin=0.30, leverage=2),
-    Horizon("1w", "1 week",  "1W",  "1wk", "5y",  window_days=90, margin=0.50, leverage=1),
+    Horizon("1h", "1 hour",  "60",  "60m", "2mo", window_days=2,  margin=0.10, leverage=10, intraday=True, bar_hours=1),
+    Horizon("4h", "4 hours", "240", "4h",  "6mo", window_days=5,  margin=0.20, leverage=5,  intraday=True, bar_hours=4),
+    Horizon("1d", "1 day",   "1D",  "1d",  "1y",  window_days=14, margin=0.30, leverage=2,  bar_hours=24),
+    Horizon("1w", "1 week",  "1W",  "1wk", "5y",  window_days=90, margin=0.50, leverage=1,  bar_hours=168),
 )
 DEFAULT_HORIZON = "1d"
 
@@ -350,7 +378,10 @@ def _load_horizons(raw: dict) -> tuple[Horizon, ...]:
                 key=base.key, label=base.label, tv_interval=base.tv_interval,
                 yahoo_interval=base.yahoo_interval, yahoo_range=base.yahoo_range,
                 window_days=window_days, margin=margin, leverage=leverage,
-                intraday=base.intraday,
+                # Carried from the built-in: bar_hours describes what the
+                # timeframe *is*, not a preference, so overriding the tunables
+                # in config.yaml must not silently reset every bar to a day.
+                intraday=base.intraday, bar_hours=base.bar_hours,
             )
         )
     return tuple(out)

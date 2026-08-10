@@ -16,13 +16,14 @@ import html
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config
+from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config, Horizon
 from .signals import (
     BUY,
     SELL,
     earnings_growth_passes,
     find_upward_crosses,
     is_strong,
+    signal_is_fresh,
     signal_is_live,
     valuation_passes,
 )
@@ -46,6 +47,45 @@ class Row:
     signals: list[Signal]  # this symbol's patterns, ascending by date
     currency: str = "USD"
     markets: tuple[str, ...] = ()
+    # Needed to judge freshness, which is measured in bars of this timeframe.
+    horizon: Horizon | None = None
+
+    @property
+    def fresh(self) -> bool:
+        """A live signal that completed within the last couple of bars."""
+        if self.horizon is None:
+            return False
+        return any(signal_is_fresh(s, self.series, self.horizon) for s in self.signals)
+
+    @property
+    def deal_discount(self) -> float | None:
+        """Discount to fair value, if this row is a candidate deal of the day.
+
+        None unless a *buy* fired, is fresh, and every known grading factor
+        backs it — the same bar as the rocket, plus the timing. Sells are
+        excluded by construction: exiting a position is not a bargain, so
+        "deal" would be the wrong word for it.
+
+        Returns the largest discount among qualifying patterns, as a fraction
+        of the price, so the page can rank candidates against each other.
+        """
+        if self.horizon is None:
+            return None
+        best: float | None = None
+        for s in self.buys:
+            if not (s.fired and signal_is_fresh(s, self.series, self.horizon)):
+                continue
+            if not is_strong(
+                (s.valuation_known, s.valuation_pass),
+                (s.earnings_growth_known, s.earnings_growth_pass),
+            ):
+                continue
+            if not s.price or not s.fair_value:
+                continue
+            discount = (s.fair_value - s.price) / s.price
+            if best is None or discount > best:
+                best = discount
+        return best
 
     @property
     def latest(self) -> RsiPoint | None:
@@ -217,6 +257,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 signals=sigs,
                 currency=ticker.currency,
                 markets=ticker.markets,
+                horizon=horizon,
             )
         )
 
@@ -348,6 +389,74 @@ def _chart_svg(row: Row, threshold: float) -> str:
 # ----------------------------------------------------------------- markup
 
 
+def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
+    """The single best fresh, confirmed buy — or nothing at all.
+
+    One pick rather than a badge on several, because the point is to answer
+    "what do I look at first" on a phone. Ties are broken by the largest
+    discount to fair value, which is the only ranking that matters once
+    freshness and the valuation gate have already been satisfied.
+
+    Renders empty on the days nothing qualifies, which will be most of them:
+    it needs a buy that fired, cleared the horizon's margin, has nothing
+    known arguing against it, *and* completed within the last two bars. An
+    empty slot is the honest answer, not a failure.
+    """
+    candidates = [r for r in rows if r.deal_discount is not None]
+    if not candidates:
+        return _no_deal(rows, horizon, threshold)
+
+    best = max(candidates, key=lambda r: r.deal_discount)
+    val = best.valuation
+    price = f"{val.price:,.2f}" if val else "—"
+    fair = f"{val.fair_value:,.2f}" if val else "—"
+    ccy = "" if best.currency == "USD" else f" {html.escape(best.currency)}"
+    return f"""
+<section class="lead" aria-label="Deal of the day">
+  <p class="lead-kicker">Deal of the day</p>
+  <div class="lead-line">
+    <h2 class="lead-symbol">{html.escape(best.symbol)}</h2>
+    <span class="lead-leader" aria-hidden="true"></span>
+    <p class="lead-figure">{best.deal_discount * 100:.0f}<span class="lead-unit">%</span></p>
+  </div>
+  <p class="lead-note">Below fair value, and the pattern is hours old rather
+     than days: second cross of {threshold:g} within the last
+     {html.escape(horizon.fresh_label)}, {price}{ccy} against a {fair}{ccy}
+     fair value, nothing known arguing against it.
+     <span class="lead-lev">{horizon.leverage}× suggested</span></p>
+</section>"""
+
+
+def _no_deal(rows: list[Row], horizon, threshold: float) -> str:
+    """What the page says on the days nothing qualifies — which is most of them.
+
+    Rendering nothing at all was the first instinct and it is the wrong one: an
+    absent block is indistinguishable from a broken one, and the reader is left
+    wondering whether the screener looked. This says it looked, says what the
+    bar is, and says how close today came.
+
+    Deliberately monochrome. The moment an empty state borrows the accent
+    colour it starts competing with the real thing, and the whole point of one
+    pick a day is that its absence is information too.
+    """
+    fresh = sum(1 for r in rows if r.fresh)
+    if fresh:
+        near = (
+            f"{fresh} pattern{'' if fresh == 1 else 's'} fired in the last "
+            f"{html.escape(horizon.fresh_label)}, "
+            "but none was a buy with a fair value confirming it."
+        )
+    else:
+        near = f"Nothing has fired in the last {html.escape(horizon.fresh_label)}."
+    return f"""
+<section class="lead lead-quiet" aria-label="No deal today">
+  <p class="lead-kicker">No deal today</p>
+  <p class="lead-note">{near} A deal needs all three at once: a second cross of
+     {threshold:g}, a fair value at least {horizon.margin_pct} above the price,
+     and the cross landing within the last {html.escape(horizon.fresh_label)}.</p>
+</section>"""
+
+
 def _card(row: Row, config: Config, horizon) -> str:
     threshold = config.rsi.threshold
     rsi_text = f"{row.rsi:.1f}" if row.rsi is not None else "—"
@@ -428,11 +537,17 @@ def _card(row: Row, config: Config, horizon) -> str:
 
     symbol = html.escape(row.symbol)
     market_classes = " ".join(f"in-{m}" for m in row.markets)
+    # Deliberately quiet: the timing is a modifier on the state, not a state
+    # of its own, so it must not compete with the pill next to it.
+    fresh_badge = (
+        f'<span class="fresh" title="Second cross within the last '
+        f'{html.escape(horizon.fresh_label)}">fresh</span>' if row.fresh else ""
+    )
     return f"""<article class="card state-{row.state} {market_classes}">
   <header class="card-head">
     <div class="ident">
       <h3>{symbol}</h3>
-      <span class="pill">{pill_label}</span>
+      <span class="pill">{pill_label}</span>{fresh_badge}
     </div>
     <div class="readout">
       <div class="metric"><span class="k">RSI</span><span class="v">{rsi_text}</span></div>
@@ -521,6 +636,7 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     body = f"""{market_radios}
 <div class="sheet">
 {masthead}
+{_deal_of_the_day(rows, horizon, threshold)}
 <nav class="market-tabs" aria-label="Market">{market_tabs}</nav>
 <main class="grid">
 {cards}
@@ -564,6 +680,7 @@ _CSS = """
   --accent:     #0E4C75;
   --crimson:    #A8231B;
   --green:      #14624A;
+  --green-soft: #3F9A72;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
   --warn:       #8A6100;
@@ -583,6 +700,7 @@ _CSS = """
     --accent:     #6FB3E0;
     --crimson:    #E0736A;
     --green:      #4FBE92;
+    --green-soft: #8FD9B6;
     --line:       #6FB3E0;
     --band:       rgba(224, 115, 106, .10);
   --warn:       #D9A441;
@@ -602,6 +720,7 @@ _CSS = """
   --accent:     #6FB3E0;
   --crimson:    #E0736A;
   --green:      #4FBE92;
+  --green-soft: #8FD9B6;
   --line:       #6FB3E0;
   --band:       rgba(224, 115, 106, .10);
   --warn:       #D9A441;
@@ -620,6 +739,7 @@ _CSS = """
   --accent:     #0E4C75;
   --crimson:    #A8231B;
   --green:      #14624A;
+  --green-soft: #3F9A72;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
   --warn:       #8A6100;
@@ -739,7 +859,7 @@ h1 {
 }
 
 .aggregates dd.hot { color: var(--crimson); font-weight: 600; }
-.aggregates dd.warn { color: var(--accent); font-weight: 600; }
+.aggregates dd.warn { color: var(--green-soft); font-weight: 600; }
 .aggregates dd.good { color: var(--green); font-weight: 600; }
 
 /* -------------------------------------------------------------- grid */
@@ -762,8 +882,11 @@ h1 {
 }
 
 .card.state-strong   { border-top: 3px solid var(--green); }
+/* Buy signals are the lighter green; a confirmed one (state-strong, above)
+   keeps the dark saturated green. Same colour family on purpose -- the two
+   differ in conviction, not in kind, and blue read as a third category. */
 .card.state-signal,
-.card.state-signal_checked { border-top: 3px solid var(--accent); }
+.card.state-signal_checked { border-top: 3px solid var(--green-soft); }
 .card.card.state-sell_strong { border-left-color: var(--crimson); }
 .card.state-sell        { border-left-color: var(--crimson); }
 .state-sell_strong .pill, .state-sell .pill {
@@ -811,7 +934,11 @@ h1 {
   border-color: var(--green);
 }
 .state-signal   .pill,
-.state-signal_checked .pill { color: var(--accent); }
+.state-signal_checked .pill {
+  color: var(--green-soft);
+  background: color-mix(in srgb, var(--green-soft) 12%, transparent);
+  border-color: color-mix(in srgb, var(--green-soft) 40%, transparent);
+}
 .state-rejected .pill { color: var(--ink-3); }
 .state-oversold .pill { color: var(--crimson); }
 .state-watch    .pill { color: var(--accent); }
@@ -1111,6 +1238,103 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
 }
 
 .colophon p { margin: 0; }
+
+/* ---- the lead, and the freshness marker -----------------------------
+   Set as a front-page lead rather than a callout box: kicker in small caps,
+   ticker in the masthead's serif, and the figure in the same tabular mono
+   every other number on the page uses. The dotted leader between them is
+   borrowed from a printed price list -- it is the one flourish here, and it
+   costs nothing but a border. */
+.lead {
+  margin: 18px 0 16px;
+  padding: 16px 18px 14px;
+  border-top: 2px solid var(--green);
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--green) 4%, transparent);
+}
+.lead-kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+.lead-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin-top: 4px;
+}
+.lead-symbol {
+  margin: 0;
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-weight: 400;
+  font-size: clamp(30px, 5.5vw, 46px);
+  letter-spacing: -.015em;
+  line-height: 1.05;
+}
+/* Grows to fill whatever the symbol and figure leave behind. */
+.lead-leader {
+  flex: 1 1 auto;
+  min-width: 24px;
+  margin: 0 10px 8px;
+  border-bottom: 2px dotted color-mix(in srgb, var(--green) 45%, transparent);
+}
+.lead-figure {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(30px, 5.5vw, 46px);
+  line-height: 1.05;
+  font-weight: 600;
+  color: var(--green);
+  white-space: nowrap;
+}
+.lead-unit { font-size: .5em; margin-left: 2px; vertical-align: .55em; }
+.lead-note {
+  margin: 6px 0 0;
+  max-width: 74ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.lead-lev {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--green);
+}
+
+/* The empty state. Monochrome on purpose: the day there is no deal, this must
+   not read as though there were one. */
+.lead-quiet {
+  border-top-color: var(--rule);
+  background: none;
+  padding-bottom: 12px;
+}
+.lead-quiet .lead-kicker { color: var(--ink-3); }
+
+/* Freshness rides alongside the state pill, so it has to stay quieter than
+   one: no fill, a single dot, and the same tracked small caps as the eyebrow.
+   A filled badge here read as a second status and fought the first. */
+.fresh {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--green-soft);
+  white-space: nowrap;
+}
+.fresh::before {
+  content: "";
+  display: inline-block;
+  width: 5px; height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--green-soft);
+  vertical-align: .12em;
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
