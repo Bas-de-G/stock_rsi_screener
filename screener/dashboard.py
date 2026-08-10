@@ -16,13 +16,14 @@ import html
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config
+from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config, Horizon
 from .signals import (
     BUY,
     SELL,
     earnings_growth_passes,
     find_upward_crosses,
     is_strong,
+    signal_is_fresh,
     signal_is_live,
     valuation_passes,
 )
@@ -46,6 +47,45 @@ class Row:
     signals: list[Signal]  # this symbol's patterns, ascending by date
     currency: str = "USD"
     markets: tuple[str, ...] = ()
+    # Needed to judge freshness, which is measured in bars of this timeframe.
+    horizon: Horizon | None = None
+
+    @property
+    def fresh(self) -> bool:
+        """A live signal that completed within the last couple of bars."""
+        if self.horizon is None:
+            return False
+        return any(signal_is_fresh(s, self.series, self.horizon) for s in self.signals)
+
+    @property
+    def deal_discount(self) -> float | None:
+        """Discount to fair value, if this row is a candidate deal of the day.
+
+        None unless a *buy* fired, is fresh, and every known grading factor
+        backs it — the same bar as the rocket, plus the timing. Sells are
+        excluded by construction: exiting a position is not a bargain, so
+        "deal" would be the wrong word for it.
+
+        Returns the largest discount among qualifying patterns, as a fraction
+        of the price, so the page can rank candidates against each other.
+        """
+        if self.horizon is None:
+            return None
+        best: float | None = None
+        for s in self.buys:
+            if not (s.fired and signal_is_fresh(s, self.series, self.horizon)):
+                continue
+            if not is_strong(
+                (s.valuation_known, s.valuation_pass),
+                (s.earnings_growth_known, s.earnings_growth_pass),
+            ):
+                continue
+            if not s.price or not s.fair_value:
+                continue
+            discount = (s.fair_value - s.price) / s.price
+            if best is None or discount > best:
+                best = discount
+        return best
 
     @property
     def latest(self) -> RsiPoint | None:
@@ -217,6 +257,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 signals=sigs,
                 currency=ticker.currency,
                 markets=ticker.markets,
+                horizon=horizon,
             )
         )
 
@@ -348,6 +389,41 @@ def _chart_svg(row: Row, threshold: float) -> str:
 # ----------------------------------------------------------------- markup
 
 
+def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
+    """The single best fresh, confirmed buy — or nothing at all.
+
+    One pick rather than a badge on several, because the point is to answer
+    "what do I look at first" on a phone. Ties are broken by the largest
+    discount to fair value, which is the only ranking that matters once
+    freshness and the valuation gate have already been satisfied.
+
+    Renders empty on the days nothing qualifies, which will be most of them:
+    it needs a buy that fired, cleared the horizon's margin, has nothing
+    known arguing against it, *and* completed within the last two bars. An
+    empty slot is the honest answer, not a failure.
+    """
+    candidates = [r for r in rows if r.deal_discount is not None]
+    if not candidates:
+        return ""
+    best = max(candidates, key=lambda r: r.deal_discount)
+    val = best.valuation
+    price = f"{val.price:,.2f}" if val else "—"
+    fair = f"{val.fair_value:,.2f}" if val else "—"
+    ccy = "" if best.currency == "USD" else f" {html.escape(best.currency)}"
+    return f"""
+<section class="deal" aria-label="Deal of the day">
+  <p class="deal-kicker">Deal of the day</p>
+  <div class="deal-body">
+    <h2>{html.escape(best.symbol)}</h2>
+    <p class="deal-discount"><strong>{best.deal_discount * 100:.0f}%</strong> below fair value</p>
+  </div>
+  <p class="deal-note">Second cross of {threshold:g} within the last
+     {html.escape(horizon.fresh_label)}, price {price}{ccy} against a
+     {fair}{ccy} fair value, and nothing known arguing against it.
+     {horizon.leverage}x suggested on the {html.escape(horizon.label)} chart.</p>
+</section>"""
+
+
 def _card(row: Row, config: Config, horizon) -> str:
     threshold = config.rsi.threshold
     rsi_text = f"{row.rsi:.1f}" if row.rsi is not None else "—"
@@ -428,11 +504,17 @@ def _card(row: Row, config: Config, horizon) -> str:
 
     symbol = html.escape(row.symbol)
     market_classes = " ".join(f"in-{m}" for m in row.markets)
+    # Deliberately quiet: the timing is a modifier on the state, not a state
+    # of its own, so it must not compete with the pill next to it.
+    fresh_badge = (
+        f'<span class="fresh" title="Second cross within the last '
+        f'{html.escape(horizon.fresh_label)}">fresh</span>' if row.fresh else ""
+    )
     return f"""<article class="card state-{row.state} {market_classes}">
   <header class="card-head">
     <div class="ident">
       <h3>{symbol}</h3>
-      <span class="pill">{pill_label}</span>
+      <span class="pill">{pill_label}</span>{fresh_badge}
     </div>
     <div class="readout">
       <div class="metric"><span class="k">RSI</span><span class="v">{rsi_text}</span></div>
@@ -521,6 +603,7 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     body = f"""{market_radios}
 <div class="sheet">
 {masthead}
+{_deal_of_the_day(rows, horizon, threshold)}
 <nav class="market-tabs" aria-label="Market">{market_tabs}</nav>
 <main class="grid">
 {cards}
@@ -1111,6 +1194,43 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
 }
 
 .colophon p { margin: 0; }
+
+/* ---- deal of the day + freshness ------------------------------------
+   One pick, above the market filter, so it is the first thing read on a
+   phone. Absent entirely on the days nothing qualifies. */
+.deal {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--green);
+  border-left: 4px solid var(--green);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+}
+.deal-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--green);
+  font-weight: 700;
+}
+.deal-body { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.deal-body h2 { margin: 0; font-size: 30px; letter-spacing: .01em; }
+.deal-discount { margin: 0; font-size: 15px; color: var(--ink-2); }
+.deal-discount strong { font-size: 22px; color: var(--green); }
+.deal-note { margin: 8px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+
+.fresh {
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--paper);
+  background: var(--accent);
+  border-radius: 999px;
+  vertical-align: 2px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

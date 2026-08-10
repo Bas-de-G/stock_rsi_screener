@@ -266,6 +266,58 @@ def signal_is_live(
     horizon_start = _moment(latest.date) - dt.timedelta(days=config.window_days)
     if _moment(signal.up2_date) < horizon_start:
         return False
+    return _rsi_still_signalling(signal, latest, threshold)
+
+
+def signal_age(signal, series: list[RsiPoint]) -> dt.timedelta | None:
+    """How long ago the pattern completed, measured to the most recent bar."""
+    if not series:
+        return None
+    return _moment(series[-1].date) - _moment(signal.up2_date)
+
+
+# A dashboard whose newest bar is older than this has stopped updating, and
+# nothing on it can honestly be called fresh whatever its own timestamps say.
+# Generous on purpose -- it should catch a feed that has actually stalled, not
+# an ordinary gap between runs.
+DATA_STALE_AFTER = dt.timedelta(days=1)
+
+
+def signal_is_fresh(
+    signal, series: list[RsiPoint], horizon, now: dt.datetime | None = None
+) -> bool:
+    """Whether the pattern completed within the last couple of its own bars.
+
+    Deliberately a different question from `signal_is_live`. Liveness asks
+    whether a setup is still valid at all, and its window is generous by
+    design -- a 1d signal stays live for a fortnight. That makes a pattern
+    which closed yesterday indistinguishable from one which closed thirteen
+    days ago, even though only the first is an entry you can still take near
+    the bounce.
+
+    Scales with the timeframe, like every other per-horizon tunable: two bars
+    is two hours on the 1h chart and two weeks on the 1w one.
+
+    Two guards beyond the obvious comparison:
+
+    * A negative age -- a pattern dated after every bar in its own series --
+      is not "extremely fresh", it is nonsense, so it is rejected. Real
+      patterns are found *in* the series and cannot outrun it, but a badge
+      reading "act now" is the wrong thing to show if that ever stops holding.
+    * If the newest bar is itself stale, nothing is fresh. The screener stops
+      publishing whenever CI does -- an outage froze it for fourteen hours in
+      August -- and a green "deal of the day" computed from week-old prices is
+      worse than no badge at all.
+    """
+    age = signal_age(signal, series)
+    if age is None or not (dt.timedelta(0) <= age <= horizon.fresh_within):
+        return False
+    now = now or dt.datetime.now()
+    return (now - _moment(series[-1].date)) <= DATA_STALE_AFTER
+
+
+def _rsi_still_signalling(signal, latest: RsiPoint, threshold: float) -> bool:
+    """Current RSI is on the side of the line the signal is arguing for."""
     if signal.direction == "sell":
         return latest.rsi < threshold
     return latest.rsi > threshold
