@@ -61,13 +61,20 @@ class Row:
     def deal_discount(self) -> float | None:
         """Discount to fair value, if this row is a candidate deal of the day.
 
-        None unless a *buy* fired, is fresh, and every known grading factor
-        backs it — the same bar as the rocket, plus the timing. Sells are
-        excluded by construction: exiting a position is not a bargain, so
-        "deal" would be the wrong word for it.
+        Two conditions and no more: a *buy* pattern that just fired on the RSI,
+        and a price below its fair value. The size of that gap is what ranks
+        the candidates against each other, so this returns it.
 
-        Returns the largest discount among qualifying patterns, as a fraction
-        of the price, so the page can rank candidates against each other.
+        Deliberately **not** gated on the horizon's margin or on earnings
+        growth. Those decide the rocket, and the rocket is a separate
+        judgement that this must not disturb: a signal is strong when the
+        valuation clears the bar by a wide margin, whereas the deal of the day
+        is simply the pick of whatever fired today. Requiring both made the
+        deal a strict subset of the rockets and left it empty for weeks.
+
+        Sells are excluded by construction — exiting a position is not a
+        bargain — and so is a gap that runs the wrong way: a fresh buy trading
+        *above* fair value is timely, but it is not a deal.
         """
         if self.horizon is None:
             return None
@@ -75,14 +82,11 @@ class Row:
         for s in self.buys:
             if not (s.fired and signal_is_fresh(s, self.series, self.horizon)):
                 continue
-            if not is_strong(
-                (s.valuation_known, s.valuation_pass),
-                (s.earnings_growth_known, s.earnings_growth_pass),
-            ):
-                continue
             if not s.price or not s.fair_value:
                 continue
             discount = (s.fair_value - s.price) / s.price
+            if discount <= 0:
+                continue
             if best is None or discount > best:
                 best = discount
         return best
@@ -419,10 +423,11 @@ def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
     <span class="lead-leader" aria-hidden="true"></span>
     <p class="lead-figure">{best.deal_discount * 100:.0f}<span class="lead-unit">%</span></p>
   </div>
-  <p class="lead-note">Below fair value, and the pattern is hours old rather
-     than days: second cross of {threshold:g} within the last
-     {html.escape(horizon.fresh_label)}, {price}{ccy} against a {fair}{ccy}
-     fair value, nothing known arguing against it.
+  <p class="lead-note">The pick of what fired today: second cross of
+     {threshold:g} within the last {html.escape(horizon.fresh_label)}, and the
+     widest gap to fair value of any of them — {price}{ccy} against
+     {fair}{ccy}. Check the card for whether the valuation clears the
+     {horizon.margin_pct} a strong buy needs.
      <span class="lead-lev">{horizon.leverage}× suggested</span></p>
 </section>"""
 
@@ -444,16 +449,16 @@ def _no_deal(rows: list[Row], horizon, threshold: float) -> str:
         near = (
             f"{fresh} pattern{'' if fresh == 1 else 's'} fired in the last "
             f"{html.escape(horizon.fresh_label)}, "
-            "but none was a buy with a fair value confirming it."
+            "but none was a buy trading below its fair value."
         )
     else:
         near = f"Nothing has fired in the last {html.escape(horizon.fresh_label)}."
     return f"""
 <section class="lead lead-quiet" aria-label="No deal today">
   <p class="lead-kicker">No deal today</p>
-  <p class="lead-note">{near} A deal needs all three at once: a second cross of
-     {threshold:g}, a fair value at least {horizon.margin_pct} above the price,
-     and the cross landing within the last {html.escape(horizon.fresh_label)}.</p>
+  <p class="lead-note">{near} A deal needs both at once: a second cross of
+     {threshold:g} within the last {html.escape(horizon.fresh_label)}, and a
+     price below fair value.</p>
 </section>"""
 
 
