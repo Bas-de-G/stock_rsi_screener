@@ -266,10 +266,10 @@ tickers:
 #
 # Delete any key to fall back to the built-in default shown here.
 horizons:
-  "1h": {window_days: 2,  margin: 0.10, leverage: 10}
-  "4h": {window_days: 5,  margin: 0.20, leverage: 5}
-  "1d": {window_days: 14, margin: 0.30, leverage: 2}
-  "1w": {window_days: 90, margin: 0.50, leverage: 1}
+  "1h": {window_days: 2,  margin: 0.05, leverage: 10}
+  "4h": {window_days: 5,  margin: 0.10, leverage: 5}
+  "1d": {window_days: 14, margin: 0.15, leverage: 2}
+  "1w": {window_days: 90, margin: 0.25, leverage: 1}
 
 rsi:
   # Wilder RSI, the same definition TradingView's "RSI (14)" uses.

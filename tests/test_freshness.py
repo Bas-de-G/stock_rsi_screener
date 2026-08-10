@@ -240,7 +240,7 @@ def test_nothing_qualifying_says_so_rather_than_vanishing(config):
     out = _deal_of_the_day(rows, h, 30.0)
     assert "No deal today" in out
     assert "lead-quiet" in out
-    assert "20%" in out             # the margin a deal would have to clear
+    assert "10%" in out             # the margin a deal would have to clear
 
 
 def test_the_empty_state_counts_what_did_fire(config):

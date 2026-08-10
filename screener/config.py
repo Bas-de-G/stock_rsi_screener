@@ -102,10 +102,10 @@ class Horizon:
 # hourly bars a ticker -- a 54 MB database to display 2.8 MB worth, growing the
 # repository by gigabytes a month. These ranges make it ~7 MB.
 DEFAULT_HORIZONS: tuple[Horizon, ...] = (
-    Horizon("1h", "1 hour",  "60",  "60m", "2mo", window_days=2,  margin=0.10, leverage=10, intraday=True, bar_hours=1),
-    Horizon("4h", "4 hours", "240", "4h",  "6mo", window_days=5,  margin=0.20, leverage=5,  intraday=True, bar_hours=4),
-    Horizon("1d", "1 day",   "1D",  "1d",  "1y",  window_days=14, margin=0.30, leverage=2,  bar_hours=24),
-    Horizon("1w", "1 week",  "1W",  "1wk", "5y",  window_days=90, margin=0.50, leverage=1,  bar_hours=168),
+    Horizon("1h", "1 hour",  "60",  "60m", "2mo", window_days=2,  margin=0.05, leverage=10, intraday=True, bar_hours=1),
+    Horizon("4h", "4 hours", "240", "4h",  "6mo", window_days=5,  margin=0.10, leverage=5,  intraday=True, bar_hours=4),
+    Horizon("1d", "1 day",   "1D",  "1d",  "1y",  window_days=14, margin=0.15, leverage=2,  bar_hours=24),
+    Horizon("1w", "1 week",  "1W",  "1wk", "5y",  window_days=90, margin=0.25, leverage=1,  bar_hours=168),
 )
 DEFAULT_HORIZON = "1d"
 

@@ -99,7 +99,7 @@ def test_the_mirrored_rule_confirms_an_expensive_sell(config):
 
 
 def test_each_horizon_is_scored_against_its_own_margin(config):
-    """A 20% gap clears 1h's 10% margin and fails 1d's 30% one."""
+    """A 10% gap clears 1h's 5% margin and fails 1d's 15% one."""
     with Store(config.storage.database) as store:
         for horizon in ("1h", "1d"):
             store.record_signal(Signal(
@@ -110,7 +110,7 @@ def test_each_horizon_is_scored_against_its_own_margin(config):
                 recorded_at="2026-07-30T00:00:00",
                 horizon=horizon, direction=BUY,
             ))
-        _rescore_signals(store, config, "AAPL", price=100.0, fair_value=120.0)
+        _rescore_signals(store, config, "AAPL", price=100.0, fair_value=110.0)
 
         assert store.all_signals("AAPL", "1h", BUY)[0].valuation_pass is True
         assert store.all_signals("AAPL", "1d", BUY)[0].valuation_pass is False

@@ -506,7 +506,7 @@ def test_the_current_horizon_is_marked_active(config):
 
 def test_the_page_states_its_own_margin_and_leverage(config):
     html = render([row()], config, config.horizon("1h"))
-    assert "10%" in html and "10x" in html
+    assert "5%" in html and "10x" in html
 
 
 def test_leverage_shows_only_when_a_signal_fired(config):
