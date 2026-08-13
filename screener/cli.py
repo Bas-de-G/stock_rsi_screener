@@ -24,7 +24,13 @@ from .morningstar import (
     save_login_session,
     scrape_ticker,
 )
-from .notify import format_signal, send_webhook
+from .notify import (
+    format_signal,
+    format_strong_buy,
+    issue_title,
+    send_github_issue,
+    send_webhook,
+)
 from .rsi import wilder_rsi_series
 from .signals import (
     BUY,
@@ -33,6 +39,7 @@ from .signals import (
     find_cross_pairs,
     is_strong,
     signal_fires,
+    signal_is_fresh,
     valuation_passes,
 )
 from .storage import (
@@ -821,6 +828,67 @@ def _commit_and_push_fair_values(config: Config, recorded: int) -> int:
     return 0
 
 
+def _notify_new_strong_buys(store: Store, config: Config) -> int:
+    """Post newly fired strong buys to the webhook, once each.
+
+    Deliberately narrow, on two axes.
+
+    *Strong*, not merely fired. Every pattern fires -- `fire_without_valuation`
+    is set -- so announcing fired signals means 5 to 20 messages a run and 251
+    the day new tickers are backfilled. The rocket is the rare one: 13% of
+    recorded patterns, and only a handful live at a time.
+
+    *Fresh*, not merely live. A strong buy stays actionable for a fortnight on
+    the daily chart, and re-announcing it for two weeks would be its own kind
+    of noise. Only a pattern that just completed is worth interrupting someone
+    for.
+
+    One message per symbol per horizon: a name that fires three times in six
+    hours on the 1h chart is one piece of news, not three.
+    """
+    from .dashboard import _collect
+
+    sent = 0
+    for horizon in config.horizons:
+        for row in _collect(store, config, horizon):
+            fresh = [
+                s for s in row.buys
+                if s.fired
+                and signal_is_fresh(s, row.series, horizon)
+                and is_strong(
+                    (s.valuation_known, s.valuation_pass),
+                    (s.earnings_growth_known, s.earnings_growth_pass),
+                )
+            ]
+            if not fresh:
+                continue
+            up2 = max(s.up2_date for s in fresh)
+            if store.already_notified("strong", horizon.key, row.symbol, up2):
+                continue
+            best = max(fresh, key=lambda s: s.up2_date)
+            discount = (
+                (best.fair_value - best.price) / best.price
+                if best.price and best.fair_value else None
+            )
+            page = "index.html" if horizon.key == DEFAULT_HORIZON else f"{horizon.key}.html"
+            url = f"{config.dashboard.site_url}/{page}" if config.dashboard.site_url else page
+            message = format_strong_buy(
+                row.symbol, discount, best.price, best.fair_value,
+                row.currency, horizon, config.rsi.threshold, url,
+            )
+            print(message)
+            # Both transports are optional and independent: a laptop run has
+            # neither and simply prints, CI has the token and may have the
+            # webhook too.
+            if send_webhook(message):
+                print("  (sent to webhook)")
+            if send_github_issue(issue_title(row.symbol, discount, horizon), message):
+                print("  (opened an issue — GitHub will email it)")
+            store.record_notification("strong", horizon.key, row.symbol, up2)
+            sent += 1
+    return sent
+
+
 def cmd_dashboard(config: Config, args) -> int:
     from .dashboard import build_all_dashboards, build_dashboard
 
@@ -832,6 +900,8 @@ def cmd_dashboard(config: Config, args) -> int:
             paths = [build_dashboard(store, config, output, horizon=args.horizon)]
         else:
             paths = build_all_dashboards(store, config, output)
+        if not args.no_notify:
+            _notify_new_strong_buys(store, config)
 
     for path in paths:
         print(f"Dashboard written to {path}")
@@ -1006,6 +1076,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_dash = sub.add_parser("dashboard", help="build the shareable HTML dashboard")
     p_dash.add_argument("--output", help="override the output path")
     p_dash.add_argument("--open", action="store_true", help="open it in a browser when done")
+    p_dash.add_argument("--no-notify", action="store_true",
+                        help="build the pages without posting a new deal to the webhook")
     p_dash.set_defaults(func=cmd_dashboard)
 
     p_signals = sub.add_parser("signals", help="list recorded patterns and signals")
