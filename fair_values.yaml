@@ -28,6 +28,10 @@ ABBV:
   fair_value: 200.0
   checked: '2026-08-05'
   source: scraped
+ABEV:
+  fair_value: 3.6
+  checked: '2026-08-13'
+  source: scraped
 ABN:
   fair_value: 30.0
   checked: '2026-08-05'
