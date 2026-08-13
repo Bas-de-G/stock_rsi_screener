@@ -380,6 +380,10 @@ PG:
   fair_value: 155.0
   checked: '2026-08-04'
   source: scraped
+PHIA:
+  fair_value: 35.0
+  checked: '2026-08-13'
+  source: scraped
 PLD:
   fair_value: 140.0
   checked: '2026-08-05'
@@ -399,6 +403,10 @@ PM:
 PONY:
   fair_value: 9.93
   checked: '2026-08-10'
+  source: scraped
+PROP:
+  fair_value: 1.37
+  checked: '2026-08-13'
   source: scraped
 PRX:
   fair_value: 29.0
