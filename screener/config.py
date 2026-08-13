@@ -187,6 +187,10 @@ class StorageConfig:
 class DashboardConfig:
     output: Path
     chart_days: int = 90
+    # Where the published pages live, so a notification can link back to the
+    # right horizon. Empty means the message carries a bare filename, which is
+    # still useful locally and harmless in a webhook.
+    site_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -351,6 +355,7 @@ def load_config(path: str | Path | None = None) -> Config:
     dashboard = DashboardConfig(
         output=_resolve(dash_raw.get("output", "data/dashboard.html")),
         chart_days=int(dash_raw.get("chart_days", 90)),
+        site_url=str(dash_raw.get("site_url", "")).rstrip("/"),
     )
     if dashboard.chart_days < 2:
         raise ValueError("dashboard.chart_days must be at least 2")

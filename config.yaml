@@ -349,6 +349,8 @@ storage:
   fair_values: fair_values.yaml
 
 dashboard:
+  # Used only to link back from a webhook notification.
+  site_url: https://bas-de-g.github.io/stock_rsi_screener
   # Where `screener dashboard` writes the page.
   output: data/dashboard.html
   # Trading days of RSI history to plot per stock.

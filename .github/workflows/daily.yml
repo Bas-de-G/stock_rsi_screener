@@ -128,8 +128,15 @@ jobs:
         run: python -m screener.cli run
 
       # Writes index.html (1d) plus 1h.html, 4h.html and 1w.html alongside it.
+      # SCREENER_WEBHOOK_URL is optional: unset, `send_webhook` returns False
+      # and the deal is only printed. Note an Actions secret on a public repo
+      # is readable by anyone who can push a workflow, so put a Slack or
+      # Discord incoming-webhook URL here and nothing else -- the worst a leak
+      # buys is the ability to post into that one channel.
       - name: Build dashboards
         run: python -m screener.cli dashboard --output site/index.html
+        env:
+          SCREENER_WEBHOOK_URL: ${{ secrets.SCREENER_WEBHOOK_URL }}
 
       # Collected data belongs on the default branch only. Guarded rather
       # than assumed, so a manual `workflow_dispatch` from a feature branch
