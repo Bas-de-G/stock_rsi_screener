@@ -16,7 +16,6 @@ Three tables, one job each:
 from __future__ import annotations
 
 import csv
-import datetime as dt
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -83,27 +82,14 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 """
 
-# What has already been announced. Exists so a deal that stays on the page for
-# hours is not re-sent on every run: the deal of the day persists for as long
-# as its pattern is fresh, and runs land every three hours, so without this the
-# same pick would arrive four or five times.
-#
-# Keyed by the pattern itself rather than by a timestamp, so the record stays
-# true across a rebuild -- the database is regenerated from Yahoo whenever CI
-# starts clean, and re-announcing everything then would be its own kind of
-# spam.
-_NOTIFICATIONS_DDL = """
-CREATE TABLE IF NOT EXISTS notifications (
-    kind      TEXT NOT NULL,   -- 'deal' for now; room for others later
-    horizon   TEXT NOT NULL,
-    symbol    TEXT NOT NULL,
-    up2_date  TEXT NOT NULL,   -- the pattern's completing cross
-    sent_at   TEXT NOT NULL,
-    PRIMARY KEY (kind, horizon, symbol, up2_date)
-);
-"""
+# NOTE: what has already been announced deliberately does NOT live here. It
+# started as a `notifications` table and could not stay: this database is a
+# 50 MB binary that CI only commits on the last run of the day, so every
+# intraday run read a copy from last night and re-announced the morning's
+# strong buys. It now lives in `screener.notified`, in a small file committed
+# on every run. Older copies of the database still carry the dead table.
 
-SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL + _NOTIFICATIONS_DDL
+SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL
 
 
 
@@ -448,24 +434,6 @@ class Store:
                       SET earnings_growth=?, earnings_growth_known=?, earnings_growth_pass=?
                     WHERE symbol=? AND horizon=? AND direction=?""",
                 (growth, int(known), int(passes), symbol, horizon, direction),
-            )
-        self._conn.commit()
-
-    def already_notified(self, kind: str, horizon: str, symbol: str, up2_date: str) -> bool:
-        with closing(self._conn.cursor()) as cur:
-            cur.execute(
-                "SELECT 1 FROM notifications WHERE kind=? AND horizon=? AND symbol=? AND up2_date=?",
-                (kind, horizon, symbol, up2_date),
-            )
-            return cur.fetchone() is not None
-
-    def record_notification(self, kind: str, horizon: str, symbol: str, up2_date: str) -> None:
-        """Mark a pattern as announced. Idempotent, so a retry cannot double-send."""
-        with closing(self._conn.cursor()) as cur:
-            cur.execute(
-                "INSERT OR IGNORE INTO notifications (kind, horizon, symbol, up2_date, sent_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (kind, horizon, symbol, up2_date, dt.datetime.now().isoformat(timespec="seconds")),
             )
         self._conn.commit()
 

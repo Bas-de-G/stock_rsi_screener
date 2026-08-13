@@ -16,6 +16,7 @@ import pytest
 from screener import notify
 from screener.cli import _notify_new_strong_buys
 from screener.config import DEFAULT_HORIZONS, load_config
+from screener.notified import KEEP_FOR, Ledger, key_for
 from screener.notify import format_signal, format_strong_buy, issue_title, send_webhook
 from screener.storage import RsiPoint, Signal, Store, Valuation
 
@@ -43,6 +44,7 @@ storage:
   database: "{tmp_path / 't.db'}"
   csv_dir: "{tmp_path}"
   fair_values: "{tmp_path / 'fv.yaml'}"
+  notifications: "{tmp_path / 'notified.json'}"
 dashboard:
   output: "{tmp_path / 't.html'}"
   chart_days: 90
@@ -190,7 +192,43 @@ def test_the_record_survives_a_send_that_failed(config, store, monkeypatch):
     still shows it; re-sending on every run for days would be worse."""
     monkeypatch.setattr("screener.cli.send_webhook", lambda m: False)
     assert _notify_new_strong_buys(store, config) == 1
-    assert store.already_notified("strong", "1h", "PTON", _stamp(2.5))
+    assert Ledger(config.storage.notifications).seen(
+        key_for("strong", "1h", "PTON", _stamp(2.5))
+    )
+
+
+def test_the_record_outlives_the_database(config, store, monkeypatch):
+    """The bug this file's ledger exists for.
+
+    CI only commits the 50 MB database on the last run of the day, so every
+    intraday run checks out the copy from last night's close. When the record
+    lived in a table inside it, a strong buy announced at 14:00 was unknown
+    again at 14:30 -- and the friend got the same email four or five times over
+    an afternoon.
+
+    Simulated here by throwing the database away entirely between runs, which
+    is strictly worse than what CI does.
+    """
+    posted = []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    assert _notify_new_strong_buys(store, config) == 1
+
+    rows = list(store.all_signals())
+    points = [
+        RsiPoint("PTON", _stamp(30 - i), 5.45, 33.3, "test", horizon="1h")
+        for i in range(30)
+    ]
+    config.storage.database.unlink()
+    with Store(config.storage.database) as reverted:
+        for point in points:
+            reverted.upsert_rsi_point(point)
+        for sig in rows:
+            reverted.record_signal(sig)
+        reverted.upsert_valuation(
+            Valuation("PTON", "2026-08-10", 5.45, 7.81, "2026-08-10", "manual")
+        )
+        assert _notify_new_strong_buys(reverted, config) == 0
+    assert len(posted) == 1
 
 
 # ------------------------------------------------- the GitHub issue transport
@@ -244,6 +282,171 @@ def test_a_failing_issue_does_not_raise(monkeypatch, capsys):
     assert "issue failed" in capsys.readouterr().out
 
 
+def test_a_second_run_finds_its_own_issue_and_stays_quiet(monkeypatch):
+    """The belt to the ledger's braces: GitHub is asked whether it already has
+    this exact signal. It is the authoritative record -- the issue *is* the
+    thing being deduplicated -- so this holds even if the ledger is lost."""
+    posted = []
+
+    class _Resp:
+        def __init__(self, payload=None): self.payload = payload or []
+        def raise_for_status(self): return None
+        def json(self): return self.payload
+
+    filed = []
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "a/b")
+    monkeypatch.setattr(notify.requests, "get", lambda *a, **kw: _Resp(list(filed)))
+    monkeypatch.setattr(
+        notify.requests, "post",
+        lambda url, headers, json, timeout: filed.append(json) or posted.append(json) or _Resp(),
+    )
+
+    key = "strong/1h/PTON/2026-08-13T14:00"
+    assert notify.send_github_issue("🚀 PTON strong buy — 43% below", "body", key) is True
+    assert notify.send_github_issue("🚀 PTON strong buy — 41% below", "body", key) is False
+    assert len(posted) == 1
+
+
+def test_the_duplicate_check_ignores_the_moving_discount(monkeypatch):
+    """Matching on the title would not work: it quotes a percentage that moves
+    with the price, so the same signal an hour later reads differently."""
+    marker = notify.issue_marker("strong/1h/PTON/2026-08-13T14:00")
+    assert marker not in "🚀 PTON strong buy on the 1 hour chart — 43% below fair value"
+    assert marker in f"a message\n\n{marker}"
+
+
+def test_an_unrelated_issue_does_not_suppress_a_signal(monkeypatch):
+    """Someone filing a bug report must not silence the screener."""
+    class _Resp:
+        def __init__(self, payload=None): self.payload = payload or []
+        def raise_for_status(self): return None
+        def json(self): return self.payload
+
+    posted = []
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "a/b")
+    monkeypatch.setattr(notify.requests, "get", lambda *a, **kw: _Resp(
+        [{"body": "the 1h page looks wrong"}, {"body": None}]
+    ))
+    monkeypatch.setattr(notify.requests, "post",
+                        lambda url, headers, json, timeout: posted.append(json) or _Resp())
+    assert notify.send_github_issue("t", "b", "strong/1h/PTON/x") is True
+    assert len(posted) == 1
+
+
+def test_an_unreachable_api_still_sends(monkeypatch, capsys):
+    """When the duplicate check cannot run, err towards telling him. A repeat
+    email is an annoyance; a missed strong buy defeats the whole point."""
+    import requests as _requests
+
+    class _Resp:
+        def raise_for_status(self): return None
+
+    posted = []
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "a/b")
+    monkeypatch.setattr(notify.requests, "get", lambda *a, **kw: (_ for _ in ()).throw(
+        _requests.RequestException("503")
+    ))
+    monkeypatch.setattr(notify.requests, "post",
+                        lambda url, headers, json, timeout: posted.append(json) or _Resp())
+    assert notify.send_github_issue("t", "b", "strong/1h/PTON/x") is True
+    assert len(posted) == 1
+    assert "filing anyway" in capsys.readouterr().out
+
+
+def test_the_marker_rides_along_in_the_body(monkeypatch):
+    """Hidden in an HTML comment, so it shows in neither the issue nor the
+    email -- but the next run can read it back."""
+    captured = {}
+
+    class _Resp:
+        def __init__(self, payload=None): self.payload = payload or []
+        def raise_for_status(self): return None
+        def json(self): return self.payload
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "a/b")
+    monkeypatch.setattr(notify.requests, "get", lambda *a, **kw: _Resp())
+    monkeypatch.setattr(notify.requests, "post",
+                        lambda url, headers, json, timeout: captured.update(json) or _Resp())
+    notify.send_github_issue("t", "the message", "strong/1h/PTON/x")
+    assert captured["body"].startswith("the message")
+    assert "<!-- screener-signal: strong/1h/PTON/x -->" in captured["body"]
+
+
+def test_a_closed_issue_still_counts_as_filed(monkeypatch):
+    """He reads the email and closes the issue; that is not an invitation to
+    send it again. The query asks for state=all for exactly this reason."""
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self): return None
+        def json(self): return [{"body": notify.issue_marker("strong/1h/PTON/x")}]
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "a/b")
+    monkeypatch.setattr(notify.requests, "get",
+                        lambda url, headers, params, timeout: captured.update(params) or _Resp())
+    assert notify.send_github_issue("t", "b", "strong/1h/PTON/x") is False
+    assert captured["state"] == "all"
+
+
+# ------------------------------------------------------------------ the ledger
+
+
+def test_the_ledger_survives_a_restart(tmp_path):
+    path = tmp_path / "notified.json"
+    Ledger(path).record(key_for("strong", "1h", "PTON", "2026-08-13T14:00"))
+    assert Ledger(path).seen("strong/1h/PTON/2026-08-13T14:00")
+    assert not Ledger(path).seen("strong/1h/PTON/2026-08-13T15:00")
+
+
+def test_the_ledger_is_readable_json(tmp_path):
+    """It gets committed and shows up in diffs, so it has to be legible to a
+    person wondering why a notification did or didn't go out."""
+    import json
+
+    path = tmp_path / "notified.json"
+    Ledger(path).record("strong/1h/PTON/2026-08-13T14:00")
+    written = json.loads(path.read_text())
+    assert list(written["sent"]) == ["strong/1h/PTON/2026-08-13T14:00"]
+
+
+def test_recording_twice_keeps_the_first_time(tmp_path):
+    path = tmp_path / "notified.json"
+    ledger = Ledger(path)
+    first = dt.datetime(2026, 8, 13, 14, 0)
+    ledger.record("k", now=first)
+    ledger.record("k", now=first + dt.timedelta(hours=3))
+    assert path.read_text().count('"k"') == 1
+    assert first.isoformat(timespec="seconds") in path.read_text()
+
+
+def test_old_entries_are_pruned(tmp_path):
+    """Otherwise the file grows a line per notification forever."""
+    path = tmp_path / "notified.json"
+    ledger = Ledger(path)
+    ledger.record("ancient", now=NOW - KEEP_FOR - dt.timedelta(days=1))
+    ledger.record("recent", now=NOW)
+    reloaded = Ledger(path)
+    assert reloaded.seen("recent")
+    assert not reloaded.seen("ancient")
+
+
+def test_a_corrupt_ledger_does_not_stop_the_run(tmp_path, capsys):
+    """A truncated write must cost at most one duplicate email, never the
+    dashboard build."""
+    path = tmp_path / "notified.json"
+    path.write_text("{not json")
+    ledger = Ledger(path)
+    assert not ledger.seen("anything")
+    assert "unreadable" in capsys.readouterr().out
+    ledger.record("k")
+    assert Ledger(path).seen("k")
+
+
 def test_the_title_carries_the_symbol_and_the_gap():
     assert issue_title("PLNT", 0.49, HOURLY) == (
         "🚀 PLNT strong buy on the 1 hour chart — 49% below fair value"
@@ -260,8 +463,10 @@ def test_both_transports_fire_for_one_signal(config, store, monkeypatch):
     posted, issues = [], []
     monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
     monkeypatch.setattr("screener.cli.send_github_issue",
-                        lambda t, b: issues.append((t, b)) or True)
+                        lambda t, b, k: issues.append((t, b, k)) or True)
     assert _notify_new_strong_buys(store, config) == 1
     assert len(posted) == 1 and len(issues) == 1
     assert issues[0][0].startswith("🚀 PTON strong buy")
     assert "STRONG BUY 🚀 — PTON" in issues[0][1]
+    # The same key the ledger uses, so both defences dedupe on one identity.
+    assert issues[0][2] == key_for("strong", "1h", "PTON", _stamp(2.5))

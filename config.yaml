@@ -347,6 +347,9 @@ storage:
   # Hand-checked Morningstar fair values. Committed and editable on GitHub,
   # unlike the database — see the README.
   fair_values: fair_values.yaml
+  # Which strong buys have already been emailed. Committed on every run, so a
+  # signal announced at 14:00 is still known to be announced at 14:30.
+  notifications: notifications.json
 
 dashboard:
   # Used only to link back from a webhook notification.

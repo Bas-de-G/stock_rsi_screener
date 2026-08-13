@@ -81,7 +81,48 @@ def issue_title(symbol: str, discount, horizon) -> str:
     return f"🚀 {symbol} strong buy on the {horizon.label} chart{gap}"
 
 
-def send_github_issue(title: str, body: str) -> bool:
+def issue_marker(key: str) -> str:
+    """A machine-readable fingerprint of the signal, hidden in the issue body.
+
+    An HTML comment: invisible both on github.com and in the notification
+    email, but readable back out of the API. Matching on this rather than on
+    the title matters because the title quotes a discount that moves with the
+    price -- the same signal an hour later would read "48%" instead of "49%"
+    and a title match would miss it.
+    """
+    return f"<!-- screener-signal: {key} -->"
+
+
+def _issue_exists(repo: str, token: str, marker: str) -> bool:
+    """Has this exact signal already been filed?
+
+    The ledger in `screener.notified` is the first line of defence; this is the
+    second, and it is the authoritative one, because the thing being deduped is
+    the issue itself. If the ledger is ever lost -- a run that dies before its
+    commit, a rebase that drops the file -- GitHub still remembers, and the
+    friend still gets one email instead of two.
+
+    Deliberately the *list* endpoint rather than the search API: search is
+    served from an index that lags issue creation by minutes, and runs land
+    half an hour apart. `state=all` so a closed issue is not reopened as a
+    duplicate; the list is newest-first, and 100 covers far more than the
+    handful of days a pattern stays fresh.
+    """
+    response = requests.get(
+        f"https://api.github.com/repos/{repo}/issues",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        params={"state": "all", "per_page": 100},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return any(marker in (issue.get("body") or "") for issue in response.json())
+
+
+def send_github_issue(title: str, body: str, key: str | None = None) -> bool:
     """Open an issue, so GitHub emails whoever watches the repository.
 
     The one notification path that costs no credential of ours. Actions
@@ -90,13 +131,30 @@ def send_github_issue(title: str, body: str) -> bool:
     repository is public, and an Actions secret is readable by anyone who can
     push a workflow -- which includes any collaborator.
 
-    Needs `issues: write` on the job. Returns False when the environment does
-    not supply a token, which is the normal case on a laptop.
+    With a `key`, the issue carries a hidden marker and an existing issue with
+    the same marker suppresses a second one: the same signal never lands in the
+    inbox twice.
+
+    Needs `issues: write` on the job (and `read` for the duplicate check, which
+    the same scope covers). Returns False when the environment does not supply
+    a token, which is the normal case on a laptop, and when a duplicate was
+    suppressed -- in both cases nothing was sent.
     """
     token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not (token and repo):
         return False
+    if key is not None:
+        marker = issue_marker(key)
+        body = f"{body}\n\n{marker}"
+        try:
+            if _issue_exists(repo, token, marker):
+                print("  (already filed as an issue — not sending again)")
+                return False
+        except requests.RequestException as exc:
+            # Can't confirm, so err towards telling him. A duplicate email is
+            # an annoyance; a missed strong buy is the whole point of this.
+            print(f"  ! could not check for a duplicate issue ({exc}) — filing anyway")
     try:
         response = requests.post(
             f"https://api.github.com/repos/{repo}/issues",

@@ -24,6 +24,7 @@ from .morningstar import (
     save_login_session,
     scrape_ticker,
 )
+from .notified import Ledger, key_for
 from .notify import (
     format_signal,
     format_strong_buy,
@@ -845,9 +846,14 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
 
     One message per symbol per horizon: a name that fires three times in six
     hours on the 1h chart is one piece of news, not three.
+
+    And once ever, not once per run. The ledger is a small committed file
+    rather than a table in the database, because the database is only
+    committed by the last run of the day -- see `screener.notified`.
     """
     from .dashboard import _collect
 
+    ledger = Ledger(config.storage.notifications)
     sent = 0
     for horizon in config.horizons:
         for row in _collect(store, config, horizon):
@@ -863,7 +869,8 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             if not fresh:
                 continue
             up2 = max(s.up2_date for s in fresh)
-            if store.already_notified("strong", horizon.key, row.symbol, up2):
+            key = key_for("strong", horizon.key, row.symbol, up2)
+            if ledger.seen(key):
                 continue
             best = max(fresh, key=lambda s: s.up2_date)
             discount = (
@@ -882,9 +889,9 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # webhook too.
             if send_webhook(message):
                 print("  (sent to webhook)")
-            if send_github_issue(issue_title(row.symbol, discount, horizon), message):
+            if send_github_issue(issue_title(row.symbol, discount, horizon), message, key):
                 print("  (opened an issue — GitHub will email it)")
-            store.record_notification("strong", horizon.key, row.symbol, up2)
+            ledger.record(key)
             sent += 1
     return sent
 

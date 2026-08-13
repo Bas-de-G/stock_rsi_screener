@@ -561,14 +561,48 @@ the only question being asked, same as the valuation gate's plain boolean.
 
 ## Notifications
 
-Put a Slack or Discord incoming webhook in `.env`:
+Only one thing is worth interrupting someone for: a **newly fired strong buy**.
+Not every fired signal — `fire_without_valuation` means everything fires, which
+is 5 to 20 patterns a run and 251 the day new tickers are backfilled. And only
+while it's *fresh*, not merely live: a strong buy stays actionable for a
+fortnight on the daily chart, and announcing it for a fortnight is spam.
+
+**By email, with no credential anywhere.** The scheduled run opens a GitHub
+issue; GitHub emails everyone watching the repository. Watch it with **Watch →
+Custom → Issues** and check email notifications are on in your GitHub settings.
+Nothing to configure in the repo — Actions injects its own token, scoped to
+this repository and expiring with the run, which matters because this repo is
+public and an Actions secret is readable by anyone who can push a workflow.
+
+**By Slack or Discord**, optionally, with an incoming webhook in `.env`:
 
 ```
 SCREENER_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-Fired signals get posted there. Without it everything still lands in SQLite,
-the CSVs, and stdout.
+Without either, everything still lands in SQLite, the CSVs, and stdout.
+
+### One signal, one email
+
+A strong buy sits on the dashboard for hours and runs land every 30 minutes, so
+the same pick would otherwise arrive four or five times in an afternoon. It's
+deduplicated twice over:
+
+- **`notifications.json`** records what's been announced, keyed by the pattern
+  itself — kind, timeframe, symbol, and the second RSI cross that completed it.
+  It's committed on every run, and deliberately *not* stored in
+  `data/screener.db`: that file is only committed by the last run of the day,
+  so a record written at 14:00 would be gone again by 14:30. That was a real
+  bug, and it's why this file exists.
+- **GitHub itself** is asked whether an issue for that exact signal already
+  exists, matching on a hidden marker in the body rather than the title (the
+  title quotes a discount that moves with the price). This is the
+  authoritative check, so even a lost ledger doesn't produce a second email.
+  A closed issue counts as filed — reading and closing one is not a request to
+  resend it.
+
+Only if the API can't be reached does it err towards sending: a repeat email is
+an annoyance, a missed strong buy defeats the point.
 
 ---
 
@@ -599,7 +633,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 313 tests
+python -m pytest tests/ -q      # 406 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

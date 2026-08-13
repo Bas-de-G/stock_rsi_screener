@@ -37,6 +37,8 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/fairvalues.py` | the committed `fair_values.yaml` |
 | `screener/morningstar.py` | logged-in scraping of price + fair value |
 | `screener/dashboard.py` | the self-contained HTML page |
+| `screener/notify.py` | the webhook and GitHub-issue transports |
+| `screener/notified.py` | the committed `notifications.json` — what's already been announced |
 | `screener/cli.py` | commands, and the glue between all of the above |
 
 ## Rules that aren't obvious from the code
@@ -69,6 +71,15 @@ cleared from the database on the next run.
 **Never commit anything under `data/`.** It's gitignored. CI force-adds it, and
 only on `main` (see the branch guard in `.github/workflows/daily.yml`). A human
 committing it will collide with the bot.
+
+**Notification state must never live in `data/screener.db`.** The database is
+only committed by the last run of the day (the deferral guard in `daily.yml` —
+it's a 50 MB binary that deltas badly in git), so every intraday run reads back
+the copy from last night's close. Anything that has to be remembered *between*
+runs on the same day belongs in `notifications.json` at the repo root, which is
+committed on every run. This started as a table in the database and had to be
+moved: the same strong buy was emailed four or five times in an afternoon. See
+`screener/notified.py`.
 
 **Running the screener locally modifies a tracked file, which blocks `git
 pull`.** `data/screener.db` (and the CSVs) are force-added by CI, so they stay
