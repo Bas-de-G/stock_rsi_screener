@@ -16,7 +16,7 @@ import pytest
 from screener import notify
 from screener.cli import _notify_new_strong_buys
 from screener.config import DEFAULT_HORIZONS, load_config
-from screener.notify import format_signal, format_strong_buy, send_webhook
+from screener.notify import format_signal, format_strong_buy, issue_title, send_webhook
 from screener.storage import RsiPoint, Signal, Store, Valuation
 
 NOW = dt.datetime.now()
@@ -191,3 +191,77 @@ def test_the_record_survives_a_send_that_failed(config, store, monkeypatch):
     monkeypatch.setattr("screener.cli.send_webhook", lambda m: False)
     assert _notify_new_strong_buys(store, config) == 1
     assert store.already_notified("strong", "1h", "PTON", _stamp(2.5))
+
+
+# ------------------------------------------------- the GitHub issue transport
+
+
+def test_no_token_means_no_issue(monkeypatch):
+    """The normal case on a laptop: print, don't post."""
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    assert notify.send_github_issue("t", "b") is False
+
+
+def test_a_token_without_a_repository_is_not_enough(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    assert notify.send_github_issue("t", "b") is False
+
+
+def test_the_issue_goes_to_the_right_repository(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self): return None
+
+    def _post(url, headers, json, timeout):
+        captured.update(url=url, headers=headers, json=json)
+        return _Resp()
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Bas-de-G/stock_rsi_screener")
+    monkeypatch.setattr(notify.requests, "post", _post)
+
+    assert notify.send_github_issue("🚀 PLNT strong buy", "body text") is True
+    assert captured["url"] == "https://api.github.com/repos/Bas-de-G/stock_rsi_screener/issues"
+    assert captured["headers"]["Authorization"] == "Bearer tok"
+    assert captured["json"] == {"title": "🚀 PLNT strong buy", "body": "body text"}
+
+
+def test_a_failing_issue_does_not_raise(monkeypatch, capsys):
+    """A GitHub hiccup must not take the publish step down with it."""
+    import requests
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "a/b")
+
+    def _boom(*a, **kw):
+        raise requests.RequestException("503")
+
+    monkeypatch.setattr(notify.requests, "post", _boom)
+    assert notify.send_github_issue("t", "b") is False
+    assert "issue failed" in capsys.readouterr().out
+
+
+def test_the_title_carries_the_symbol_and_the_gap():
+    assert issue_title("PLNT", 0.49, HOURLY) == (
+        "🚀 PLNT strong buy on the 1 hour chart — 49% below fair value"
+    )
+
+
+def test_the_title_survives_an_unknown_gap():
+    """A rocket earned on earnings growth alone has no discount to quote."""
+    assert issue_title("AD", None, HOURLY) == "🚀 AD strong buy on the 1 hour chart"
+
+
+def test_both_transports_fire_for_one_signal(config, store, monkeypatch):
+    """They are independent: CI has the token and may have the webhook too."""
+    posted, issues = [], []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    monkeypatch.setattr("screener.cli.send_github_issue",
+                        lambda t, b: issues.append((t, b)) or True)
+    assert _notify_new_strong_buys(store, config) == 1
+    assert len(posted) == 1 and len(issues) == 1
+    assert issues[0][0].startswith("🚀 PTON strong buy")
+    assert "STRONG BUY 🚀 — PTON" in issues[0][1]

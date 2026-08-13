@@ -24,7 +24,13 @@ from .morningstar import (
     save_login_session,
     scrape_ticker,
 )
-from .notify import format_signal, format_strong_buy, send_webhook
+from .notify import (
+    format_signal,
+    format_strong_buy,
+    issue_title,
+    send_github_issue,
+    send_webhook,
+)
 from .rsi import wilder_rsi_series
 from .signals import (
     BUY,
@@ -871,8 +877,13 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
                 row.currency, horizon, config.rsi.threshold, url,
             )
             print(message)
+            # Both transports are optional and independent: a laptop run has
+            # neither and simply prints, CI has the token and may have the
+            # webhook too.
             if send_webhook(message):
                 print("  (sent to webhook)")
+            if send_github_issue(issue_title(row.symbol, discount, horizon), message):
+                print("  (opened an issue — GitHub will email it)")
             store.record_notification("strong", horizon.key, row.symbol, up2)
             sent += 1
     return sent

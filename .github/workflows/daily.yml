@@ -75,6 +75,10 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  # Lets the publish step open an issue for a new strong buy. GitHub then
+  # emails anyone watching the repository, which is a notification channel
+  # that needs no credential stored anywhere -- see notify.send_github_issue.
+  issues: write
 
 concurrency:
   group: daily-screener
@@ -137,6 +141,7 @@ jobs:
         run: python -m screener.cli dashboard --output site/index.html
         env:
           SCREENER_WEBHOOK_URL: ${{ secrets.SCREENER_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Collected data belongs on the default branch only. Guarded rather
       # than assumed, so a manual `workflow_dispatch` from a feature branch

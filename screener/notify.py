@@ -73,3 +73,43 @@ def format_strong_buy(symbol: str, discount,  price, fair_value, currency: str,
         f" · {horizon.leverage}x suggested",
         f"  {url}",
     ])
+
+
+def issue_title(symbol: str, discount, horizon) -> str:
+    """One line, because this is what lands in the email subject."""
+    gap = f" — {discount * 100:.0f}% below fair value" if discount is not None else ""
+    return f"🚀 {symbol} strong buy on the {horizon.label} chart{gap}"
+
+
+def send_github_issue(title: str, body: str) -> bool:
+    """Open an issue, so GitHub emails whoever watches the repository.
+
+    The one notification path that costs no credential of ours. Actions
+    injects GITHUB_TOKEN itself, scoped to this repository and expiring with
+    the run, so nothing has to be stored anywhere. That matters here: the
+    repository is public, and an Actions secret is readable by anyone who can
+    push a workflow -- which includes any collaborator.
+
+    Needs `issues: write` on the job. Returns False when the environment does
+    not supply a token, which is the normal case on a laptop.
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not (token and repo):
+        return False
+    try:
+        response = requests.post(
+            f"https://api.github.com/repos/{repo}/issues",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"title": title, "body": body},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        print(f"  ! issue failed: {exc}")
+        return False
