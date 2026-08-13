@@ -91,6 +91,48 @@ tickers:
   - {symbol: MO,    tradingview: "NYSE:MO",      morningstar: xnys/mo, markets: [sp500]}
   - {symbol: PM,    tradingview: "NYSE:PM",      morningstar: xnys/pm, markets: [sp500]}
   - {symbol: LULU,  tradingview: "NASDAQ:LULU",  morningstar: xnas/lulu, markets: [sp500, nasdaq]}
+
+  # --- Screened for strong-buy potential --------------------------------
+  # Picked by measurement rather than taste. Every name below cleared two
+  # tests over a year of daily bars: at least two completed double-crosses of
+  # RSI 30, and earnings growing rather than shrinking. The second matters as
+  # much as the first -- a shrinking bottom line vetoes the rocket outright,
+  # however cheap the stock, which is what knocked out otherwise ideal
+  # candidates like KMB (4 patterns), MOH (5), CHWY (5) and LI (7).
+  #
+  # The profile that survives is a specific one: a quality name that had its
+  # own de-rating, not a broad cyclical. Of 133 existing tickers, 56% have
+  # never produced a single buy pattern -- mega-cap defensives essentially
+  # never do.
+  #
+  # What is NOT verified here is the third leg, the Morningstar discount.
+  # That needs `screener scrape`; these are candidates for a strong buy, not
+  # promises of one.
+  - {symbol: DG,    tradingview: "NYSE:DG",       morningstar: xnys/dg, markets: [sp500]}
+  - {symbol: EPAM,  tradingview: "NYSE:EPAM",     morningstar: xnys/epam, markets: [sp500]}
+  - {symbol: ALB,   tradingview: "NYSE:ALB",      morningstar: xnys/alb, markets: [sp500]}
+  - {symbol: EL,    tradingview: "NYSE:EL",       morningstar: xnys/el, markets: [sp500]}
+  - {symbol: DECK,  tradingview: "NYSE:DECK",     morningstar: xnys/deck, markets: [sp500]}
+  - {symbol: WHR,   tradingview: "NYSE:WHR",      morningstar: xnys/whr, markets: [sp500]}
+  - {symbol: PYPL,  tradingview: "NASDAQ:PYPL",   morningstar: xnas/pypl, markets: [sp500, nasdaq]}
+  - {symbol: DXCM,  tradingview: "NASDAQ:DXCM",   morningstar: xnas/dxcm, markets: [sp500, nasdaq]}
+  - {symbol: DDOG,  tradingview: "NASDAQ:DDOG",   morningstar: xnas/ddog, markets: [sp500, nasdaq]}
+  - {symbol: NXPI,  tradingview: "NASDAQ:NXPI",   morningstar: xnas/nxpi, markets: [sp500, nasdaq]}
+  - {symbol: ALNY,  tradingview: "NASDAQ:ALNY",   morningstar: xnas/alny, markets: [sp500, nasdaq]}
+  # Mid-caps and recent listings: filed under the large-cap US group because
+  # every ticker needs a market to be reachable from a filter, not as a claim
+  # of index membership. Same reasoning as OGN above.
+  - {symbol: RBLX,  tradingview: "NYSE:RBLX",     morningstar: xnys/rblx, markets: [sp500]}
+  - {symbol: PATH,  tradingview: "NYSE:PATH",     morningstar: xnys/path, markets: [sp500]}
+  - {symbol: PLNT,  tradingview: "NYSE:PLNT",     morningstar: xnys/plnt, markets: [sp500]}
+  - {symbol: LYFT,  tradingview: "NASDAQ:LYFT",   morningstar: xnas/lyft, markets: [nasdaq]}
+  - {symbol: AFRM,  tradingview: "NASDAQ:AFRM",   morningstar: xnas/afrm, markets: [nasdaq]}
+  - {symbol: UPST,  tradingview: "NASDAQ:UPST",   morningstar: xnas/upst, markets: [nasdaq]}
+  # Chinese ADRs, quoted in dollars on Nasdaq. Tagged asia for where you would
+  # look for the company, as PONY and NVO already are.
+  - {symbol: NTES,  tradingview: "NASDAQ:NTES",   morningstar: xnas/ntes, markets: [nasdaq, asia]}
+  - {symbol: TCOM,  tradingview: "NASDAQ:TCOM",   morningstar: xnas/tcom, markets: [nasdaq, asia]}
+  - {symbol: BILI,  tradingview: "NASDAQ:BILI",   morningstar: xnas/bili, markets: [nasdaq, asia]}
   # Grain and oilseed processing -- agriculture rather than retail.
   - {symbol: ADM,   tradingview: "NYSE:ADM",     morningstar: xnys/adm, markets: [sp500]}
 
