@@ -181,6 +181,11 @@ class StorageConfig:
     database: Path
     csv_dir: Path
     fair_values: Path
+    # Which strong buys have already been announced. Deliberately outside
+    # `csv_dir`: everything in there is regenerated data and gitignored, while
+    # this has to be committed on every run or the same signal is announced
+    # again half an hour later. See `screener.notified`.
+    notifications: Path = Path("notifications.json")
 
 
 @dataclass(frozen=True)
@@ -341,6 +346,7 @@ def load_config(path: str | Path | None = None) -> Config:
         database=_resolve(store_raw.get("database", "data/screener.db")),
         csv_dir=_resolve(store_raw.get("csv_dir", "data")),
         fair_values=_resolve(store_raw.get("fair_values", "fair_values.yaml")),
+        notifications=_resolve(store_raw.get("notifications", "notifications.json")),
     )
 
     ms_raw = raw.get("morningstar", {})

@@ -167,21 +167,32 @@ jobs:
       - name: Commit collected data
         if: github.ref_name == github.event.repository.default_branch
         run: |
-          # Late-day runs snapshot; earlier ones defer. Deliberately ">= 21"
-          # rather than "== 21": GitHub delivers this repo's scheduled runs
-          # around 22:30, so matching the hour exactly meant the one run that
-          # actually lands each day fell through and never committed. 10# forces
-          # base 10, or `date +%H` returning "09" is read as invalid octal.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # notifications.json is committed on EVERY run, deferral or not. It
+          # records which strong buys have already been emailed, and it is
+          # useless unless the next run half an hour later can read it back --
+          # which is exactly what deferring it broke: the same signal was
+          # announced four or five times over an afternoon. A few hundred
+          # bytes of JSON, so it costs nothing to write every time.
+          git add notifications.json 2>/dev/null || true
+
+          # Late-day runs snapshot the database; earlier ones defer.
+          # Deliberately ">= 21" rather than "== 21": GitHub delivers this
+          # repo's scheduled runs around 22:30, so matching the hour exactly
+          # meant the one run that actually lands each day fell through and
+          # never committed. 10# forces base 10, or `date +%H` returning "09"
+          # is read as invalid octal.
           if [ "${{ github.event_name }}" = "schedule" ] \
              && [ "$((10#$(date -u +%H)))" -lt 21 ]; then
             echo "Intraday run — dashboard published; database snapshot deferred to the last run of the day."
-            exit 0
+          else
+            # data/ is gitignored so local runs stay clean; CI force-adds it
+            # because this is where the shared history lives.
+            git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # data/ is gitignored so local runs stay clean; CI force-adds it
-          # because this is where the shared history lives.
-          git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
+
           if git diff --staged --quiet; then
             echo "Nothing changed."
           else
