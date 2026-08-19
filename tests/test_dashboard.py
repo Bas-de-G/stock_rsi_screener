@@ -538,8 +538,18 @@ def test_build_all_dashboards_writes_one_page_per_horizon(tmp_path, config):
             )
         paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
     names = sorted(p.name for p in paths)
-    assert names == ["1h.html", "1w.html", "4h.html", "index.html"]
+    assert names == ["1h.html", "1w.html", "4h.html", "history.html", "index.html"]
     assert all(p.exists() and p.stat().st_size > 0 for p in paths)
+
+
+def test_every_page_links_to_the_track_record(tmp_path, config):
+    """A screener with no visible score is asking to be trusted on nothing."""
+    db = tmp_path / "t.db"
+    with Store(db) as store:
+        store.upsert_rsi_point(RsiPoint("IBM", "2026-07-01", 200.0, 45.0, "backfill:yahoo"))
+        paths = build_all_dashboards(store, config, tmp_path / "site" / "index.html")
+    for path in paths:
+        assert 'href="history.html"' in path.read_text()
 
 
 def test_the_default_horizon_is_index_html(tmp_path, config):

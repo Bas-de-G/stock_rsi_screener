@@ -137,6 +137,13 @@ jobs:
       - name: Run screener
         run: python -m screener.cli run
 
+      # Measures what happened after every pattern on record, from price
+      # history already on disk. Cheap (a few seconds) and idempotent, so it
+      # runs unconditionally: the track-record page is built from its output,
+      # and a stale one is worse than none.
+      - name: Measure past signals
+        run: python -m screener.cli evaluate
+
       # Writes index.html (1d) plus 1h.html, 4h.html and 1w.html alongside it.
       # SCREENER_WEBHOOK_URL is optional: unset, `send_webhook` returns False
       # and the deal is only printed. Note an Actions secret on a public repo
