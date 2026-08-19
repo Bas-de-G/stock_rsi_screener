@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,12 +25,15 @@ from .morningstar import (
     save_login_session,
     scrape_ticker,
 )
+from .earnings import earnings_window
+from .earnings import to_date as to_release_date
 from .notified import Ledger, key_for
 from .notify import (
     format_signal,
     format_strong_buy,
     issue_title,
     send_github_issue,
+    send_push,
     send_webhook,
 )
 from .rsi import wilder_rsi_series
@@ -41,6 +45,7 @@ from .signals import (
     is_strong,
     signal_fires,
     signal_is_fresh,
+    signal_is_live,
     valuation_passes,
 )
 from .storage import (
@@ -52,9 +57,14 @@ from .storage import (
     export_csv_snapshot,
 )
 from .tradingview import (
+    EARNINGS_FIELDS,
+    EARNINGS_LAST_FIELD,
+    EARNINGS_NEXT_FIELD,
     MarketDataError,
     NoHistoryYet,
+    decode_quote,
     fetch_daily_closes,
+    fetch_live_batch,
     fetch_live_rsi,
 )
 
@@ -88,6 +98,63 @@ def cmd_login(config: Config, args) -> int:
     return 0
 
 
+# How stale a horizon's Yahoo bars may get before they are pulled again. The
+# batch scan writes live 1h and 4h rows every half hour in between, so a
+# refresh is only topping up the true bar closes behind them -- and repairing
+# whatever a missed run left as a gap, which is the reason to keep doing it at
+# all. Measured against the newest bar rather than a stored timestamp, which
+# makes it land roughly once a day per horizon without any bookkeeping.
+INTRADAY_REFRESH_AFTER = dt.timedelta(hours=20)
+
+
+def _refreshed_today(series) -> bool:
+    """Whether Yahoo history for this horizon was pulled recently enough.
+
+    Only backfilled rows count. The live rows in between come from the batch
+    scan and say nothing about when Yahoo was last asked.
+    """
+    stamps = [p.date for p in series if p.source.startswith("backfill")]
+    if not stamps:
+        return False
+    try:
+        newest = dt.datetime.fromisoformat(max(stamps))
+    except ValueError:
+        return False
+    return (dt.datetime.now() - newest) < INTRADAY_REFRESH_AFTER
+
+
+def _new_tickers(store: Store, config: Config) -> list[str]:
+    """Tickers with no history at all — the ones seeding is expensive for.
+
+    Deliberately "nothing anywhere" rather than "short on this horizon". A
+    ticker can be fully seeded daily and thin weekly simply by being a recent
+    listing: BSP has 257 daily bars and not yet fifteen weekly ones. That is
+    one cheap request that fills itself as bars accumulate, and capping it
+    would defer it every run forever.
+    """
+    return [
+        t.symbol for t in config.tickers
+        if not store.rsi_series(t.symbol, DEFAULT_HORIZON)
+    ]
+
+
+def _new_ticker_budget(store: Store, config: Config, args) -> set[str]:
+    """Which never-seen tickers get their history this run.
+
+    Config order, so a batch added together arrives together rather than
+    alphabetically interleaved. Returns every new ticker when uncapped.
+    """
+    new = _new_tickers(store, config)
+    limit = getattr(args, "max_new", None)
+    if not limit or limit >= len(new):
+        if new:
+            print(f"Seeding {len(new)} new ticker(s): {', '.join(new)}")
+        return set(new)
+    print(f"{len(new)} new ticker(s) to seed; taking {limit} this run, "
+          f"{len(new) - limit} deferred.")
+    return set(new[:limit])
+
+
 def cmd_backfill(config: Config, args) -> int:
     """Seed RSI history from daily closes so signals work immediately.
 
@@ -101,20 +168,41 @@ def cmd_backfill(config: Config, args) -> int:
     to config.yaml after that first run (SanDisk, say) would never get
     backfilled by CI and would trickle in one live row a day instead. Making
     this idempotent and calling it every run lets a new ticker backfill itself.
+
+    Two things keep it affordable as the watchlist grows, because unlike RSI
+    this is one Yahoo request per ticker per horizon and cannot be batched:
+
+    * Seeding a *new* ticker is capped per run (--max-new). Adding a hundred
+      names then spreads over a few runs instead of timing one out.
+    * Seeded intraday history is refreshed once a day rather than every run.
+      It used to refetch on every run -- 153 x 2 = 306 requests, most of the
+      job's wall time -- which was worth it when a run was the only thing
+      writing intraday rows. It no longer is: the batch scan lays down live
+      1h and 4h rows every half hour, and the daily refresh backfills the true
+      bar closes behind them.
     """
     horizons = _selected_horizons(config, args)
     with Store(config.storage.database) as store:
+        # Only ever holds back tickers we have never seen at all. A known
+        # ticker that is thin on one horizon still refetches: that is a single
+        # request, and it is how a recent listing's weekly history fills in.
+        deferred = set(_new_tickers(store, config)) - _new_ticker_budget(store, config, args)
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
             for ticker in config.tickers:
                 existing = store.rsi_series(ticker.symbol, horizon.key)
-                # Intraday bars go stale between runs in a way daily ones don't:
-                # a full 1h history collected yesterday is missing every bar
-                # since. Always refetch those; the upsert dedupes.
                 seeded = len(existing) >= config.dashboard.chart_days
-                if seeded and not horizon.intraday and not args.force:
-                    print(f"  {ticker.symbol}: {len(existing)} bars already — skip (--force to refetch)")
-                    continue
+                if not args.force:
+                    if ticker.symbol in deferred:
+                        print(f"  {ticker.symbol}: new — deferred to a later run "
+                              f"(--max-new is {args.max_new})")
+                        continue
+                    if seeded and not horizon.intraday:
+                        print(f"  {ticker.symbol}: {len(existing)} bars already — skip (--force to refetch)")
+                        continue
+                    if seeded and _refreshed_today(existing):
+                        print(f"  {ticker.symbol}: intraday history refreshed today — skip")
+                        continue
 
                 # Each horizon has its own sensible depth (5y of weekly bars,
                 # but only 730d of hourly -- Yahoo's intraday ceiling).
@@ -178,15 +266,53 @@ def cmd_run(config: Config, args) -> int:
         # run every hour lays down a genuine intraday series rather than
         # overwriting a single row all day.
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M")
+
+        # Every ticker, every horizon, in one request -- TradingView's scan
+        # endpoint takes a list of symbols and a list of columns, and RSI|60,
+        # RSI|240, RSI and RSI|1W are just four more columns. This used to be a
+        # GET per (ticker, horizon): 153 x 4 = 612 sequential requests, which
+        # was most of the run's wall time and the reason the watchlist could
+        # not grow. Measured at 637 symbols x 4 horizons in 0.75 seconds.
+        #
+        # A failure here is a real outage and fails the run; a symbol simply
+        # missing from the response is reported per ticker below, exactly like
+        # a null field.
+        try:
+            rows = fetch_live_batch(
+                [t.tradingview for t in config.tickers],
+                [h.tv_interval for h in horizons],
+                period=config.rsi.period,
+                extra_fields=EARNINGS_FIELDS,
+            )
+        except MarketDataError as exc:
+            print(f"\n  ! {exc}")
+            return 1
+
+        _record_earnings_dates(store, config, rows)
+
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
             for ticker in config.tickers:
                 try:
-                    quote = fetch_live_rsi(
-                        ticker.tradingview,
-                        period=config.rsi.period,
-                        interval=horizon.tv_interval,
-                    )
+                    row = rows.get(ticker.tradingview)
+                    if row is not None:
+                        quote = decode_quote(
+                            ticker.tradingview, row,
+                            period=config.rsi.period,
+                            interval=horizon.tv_interval,
+                        )
+                    else:
+                        # The scan index is not quite the same set as the
+                        # symbol endpoint, so a listing can resolve there and
+                        # be absent here. Ask for it on its own rather than let
+                        # it drop off the dashboard unremarked -- one extra
+                        # request for a case that should never happen beats a
+                        # ticker quietly going missing.
+                        quote = fetch_live_rsi(
+                            ticker.tradingview,
+                            period=config.rsi.period,
+                            interval=horizon.tv_interval,
+                        )
                 except NoHistoryYet as exc:
                     # Expected for a recent listing, and it fixes itself as the
                     # bars accumulate. Not a failure: letting it set exit_code
@@ -525,6 +651,38 @@ def sync_fair_values(store: Store, config: Config, quiet: bool = False) -> int:
     return applied
 
 
+def _record_earnings_dates(store: Store, config: Config, rows: dict) -> int:
+    """Store when each company next reports, from the batch response.
+
+    Free: the dates are two more columns on the request that already fetched
+    RSI. A symbol the feed has no date for is recorded as such rather than
+    skipped, so a date that disappears (the release happened, the next one is
+    not scheduled) clears the old one instead of leaving it to go stale.
+    """
+    recorded = 0
+    for ticker in config.tickers:
+        row = rows.get(ticker.tradingview)
+        if row is None:
+            continue
+        nxt = to_release_date(row.get(EARNINGS_NEXT_FIELD))
+        last = to_release_date(row.get(EARNINGS_LAST_FIELD))
+        store.upsert_earnings(
+            ticker.symbol,
+            nxt.isoformat() if nxt else None,
+            _release_stamp(row.get(EARNINGS_NEXT_FIELD)),
+            last.isoformat() if last else None,
+        )
+        recorded += 1
+    return recorded
+
+
+def _release_stamp(value) -> str | None:
+    """The release timestamp in full, which says before-open vs after-close."""
+    if not isinstance(value, (int, float)):
+        return None
+    return dt.datetime.fromtimestamp(value, dt.timezone.utc).isoformat(timespec="minutes")
+
+
 def _rescore_signals(
     store: Store, config: Config, symbol: str, price: float, fair_value: float
 ) -> int:
@@ -553,8 +711,18 @@ def _rescore_signals(
     return updated
 
 
+# How urgently a symbol wants a fair value. Lower sorts first, which is what a
+# capped session spends its pages on.
+_FRESH, _LIVE, _RECORDED = 0, 1, 2
+_URGENCY_LABEL = {
+    _FRESH: "just fired",
+    _LIVE: "live signal",
+    _RECORDED: "signal on file",
+}
+
+
 def _signalled_symbols(store: Store, config: Config) -> list[str]:
-    """Symbols whose fired signal is recent enough to still be on the dashboard.
+    """Symbols wanting a fair value, most actionable first.
 
     This is what makes scraping cheap. A fair value only changes anything when a
     pattern has fired — it's what upgrades a plain buy to a strong one. With
@@ -562,26 +730,72 @@ def _signalled_symbols(store: Store, config: Config) -> list[str]:
     gains nothing from being scraped, so don't fetch 35 subscriber pages to
     answer a question about three of them.
 
-    The chart-window rule is mirrored from `dashboard._collect`, so a signal
-    that's aged off the dashboard doesn't drag a scrape along with it.
+    The *order* matters as much as the membership once `--limit` caps a
+    session, and it is where this used to fall down. "Has a fired pattern in
+    the chart window" barely filters at all when every pattern fires: measured
+    on the live database it selected 131 of 153 tickers, while only 50 had a
+    signal actually live on a dashboard page. Nothing was wrong with scraping
+    the other 81 — a fair value is cached for a fortnight, so reading one early
+    often pays off later — but they were fetched in no particular order, so a
+    capped run could spend every page on stale candidates and never reach the
+    rocket that fired this morning.
+
+    So they are ranked rather than filtered, in three tiers:
+
+    * a pattern that *just* completed — the ones that become a strong buy today
+    * a pattern still live, so it is on the dashboard now
+    * a pattern on file inside the chart window — worth caching ahead
+
+    and within a tier, most recently completed first. Both directions count:
+    the same Morningstar number grades a sell against the mirrored rule.
     """
+    return [symbol for symbol, _, _ in _ranked_targets(store, config)]
+
+
+def _ranked_targets(store: Store, config: Config) -> list[tuple[str, int, str]]:
+    """(symbol, urgency, most recent completing cross), most urgent first."""
     window = config.dashboard.chart_days
-    out: list[str] = []
+    ranked: list[tuple[str, int, str]] = []
+
     for ticker in config.tickers:
-        # A signal on any horizon is reason enough to check the fair value --
-        # the same Morningstar number feeds all four gates.
+        best: tuple[int, str] | None = None
         for horizon in config.horizons:
             series = store.rsi_series(ticker.symbol, horizon.key)
             if not series:
                 continue
             chart_start = series[-window:][0].date
-            if any(
-                s.fired and s.up2_date >= chart_start
-                for s in store.all_signals(ticker.symbol, horizon.key)
-            ):
-                out.append(ticker.symbol)
-                break
-    return out
+            # Mirrors dashboard._collect: liveness is judged against the
+            # horizon's own lookback, not the global one.
+            liveness = replace(config.signal, window_days=horizon.window_days)
+            for signal in store.all_signals(ticker.symbol, horizon.key):
+                if not (signal.fired and signal.up2_date >= chart_start):
+                    continue
+                threshold = (
+                    config.rsi.threshold if signal.direction == BUY
+                    else config.rsi.overbought
+                )
+                if signal_is_fresh(signal, series, horizon):
+                    urgency = _FRESH
+                elif signal_is_live(signal, series, liveness, threshold):
+                    urgency = _LIVE
+                else:
+                    urgency = _RECORDED
+                # The most urgent signal on any horizon speaks for the ticker;
+                # within one tier, the one that completed most recently.
+                if best is None or urgency < best[0] or (
+                    urgency == best[0] and signal.up2_date > best[1]
+                ):
+                    best = (urgency, signal.up2_date)
+        if best is not None:
+            ranked.append((ticker.symbol, best[0], best[1]))
+
+    # Two stable passes, least significant first — cheaper to read than one key
+    # that has to invert a date to sort it descending. `ranked` starts in
+    # config order and both sorts are stable, so anything the ranking cannot
+    # separate stays in the order the watchlist lists it.
+    ranked.sort(key=lambda row: row[2], reverse=True)      # latest cross first
+    ranked.sort(key=lambda row: row[1])                    # urgency wins
+    return ranked
 
 
 # Morningstar analysts revise a fair value on earnings or a thesis change --
@@ -617,7 +831,13 @@ def _fresh_fair_values(config: Config, max_age_days: int) -> dict[str, int]:
 
 
 def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
-    """Work out which tickers `scrape` should visit."""
+    """Work out which tickers `scrape` should visit, most urgent first.
+
+    Named symbols keep the order they were typed in — that is an explicit
+    instruction, not a suggestion. Everything else comes back ranked, so
+    `--limit` cuts from the bottom rather than from wherever the config file
+    happened to list things.
+    """
     if args.symbols:
         wanted = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
         tickers = []
@@ -627,9 +847,26 @@ def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
             except KeyError as exc:
                 print(f"  ! {exc}")
         return tickers
-    if args.all:
-        return list(config.tickers)
-    return [config.ticker(s) for s in _signalled_symbols(store, config)]
+
+    ranked = [config.ticker(s) for s in _signalled_symbols(store, config)]
+    if not args.all:
+        return ranked
+    # --all still leads with the tickers a fair value would change something
+    # for; the rest follow in config order.
+    seen = {t.symbol for t in ranked}
+    return ranked + [t for t in config.tickers if t.symbol not in seen]
+
+
+def _cap_targets(tickers: list, args) -> tuple[list, list]:
+    """Split into (this session's pages, deferred to the next run).
+
+    Applied *after* the freshness filter so the budget counts pages actually
+    fetched, not candidates considered.
+    """
+    limit = getattr(args, "limit", None)
+    if not limit or limit >= len(tickers):
+        return tickers, []
+    return tickers[:limit], tickers[limit:]
 
 
 def _drop_recently_checked(config: Config, tickers: list, args) -> tuple[list, list]:
@@ -671,6 +908,125 @@ def _reference_prices(store: Store, tickers: list) -> dict[str, float]:
     return out
 
 
+def cmd_universe(config: Config, args) -> int:
+    """Propose tickers to add to the watchlist.
+
+    Prints config.yaml lines, ready to paste or to append with --write. It
+    never removes anything: the watchlist only grows, and a name that has since
+    left an index keeps its card and its history.
+    """
+    from .tradingview import discover_market
+    from .universe import as_yaml_line, parse_candidates, select
+
+    wanted_indexes = tuple(
+        i.strip() for i in (args.indexes or "").split(",") if i.strip()
+    )
+    existing = {t.symbol.upper() for t in config.tickers}
+
+    try:
+        rows = discover_market(
+            args.market,
+            min_market_cap=args.min_cap,
+            min_volume=args.min_volume,
+            limit=args.scan_limit,
+        )
+    except MarketDataError as exc:
+        print(f"  ! {exc}")
+        return 1
+
+    # What the watchlist already covers, by company rather than by symbol. One
+    # extra request, and it is what stops GOOG being proposed as a new company
+    # when GOOGL is already tracked.
+    try:
+        tracked = fetch_live_batch(
+            [t.tradingview for t in config.tickers], [],
+            extra_fields=("description",),
+        )
+        tracked_companies = {row.get("description") for row in tracked.values()}
+    except MarketDataError as exc:
+        print(f"  ! could not read the watchlist's company names ({exc}) — "
+              f"a second share class of something you already track may slip through")
+        tracked_companies = set()
+
+    candidates = parse_candidates(rows)
+    proposed = select(
+        candidates,
+        market=args.market,
+        indexes=wanted_indexes,
+        min_volume=args.min_volume,
+        exclude=existing,
+        exclude_companies=tracked_companies,
+    )
+    if args.limit:
+        proposed = proposed[:args.limit]
+
+    print(f"{args.market}: {len(rows)} listings scanned, "
+          f"{len(existing)} already on the watchlist, {len(proposed)} proposed")
+    if wanted_indexes:
+        print(f"  restricted to: {', '.join(wanted_indexes)}")
+    if not proposed:
+        print("\nNothing new to add.")
+        return 0
+
+    missing_slug = [c.symbol for c in proposed if not c.morningstar]
+    print()
+    for candidate in proposed:
+        print(as_yaml_line(candidate))
+
+    if missing_slug:
+        print(f"\n  ! no Morningstar slug for {', '.join(missing_slug)} — "
+              f"fill in the TODO by hand before scraping those.")
+
+    if not args.write:
+        print(f"\n({len(proposed)} lines above. --write appends them to "
+              f"{config_path_hint()}; review the diff before committing.)")
+        return 0
+
+    _append_tickers(proposed)
+    print(f"\nAppended {len(proposed)} ticker(s). Next:")
+    print("  git diff config.yaml")
+    print("  python -m screener.cli backfill      # seeds their history")
+    return 0
+
+
+def config_path_hint() -> str:
+    from .config import DEFAULT_CONFIG
+
+    return DEFAULT_CONFIG.name
+
+
+def _append_tickers(candidates) -> None:
+    """Insert new entries at the end of the `tickers:` block.
+
+    Text insertion rather than a YAML round-trip on purpose: config.yaml is
+    heavily commented -- sector headings, notes on individual names, the
+    reasoning behind the horizons -- and dumping it back through PyYAML would
+    erase all of it.
+    """
+    from .config import DEFAULT_CONFIG
+    from .universe import as_yaml_line
+
+    lines = DEFAULT_CONFIG.read_text().splitlines()
+    last = None
+    in_tickers = False
+    for i, line in enumerate(lines):
+        if line.startswith("tickers:"):
+            in_tickers = True
+            continue
+        if in_tickers:
+            if line.startswith("  - {"):
+                last = i
+            elif line and not line[0].isspace():
+                break
+    if last is None:
+        raise ValueError("could not find the tickers: block in config.yaml")
+
+    block = ["", "  # --- Added by `screener universe` ---"]
+    block += [as_yaml_line(c) for c in candidates]
+    lines[last + 1:last + 1] = block
+    DEFAULT_CONFIG.write_text("\n".join(lines) + "\n")
+
+
 def cmd_scrape(config: Config, args) -> int:
     """Read fair values off Morningstar and record them in the YAML file.
 
@@ -709,8 +1065,23 @@ def cmd_scrape(config: Config, args) -> int:
                 print("  Use --all to scrape every ticker anyway, or --symbols SYM,SYM.")
             return 0
 
+        targets, deferred = _cap_targets(targets, args)
+        if deferred:
+            print(f"Capped at {len(targets)} this session; "
+                  f"{len(deferred)} deferred to the next run.")
+            print(f"  Next up: {', '.join(t.symbol for t in deferred[:8])}"
+                  f"{' …' if len(deferred) > 8 else ''}")
+
         names = ", ".join(t.symbol for t in targets)
         print(f"Scraping {len(targets)} ticker(s): {names}")
+        if not args.symbols:
+            urgency = {s: u for s, u, _ in _ranked_targets(store, config)}
+            tally = Counter(urgency[t.symbol] for t in targets if t.symbol in urgency)
+            if tally:
+                print("  " + ", ".join(
+                    f"{count} {_URGENCY_LABEL[level]}"
+                    for level, count in sorted(tally.items())
+                ))
         if args.dry_run:
             print("\n(--dry-run: nothing fetched, nothing written)")
             return 0
@@ -857,6 +1228,11 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
     sent = 0
     for horizon in config.horizons:
         for row in _collect(store, config, horizon):
+            # A signal the page itself badges as un-actionable must not also
+            # ring someone's phone -- that is the one contradiction the warning
+            # could not survive.
+            if row.suspended:
+                continue
             fresh = [
                 s for s in row.buys
                 if s.fired
@@ -887,9 +1263,12 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # Both transports are optional and independent: a laptop run has
             # neither and simply prints, CI has the token and may have the
             # webhook too.
+            title = issue_title(row.symbol, discount, horizon)
+            if send_push(title, message, url):
+                print("  (pushed to phones)")
             if send_webhook(message):
                 print("  (sent to webhook)")
-            if send_github_issue(issue_title(row.symbol, discount, horizon), message, key):
+            if send_github_issue(title, message, key):
                 print("  (opened an issue — GitHub will email it)")
             ledger.record(key)
             sent += 1
@@ -1037,6 +1416,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="refetch even tickers that already have a full history",
     )
+    p_backfill.add_argument(
+        "--max-new", type=int, default=None, dest="max_new", metavar="N",
+        help="seed at most N never-seen tickers this run; the rest wait for the "
+             "next one (Yahoo is one request per ticker per horizon and cannot "
+             "be batched)",
+    )
     p_backfill.set_defaults(func=cmd_backfill)
 
     p_run = sub.add_parser("run", help="the daily job (RSI only by default)")
@@ -1055,6 +1440,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_fv.add_argument("--note", help="optional note, e.g. 'post-earnings cut'")
     p_fv.set_defaults(func=cmd_fair_value)
 
+    p_uni = sub.add_parser(
+        "universe", help="propose tickers to add to the watchlist"
+    )
+    p_uni.add_argument(
+        "--market", default="america",
+        help="TradingView's regional scanner: america, netherlands, uk, … (default: america)",
+    )
+    p_uni.add_argument(
+        "--indexes", default="S&P 500,NASDAQ 100",
+        help='comma-separated index names to require, e.g. "S&P 500,NASDAQ 100" '
+             'or "STOXX Europe 600". Empty means any listing that passes the filters.',
+    )
+    p_uni.add_argument(
+        "--min-cap", type=float, default=5e9, dest="min_cap",
+        help="minimum market capitalisation (default: 5e9)",
+    )
+    p_uni.add_argument(
+        "--min-volume", type=float, default=5e5, dest="min_volume",
+        help="minimum 10-day average volume, to exclude illiquid names (default: 5e5)",
+    )
+    p_uni.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help="propose at most N tickers (largest first)",
+    )
+    p_uni.add_argument(
+        "--scan-limit", type=int, default=1000, dest="scan_limit",
+        help="how many listings to pull from the scanner before filtering",
+    )
+    p_uni.add_argument(
+        "--write", action="store_true",
+        help="append the proposals to config.yaml instead of only printing them",
+    )
+    p_uni.set_defaults(func=cmd_universe)
+
     p_scrape = sub.add_parser(
         "scrape", help="read fair values off Morningstar (needs `login` first)"
     )
@@ -1062,6 +1481,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--all", action="store_true", help="every ticker, not just ones with a live signal"
     )
     p_scrape.add_argument("--symbols", help="explicit comma-separated list, e.g. IBM,NVDA")
+    p_scrape.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help="stop after N pages this session; the rest wait for the next run "
+             "(targets are ordered most actionable first)",
+    )
     p_scrape.add_argument(
         "--dry-run", action="store_true", help="list what would be scraped, fetch nothing"
     )

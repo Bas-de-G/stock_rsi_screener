@@ -25,13 +25,16 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **65 tickers** out of the box across four market groups you can switch
+Tracks **253 tickers** out of the box across five market groups you can switch
 between on the dashboard — **S&P 500**, **NASDAQ**, **Europe** (Amsterdam +
-London) and **Under $10**. A ticker can sit in more than one: Apple is both
-S&P 500 and Nasdaq-listed. Edit `config.yaml`
-to change the list. Every entry was checked against both data sources first,
-so none of them 404. Push a new ticker to `main` and the next scheduled run
-backfills its history automatically — nothing to run or push by hand.
+London), **Asia** and **Under $10**. A ticker can sit in more than one: Apple
+is both S&P 500 and Nasdaq-listed. Every entry was checked against both data
+sources first, so none of them 404. Push a new ticker to `main` and the next
+scheduled run backfills its history automatically — nothing to run or push by
+hand.
+
+`screener universe` proposes more from an index, deduplicated — see
+[Growing the watchlist](#growing-the-watchlist).
 
 Non-US listings work too, they just need their own identifiers:
 
@@ -95,9 +98,11 @@ All four are tunable in `config.yaml` under `horizons:`. Set every `margin` to
 > losses exactly as readily as gains, and 10x on an hourly signal is
 > aggressive by any standard. The dashboard carries the same caveat.
 
-Data collection runs **hourly on weekdays, 13:00–21:00 UTC**. That's what makes
-the intraday horizons meaningful — a once-a-day sample of an hourly RSI is up
-to 24 hours stale by the time you read it.
+Data collection runs **every 30 minutes on weekdays, 07:00–21:00 UTC**, plus two
+probes during the Hong Kong session. That's what makes the intraday horizons
+meaningful — a once-a-day sample of an hourly RSI is up to 24 hours stale by the
+time you read it. The window starts at the European open because the watchlist
+is no longer US-only.
 
 ---
 
@@ -128,6 +133,7 @@ decide how much conviction the dashboard shows:
 | **Strong buy 🚀** | Live pattern, **and** the fair value confirms, **and** nothing else known contradicts it |
 | **Buy signal** | Live pattern, but no fair value recorded — or one that disagrees |
 | **Strong sell 🔻** / **Sell signal** | The same two tiers on the overbought side |
+| **Suspended ⚠️** | A real pattern, but results are days away — see below |
 | **Pattern, gate failed** | Only in strict mode (below) |
 | Oversold / Near threshold / Neutral | No pattern; just where RSI sits now |
 
@@ -145,6 +151,30 @@ python -m screener.cli fair-value IBM 225
 
 If you'd rather nothing fired until a fair value confirms it, set
 `fire_without_valuation: false` in `config.yaml` for strict mode.
+
+### Earnings suspend a signal
+
+RSI cannot tell an ordinary correction from positioning ahead of results. Both
+look like a stock going oversold; only one is a technical setup. The other gaps
+on the release whatever the chart said.
+
+So from **three trading sessions before** a results date until a session has
+closed **after** it, the signal is suspended: the card stays, with an amber
+badge saying when results land, but it earns no rocket, cannot be the deal of
+the day, and sends no alert.
+
+> ⚠️ Earnings tomorrow — sell signal suspended
+
+Symmetrical, because an overbought stock gapping *down* on results is the same
+risk from the other side. The dates come from TradingView in the same request
+as the RSI, so this costs nothing. A ticker the feed has no date for is never
+suspended — refusing to signal on every stock whose calendar we can't see would
+quietly disable the screener.
+
+Three sessions rather than two because the count is in weekdays: real trading
+days only exist for the past, so a market holiday inside the window makes the
+release one session closer than the count says. Being a day early costs a
+deferred signal; being a day late means holding through the gap.
 
 ---
 
@@ -319,6 +349,43 @@ and stale valuations are cleared from the database on the next run.
 
 ---
 
+## Growing the watchlist
+
+```bash
+python -m screener.cli universe                      # propose S&P 500 / NASDAQ 100 names
+python -m screener.cli universe --limit 50 --write   # append the 50 largest to config.yaml
+python -m screener.cli universe --market netherlands --indexes "STOXX Europe 600"
+```
+
+It prints `config.yaml` lines and, with `--write`, appends them — leaving the
+file's comments intact, because a YAML round-trip would erase them. Review with
+`git diff config.yaml` before committing.
+
+**It only ever adds.** A ticker that has left an index keeps its entry, its
+history and its card. Dropping it would take its chart and its recorded
+patterns with it, and those are the record the screener gets judged against.
+
+Three kinds of duplicate get removed first, and all three are real:
+
+| | |
+|---|---|
+| the same company abroad | NVIDIA is also `MUN:NVD`, `EUROTLX:4NVDA`, `SIX:NVDA.USD` — Germany's scanner alone returns 15,079 "stocks", mostly foreign listings |
+| the same company's other share class | Alphabet is GOOGL *and* GOOG; the more traded one is kept |
+| not a share at all | `NASDAQ:GOOGN` is preferred stock reporting Alphabet's market cap against its own $48 price |
+
+Index membership and share class are read from TradingView's own `indexes` and
+`typespecs` fields rather than inferred, so a NYSE company outside the S&P 500
+isn't labelled as being in it.
+
+**Adding many at once is paced.** RSI is one batched request however long the
+list gets, but `backfill` is one Yahoo request per ticker *per horizon* and
+can't be batched — 100 new names is 400 requests. `backfill --max-new 25` (what
+CI runs) seeds 25 a run, so they arrive over a few runs instead of timing one
+out. Already-seeded tickers are untouched by the cap, and their intraday
+history is refreshed about once a day rather than every run.
+
+---
+
 ## Scraping fair values
 
 Set up once:
@@ -339,16 +406,34 @@ to `auth/morningstar_state.json` (gitignored) and reused for weeks.
 Then, whenever you want fair values refreshed:
 
 ```bash
-python -m screener.cli scrape              # only tickers with a live signal
+python -m screener.cli scrape              # tickers with a signal, most urgent first
+python -m screener.cli scrape --limit 40   # cap the session; the rest wait
 python -m screener.cli scrape --dry-run    # see what it would visit first
 python -m screener.cli scrape --push       # ...and commit + push the result
 ```
 
-**It only visits tickers with a live signal.** A fair value only changes
-anything when a pattern has fired — it's what upgrades a plain buy to a strong
-one. A ticker sitting at RSI 60 with no pattern gains nothing from being
-scraped, so a typical run fetches three or four pages instead of thirty-five.
-Use `--all` to override, or `--symbols IBM,NVDA` to check something specific.
+**It only visits tickers with a signal.** A fair value only changes anything
+when a pattern has fired — it's what upgrades a plain buy to a strong one. A
+ticker sitting at RSI 60 with no pattern gains nothing from being scraped. Use
+`--all` to override, or `--symbols IBM,NVDA` to check something specific.
+
+**And it visits them in order of how much they matter today**, which is what
+makes `--limit` safe. Three tiers:
+
+| | |
+|---|---|
+| **just fired** | becomes a strong buy today if the valuation confirms |
+| **live signal** | on a dashboard page right now |
+| **signal on file** | inside the chart window; worth reading ahead, since a value is cached 14 days |
+
+Within a tier, the most recently completed pattern leads. On the current
+watchlist that's 10 / 41 / 80 — so `--limit 40` covers every signal that just
+fired plus most of the live ones, and leaves the read-ahead work for the next
+session. Without the ordering a cap would spend its budget on whatever the
+config file happened to list first.
+
+With ~8s per page plus the pacing gap, budget roughly **13 seconds a ticker**:
+40 pages is about 9 minutes.
 
 Results are written to `fair_values.yaml`, the same file you'd edit by hand —
 so scraped and hand-checked values flow through identical code, and every
@@ -567,12 +652,30 @@ is 5 to 20 patterns a run and 251 the day new tickers are backfilled. And only
 while it's *fresh*, not merely live: a strong buy stays actionable for a
 fortnight on the daily chart, and announcing it for a fortnight is spam.
 
-**By email, with no credential anywhere.** The scheduled run opens a GitHub
+**On your phone**, for as many people as you like, with no app to build. Uses
+[ntfy](https://ntfy.sh) — free, no account, and adding someone is them
+installing an app and typing a topic name.
+
+1. Invent a long, unguessable topic name — `openssl rand -hex 12` is fine.
+2. Add it as the repository secret `SCREENER_NTFY_TOPIC`
+   (*Settings → Secrets and variables → Actions*).
+3. Everyone installs ntfy ([iOS](https://apps.apple.com/app/ntfy/id1625396347),
+   [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)),
+   taps **+**, and subscribes to that topic.
+
+Alerts arrive titled with the ticker and the discount, and tap through to the
+right dashboard page. Locally, put the same name in `.env` to test.
+
+> The topic name **is** the password — ntfy has no other access control, and on
+> a public repo an Actions secret is readable by anyone who can push a
+> workflow. Worst case is a stranger reading which stocks the screener likes.
+> To rotate: change the secret, re-subscribe in the app.
+
+**By email, with no credential anywhere.** The scheduled run also opens a GitHub
 issue; GitHub emails everyone watching the repository. Watch it with **Watch →
 Custom → Issues** and check email notifications are on in your GitHub settings.
 Nothing to configure in the repo — Actions injects its own token, scoped to
-this repository and expiring with the run, which matters because this repo is
-public and an Actions secret is readable by anyone who can push a workflow.
+this repository and expiring with the run.
 
 **By Slack or Discord**, optionally, with an incoming webhook in `.env`:
 
@@ -580,7 +683,8 @@ public and an Actions secret is readable by anyone who can push a workflow.
 SCREENER_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-Without either, everything still lands in SQLite, the CSVs, and stdout.
+The three are independent; set any, all, or none. Without any of them
+everything still lands in SQLite, the CSVs, and stdout.
 
 ### One signal, one email
 
@@ -600,6 +704,9 @@ deduplicated twice over:
   authoritative check, so even a lost ledger doesn't produce a second email.
   A closed issue counts as filed — reading and closing one is not a request to
   resend it.
+
+The dedupe sits above the transports, so the phone push and the webhook inherit
+it rather than each carrying their own copy.
 
 Only if the API can't be reached does it err towards sending: a repeat email is
 an annoyance, a missed strong buy defeats the point.
@@ -633,7 +740,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 406 tests
+python -m pytest tests/ -q      # 480 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

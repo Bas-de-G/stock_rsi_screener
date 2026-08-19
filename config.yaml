@@ -293,6 +293,108 @@ tickers:
   - {symbol: ABEV,  tradingview: "NYSE:ABEV",   morningstar: xnys/abev, markets: [penny]}
   - {symbol: KOS,   tradingview: "NYSE:KOS",    morningstar: xnys/kos,  markets: [penny]}
 
+  # --- Added by `screener universe` ---
+  - {symbol: SPCX, tradingview: "NASDAQ:SPCX", morningstar: xnas/spcx, markets: [nasdaq]}
+  - {symbol: MU, tradingview: "NASDAQ:MU", morningstar: xnas/mu, markets: [sp500, nasdaq]}
+  - {symbol: LRCX, tradingview: "NASDAQ:LRCX", morningstar: xnas/lrcx, markets: [sp500, nasdaq]}
+  - {symbol: PANW, tradingview: "NASDAQ:PANW", morningstar: xnas/panw, markets: [sp500, nasdaq]}
+  - {symbol: DELL, tradingview: "NYSE:DELL", morningstar: xnys/dell, markets: [sp500]}
+  - {symbol: GEV, tradingview: "NYSE:GEV", morningstar: xnys/gev, markets: [sp500]}
+  - {symbol: KLAC, tradingview: "NASDAQ:KLAC", morningstar: xnas/klac, markets: [sp500, nasdaq]}
+  - {symbol: ANET, tradingview: "NYSE:ANET", morningstar: xnys/anet, markets: [sp500]}
+  - {symbol: C, tradingview: "NYSE:C", morningstar: xnys/c, markets: [sp500]}
+  - {symbol: AMGN, tradingview: "NASDAQ:AMGN", morningstar: xnas/amgn, markets: [sp500, nasdaq]}
+  - {symbol: CRWD, tradingview: "NASDAQ:CRWD", morningstar: xnas/crwd, markets: [sp500, nasdaq]}
+  - {symbol: STX, tradingview: "NASDAQ:STX", morningstar: xnas/stx, markets: [sp500, nasdaq]}
+  - {symbol: APH, tradingview: "NYSE:APH", morningstar: xnys/aph, markets: [sp500]}
+  - {symbol: TMUS, tradingview: "NASDAQ:TMUS", morningstar: xnas/tmus, markets: [sp500, nasdaq]}
+  - {symbol: SCHW, tradingview: "NYSE:SCHW", morningstar: xnys/schw, markets: [sp500]}
+  - {symbol: MRVL, tradingview: "NASDAQ:MRVL", morningstar: xnas/mrvl, markets: [sp500, nasdaq]}
+  - {symbol: SHOP, tradingview: "NASDAQ:SHOP", morningstar: xnas/shop, markets: [nasdaq]}
+  - {symbol: BLK, tradingview: "NYSE:BLK", morningstar: xnys/blk, markets: [sp500]}
+  - {symbol: ADI, tradingview: "NASDAQ:ADI", morningstar: xnas/adi, markets: [sp500, nasdaq]}
+  - {symbol: WDC, tradingview: "NASDAQ:WDC", morningstar: xnas/wdc, markets: [sp500, nasdaq]}
+  - {symbol: GILD, tradingview: "NASDAQ:GILD", morningstar: xnas/gild, markets: [sp500, nasdaq]}
+  - {symbol: BX, tradingview: "NYSE:BX", morningstar: xnys/bx, markets: [sp500]}
+  - {symbol: WELL, tradingview: "NYSE:WELL", morningstar: xnys/well, markets: [sp500]}
+  - {symbol: ETN, tradingview: "NYSE:ETN", morningstar: xnys/etn, markets: [sp500]}
+  - {symbol: TJX, tradingview: "NYSE:TJX", morningstar: xnys/tjx, markets: [sp500]}
+  - {symbol: BKNG, tradingview: "NASDAQ:BKNG", morningstar: xnas/bkng, markets: [sp500, nasdaq]}
+  - {symbol: IBKR, tradingview: "NASDAQ:IBKR", morningstar: xnas/ibkr, markets: [sp500, nasdaq]}
+  - {symbol: DHR, tradingview: "NYSE:DHR", morningstar: xnys/dhr, markets: [sp500]}
+  - {symbol: ISRG, tradingview: "NASDAQ:ISRG", morningstar: xnas/isrg, markets: [sp500, nasdaq]}
+  - {symbol: GLW, tradingview: "NYSE:GLW", morningstar: xnys/glw, markets: [sp500]}
+  - {symbol: COF, tradingview: "NYSE:COF", morningstar: xnys/cof, markets: [sp500]}
+  - {symbol: BMY, tradingview: "NYSE:BMY", morningstar: xnys/bmy, markets: [sp500]}
+  - {symbol: VRTX, tradingview: "NASDAQ:VRTX", morningstar: xnas/vrtx, markets: [sp500, nasdaq]}
+  - {symbol: CB, tradingview: "NYSE:CB", morningstar: xnys/cb, markets: [sp500]}
+  - {symbol: PH, tradingview: "NYSE:PH", morningstar: xnys/ph, markets: [sp500]}
+  - {symbol: SYK, tradingview: "NYSE:SYK", morningstar: xnys/syk, markets: [sp500]}
+  - {symbol: NOW, tradingview: "NYSE:NOW", morningstar: xnys/now, markets: [sp500]}
+  - {symbol: SPGI, tradingview: "NYSE:SPGI", morningstar: xnys/spgi, markets: [sp500]}
+  - {symbol: NEM, tradingview: "NYSE:NEM", morningstar: xnys/nem, markets: [sp500]}
+  - {symbol: CVS, tradingview: "NYSE:CVS", morningstar: xnys/cvs, markets: [sp500]}
+  - {symbol: SBUX, tradingview: "NASDAQ:SBUX", morningstar: xnas/sbux, markets: [sp500, nasdaq]}
+  - {symbol: PGR, tradingview: "NYSE:PGR", morningstar: xnys/pgr, markets: [sp500]}
+  - {symbol: MDT, tradingview: "NYSE:MDT", morningstar: xnys/mdt, markets: [sp500]}
+  - {symbol: HWM, tradingview: "NYSE:HWM", morningstar: xnys/hwm, markets: [sp500]}
+  - {symbol: FTNT, tradingview: "NASDAQ:FTNT", morningstar: xnas/ftnt, markets: [sp500, nasdaq]}
+  - {symbol: BNY, tradingview: "NYSE:BNY", morningstar: xnys/bny, markets: [sp500]}
+  - {symbol: ABNB, tradingview: "NASDAQ:ABNB", morningstar: xnas/abnb, markets: [sp500, nasdaq]}
+  - {symbol: ADP, tradingview: "NASDAQ:ADP", morningstar: xnas/adp, markets: [sp500, nasdaq]}
+  - {symbol: EQIX, tradingview: "NASDAQ:EQIX", morningstar: xnas/eqix, markets: [sp500, nasdaq]}
+  - {symbol: GD, tradingview: "NYSE:GD", morningstar: xnys/gd, markets: [sp500]}
+  - {symbol: ACN, tradingview: "NYSE:ACN", morningstar: xnys/acn, markets: [sp500]}
+  - {symbol: VRT, tradingview: "NYSE:VRT", morningstar: xnys/vrt, markets: [sp500]}
+  - {symbol: PWR, tradingview: "NYSE:PWR", morningstar: xnys/pwr, markets: [sp500]}
+  - {symbol: MPC, tradingview: "NYSE:MPC", morningstar: xnys/mpc, markets: [sp500]}
+  - {symbol: APP, tradingview: "NASDAQ:APP", morningstar: xnas/app, markets: [sp500, nasdaq]}
+  - {symbol: TT, tradingview: "NYSE:TT", morningstar: xnys/tt, markets: [sp500]}
+  - {symbol: PNC, tradingview: "NYSE:PNC", morningstar: xnys/pnc, markets: [sp500]}
+  - {symbol: MCK, tradingview: "NYSE:MCK", morningstar: xnys/mck, markets: [sp500]}
+  - {symbol: USB, tradingview: "NYSE:USB", morningstar: xnys/usb, markets: [sp500]}
+  - {symbol: VLO, tradingview: "NYSE:VLO", morningstar: xnys/vlo, markets: [sp500]}
+  - {symbol: CME, tradingview: "NASDAQ:CME", morningstar: xnas/cme, markets: [sp500, nasdaq]}
+  - {symbol: PSX, tradingview: "NYSE:PSX", morningstar: xnys/psx, markets: [sp500]}
+  - {symbol: KKR, tradingview: "NYSE:KKR", morningstar: xnys/kkr, markets: [sp500]}
+  - {symbol: INTU, tradingview: "NASDAQ:INTU", morningstar: xnas/intu, markets: [sp500, nasdaq]}
+  - {symbol: CEG, tradingview: "NASDAQ:CEG", morningstar: xnas/ceg, markets: [sp500, nasdaq]}
+  - {symbol: DASH, tradingview: "NASDAQ:DASH", morningstar: xnas/dash, markets: [sp500, nasdaq]}
+  - {symbol: MMM, tradingview: "NYSE:MMM", morningstar: xnys/mmm, markets: [sp500]}
+  - {symbol: MAR, tradingview: "NASDAQ:MAR", morningstar: xnas/mar, markets: [sp500, nasdaq]}
+  - {symbol: CSX, tradingview: "NASDAQ:CSX", morningstar: xnas/csx, markets: [sp500, nasdaq]}
+  - {symbol: CMCSA, tradingview: "NASDAQ:CMCSA", morningstar: xnas/cmcsa, markets: [sp500, nasdaq]}
+  - {symbol: MNST, tradingview: "NASDAQ:MNST", morningstar: xnas/mnst, markets: [sp500, nasdaq]}
+  - {symbol: WMB, tradingview: "NYSE:WMB", morningstar: xnys/wmb, markets: [sp500]}
+  - {symbol: JCI, tradingview: "NYSE:JCI", morningstar: xnys/jci, markets: [sp500]}
+  - {symbol: MELI, tradingview: "NASDAQ:MELI", morningstar: xnas/meli, markets: [nasdaq]}
+  - {symbol: WM, tradingview: "NYSE:WM", morningstar: xnys/wm, markets: [sp500]}
+  - {symbol: HCA, tradingview: "NYSE:HCA", morningstar: xnys/hca, markets: [sp500]}
+  - {symbol: MRSH, tradingview: "NYSE:MRSH", morningstar: xnys/mrsh, markets: [sp500]}
+  - {symbol: EMR, tradingview: "NYSE:EMR", morningstar: xnys/emr, markets: [sp500]}
+  - {symbol: ICE, tradingview: "NYSE:ICE", morningstar: xnys/ice, markets: [sp500]}
+  - {symbol: CDNS, tradingview: "NASDAQ:CDNS", morningstar: xnas/cdns, markets: [sp500, nasdaq]}
+  - {symbol: ELV, tradingview: "NYSE:ELV", morningstar: xnys/elv, markets: [sp500]}
+  - {symbol: CMI, tradingview: "NYSE:CMI", morningstar: xnys/cmi, markets: [sp500]}
+  - {symbol: MCO, tradingview: "NYSE:MCO", morningstar: xnys/mco, markets: [sp500]}
+  - {symbol: NOC, tradingview: "NYSE:NOC", morningstar: xnys/noc, markets: [sp500]}
+  - {symbol: REGN, tradingview: "NASDAQ:REGN", morningstar: xnas/regn, markets: [sp500, nasdaq]}
+  - {symbol: HOOD, tradingview: "NASDAQ:HOOD", morningstar: xnas/hood, markets: [sp500, nasdaq]}
+  - {symbol: ITW, tradingview: "NYSE:ITW", morningstar: xnys/itw, markets: [sp500]}
+  - {symbol: RCL, tradingview: "NYSE:RCL", morningstar: xnys/rcl, markets: [sp500]}
+  - {symbol: MDLZ, tradingview: "NASDAQ:MDLZ", morningstar: xnas/mdlz, markets: [sp500, nasdaq]}
+  - {symbol: CTAS, tradingview: "NASDAQ:CTAS", morningstar: xnas/ctas, markets: [sp500, nasdaq]}
+  - {symbol: APO, tradingview: "NYSE:APO", morningstar: xnys/apo, markets: [sp500]}
+  - {symbol: ECL, tradingview: "NYSE:ECL", morningstar: xnys/ecl, markets: [sp500]}
+  - {symbol: LITE, tradingview: "NASDAQ:LITE", morningstar: xnas/lite, markets: [sp500, nasdaq]}
+  - {symbol: EOG, tradingview: "NYSE:EOG", morningstar: xnys/eog, markets: [sp500]}
+  - {symbol: MSI, tradingview: "NYSE:MSI", morningstar: xnys/msi, markets: [sp500]}
+  - {symbol: FDX, tradingview: "NYSE:FDX", morningstar: xnys/fdx, markets: [sp500]}
+  - {symbol: SNPS, tradingview: "NASDAQ:SNPS", morningstar: xnas/snps, markets: [sp500, nasdaq]}
+  - {symbol: TRV, tradingview: "NYSE:TRV", morningstar: xnys/trv, markets: [sp500]}
+  - {symbol: NSC, tradingview: "NYSE:NSC", morningstar: xnys/nsc, markets: [sp500]}
+  - {symbol: ROST, tradingview: "NASDAQ:ROST", morningstar: xnas/rost, markets: [sp500, nasdaq]}
+
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView
 # and Yahoo actually accept -- but these three are:

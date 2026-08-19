@@ -89,7 +89,24 @@ CREATE TABLE IF NOT EXISTS signals (
 # strong buys. It now lives in `screener.notified`, in a small file committed
 # on every run. Older copies of the database still carry the dead table.
 
-SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL
+# When each company next reports, and when it last did. One row per symbol,
+# overwritten every run from the same TradingView batch request that fetches
+# RSI -- the dates are columns on that response, so this costs nothing extra.
+#
+# Not part of rsi_history despite arriving with it: a release date is a fact
+# about the company on a calendar, not a reading taken at a bar, and keeping it
+# per-bar would store the same date thousands of times over.
+_EARNINGS_DDL = """
+CREATE TABLE IF NOT EXISTS earnings_calendar (
+    symbol       TEXT PRIMARY KEY,
+    next_date    TEXT,   -- ISO date of the next release, if the feed has one
+    next_at      TEXT,   -- full timestamp, which says before-open vs after-close
+    last_date    TEXT,   -- ISO date of the most recent release
+    updated_at   TEXT NOT NULL
+);
+"""
+
+SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL + _EARNINGS_DDL
 
 
 
@@ -441,6 +458,32 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute("SELECT DISTINCT symbol FROM valuations WHERE source='manual'")
             return [r["symbol"] for r in cur.fetchall()]
+
+    def upsert_earnings(
+        self, symbol: str, next_date: str | None, next_at: str | None, last_date: str | None
+    ) -> None:
+        """Record when a company next reports. One row per symbol, overwritten."""
+        import datetime as _dt
+
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """INSERT INTO earnings_calendar (symbol, next_date, next_at, last_date, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol) DO UPDATE SET
+                       next_date=excluded.next_date,
+                       next_at=excluded.next_at,
+                       last_date=excluded.last_date,
+                       updated_at=excluded.updated_at""",
+                (symbol, next_date, next_at, last_date,
+                 _dt.datetime.now().isoformat(timespec="seconds")),
+            )
+        self._conn.commit()
+
+    def earnings_dates(self) -> dict[str, tuple[str | None, str | None]]:
+        """Every symbol's (next, last) release date, as ISO strings."""
+        with closing(self._conn.cursor()) as cur:
+            cur.execute("SELECT symbol, next_date, last_date FROM earnings_calendar")
+            return {r["symbol"]: (r["next_date"], r["last_date"]) for r in cur.fetchall()}
 
     def delete_manual_valuations(self, symbol: str) -> None:
         """Drop hand-entered valuations for a symbol.

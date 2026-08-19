@@ -126,7 +126,13 @@ jobs:
       # trickling in one live row a day for months.
       - name: Backfill any tickers missing history
         # No --range: each horizon has its own depth (5y weekly, 730d hourly).
-        run: python -m screener.cli backfill
+        #
+        # --max-new caps how many never-seen tickers get seeded in one run.
+        # Yahoo is one request per ticker per horizon and cannot be batched the
+        # way TradingView's RSI can, so adding a hundred names at once is 400
+        # requests; at 25 a run they arrive over four runs instead of timing
+        # one out. Everything already seeded is untouched by the cap.
+        run: python -m screener.cli backfill --max-new 25
 
       - name: Run screener
         run: python -m screener.cli run
@@ -141,6 +147,13 @@ jobs:
         run: python -m screener.cli dashboard --output site/index.html
         env:
           SCREENER_WEBHOOK_URL: ${{ secrets.SCREENER_WEBHOOK_URL }}
+          # The ntfy topic everyone's phone subscribes to. Same caveat as the
+          # webhook above -- on a public repo this is readable by anyone who
+          # can push a workflow, and with ntfy the topic name is the only
+          # access control there is. Worst case is a stranger reading which
+          # stocks the screener likes; rotate by changing it here and
+          # re-subscribing in the app.
+          SCREENER_NTFY_TOPIC: ${{ secrets.SCREENER_NTFY_TOPIC }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Collected data belongs on the default branch only. Guarded rather
