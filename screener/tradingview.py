@@ -235,6 +235,66 @@ def _pick_earnings_growth(data: dict) -> tuple[float | None, str | None]:
     return None, None
 
 
+# What the screener needs to judge a candidate for the watchlist. `typespecs`
+# and `indexes` are the two that do the real work: the first separates a
+# company's ordinary shares from its preferred and depositary lines, the second
+# is actual index membership rather than a market-cap guess at it.
+DISCOVERY_COLUMNS = (
+    "name", "description", "close", "currency", "market_cap_basic",
+    "average_volume_10d_calc", "type", "typespecs", "indexes", "sector",
+)
+
+
+def discover_market(
+    market: str,
+    min_market_cap: float = 0.0,
+    min_volume: float = 0.0,
+    limit: int = 1000,
+) -> list[dict]:
+    """List the tradeable stocks on one market, largest first.
+
+    `market` is the scanner's own regional path -- "america", "netherlands",
+    "germany" and so on. Returns one dict per listing, keyed by
+    DISCOVERY_COLUMNS plus "symbol" (the exchange-prefixed TradingView name).
+
+    Size and liquidity are filtered server-side because they cut the response
+    hard: the American market alone has thousands of listings, and only a few
+    hundred are things anyone would trade.
+    """
+    filters = [{"left": "type", "operation": "equal", "right": "stock"}]
+    if min_market_cap:
+        filters.append(
+            {"left": "market_cap_basic", "operation": "egreater", "right": min_market_cap}
+        )
+    if min_volume:
+        filters.append(
+            {"left": "average_volume_10d_calc", "operation": "egreater", "right": min_volume}
+        )
+    try:
+        resp = requests.post(
+            f"https://scanner.tradingview.com/{market}/scan",
+            json={
+                "filter": filters,
+                "columns": list(DISCOVERY_COLUMNS),
+                "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
+                "range": [0, limit],
+            },
+            headers={**_HEADERS, "Content-Type": "application/json"},
+            timeout=_TIMEOUT * 3,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise MarketDataError(f"TradingView discovery failed for {market}: {exc}") from exc
+
+    out = []
+    for row in payload.get("data", []) or []:
+        record = dict(zip(DISCOVERY_COLUMNS, row.get("d", [])))
+        record["symbol"] = row.get("s", "")
+        out.append(record)
+    return out
+
+
 def fetch_daily_closes(
     yahoo_symbol: str, range_: str = "1y", interval: str = "1d"
 ) -> list[tuple[str, float]]:

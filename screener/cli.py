@@ -98,6 +98,63 @@ def cmd_login(config: Config, args) -> int:
     return 0
 
 
+# How stale a horizon's Yahoo bars may get before they are pulled again. The
+# batch scan writes live 1h and 4h rows every half hour in between, so a
+# refresh is only topping up the true bar closes behind them -- and repairing
+# whatever a missed run left as a gap, which is the reason to keep doing it at
+# all. Measured against the newest bar rather than a stored timestamp, which
+# makes it land roughly once a day per horizon without any bookkeeping.
+INTRADAY_REFRESH_AFTER = dt.timedelta(hours=20)
+
+
+def _refreshed_today(series) -> bool:
+    """Whether Yahoo history for this horizon was pulled recently enough.
+
+    Only backfilled rows count. The live rows in between come from the batch
+    scan and say nothing about when Yahoo was last asked.
+    """
+    stamps = [p.date for p in series if p.source.startswith("backfill")]
+    if not stamps:
+        return False
+    try:
+        newest = dt.datetime.fromisoformat(max(stamps))
+    except ValueError:
+        return False
+    return (dt.datetime.now() - newest) < INTRADAY_REFRESH_AFTER
+
+
+def _new_tickers(store: Store, config: Config) -> list[str]:
+    """Tickers with no history at all — the ones seeding is expensive for.
+
+    Deliberately "nothing anywhere" rather than "short on this horizon". A
+    ticker can be fully seeded daily and thin weekly simply by being a recent
+    listing: BSP has 257 daily bars and not yet fifteen weekly ones. That is
+    one cheap request that fills itself as bars accumulate, and capping it
+    would defer it every run forever.
+    """
+    return [
+        t.symbol for t in config.tickers
+        if not store.rsi_series(t.symbol, DEFAULT_HORIZON)
+    ]
+
+
+def _new_ticker_budget(store: Store, config: Config, args) -> set[str]:
+    """Which never-seen tickers get their history this run.
+
+    Config order, so a batch added together arrives together rather than
+    alphabetically interleaved. Returns every new ticker when uncapped.
+    """
+    new = _new_tickers(store, config)
+    limit = getattr(args, "max_new", None)
+    if not limit or limit >= len(new):
+        if new:
+            print(f"Seeding {len(new)} new ticker(s): {', '.join(new)}")
+        return set(new)
+    print(f"{len(new)} new ticker(s) to seed; taking {limit} this run, "
+          f"{len(new) - limit} deferred.")
+    return set(new[:limit])
+
+
 def cmd_backfill(config: Config, args) -> int:
     """Seed RSI history from daily closes so signals work immediately.
 
@@ -111,20 +168,41 @@ def cmd_backfill(config: Config, args) -> int:
     to config.yaml after that first run (SanDisk, say) would never get
     backfilled by CI and would trickle in one live row a day instead. Making
     this idempotent and calling it every run lets a new ticker backfill itself.
+
+    Two things keep it affordable as the watchlist grows, because unlike RSI
+    this is one Yahoo request per ticker per horizon and cannot be batched:
+
+    * Seeding a *new* ticker is capped per run (--max-new). Adding a hundred
+      names then spreads over a few runs instead of timing one out.
+    * Seeded intraday history is refreshed once a day rather than every run.
+      It used to refetch on every run -- 153 x 2 = 306 requests, most of the
+      job's wall time -- which was worth it when a run was the only thing
+      writing intraday rows. It no longer is: the batch scan lays down live
+      1h and 4h rows every half hour, and the daily refresh backfills the true
+      bar closes behind them.
     """
     horizons = _selected_horizons(config, args)
     with Store(config.storage.database) as store:
+        # Only ever holds back tickers we have never seen at all. A known
+        # ticker that is thin on one horizon still refetches: that is a single
+        # request, and it is how a recent listing's weekly history fills in.
+        deferred = set(_new_tickers(store, config)) - _new_ticker_budget(store, config, args)
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
             for ticker in config.tickers:
                 existing = store.rsi_series(ticker.symbol, horizon.key)
-                # Intraday bars go stale between runs in a way daily ones don't:
-                # a full 1h history collected yesterday is missing every bar
-                # since. Always refetch those; the upsert dedupes.
                 seeded = len(existing) >= config.dashboard.chart_days
-                if seeded and not horizon.intraday and not args.force:
-                    print(f"  {ticker.symbol}: {len(existing)} bars already — skip (--force to refetch)")
-                    continue
+                if not args.force:
+                    if ticker.symbol in deferred:
+                        print(f"  {ticker.symbol}: new — deferred to a later run "
+                              f"(--max-new is {args.max_new})")
+                        continue
+                    if seeded and not horizon.intraday:
+                        print(f"  {ticker.symbol}: {len(existing)} bars already — skip (--force to refetch)")
+                        continue
+                    if seeded and _refreshed_today(existing):
+                        print(f"  {ticker.symbol}: intraday history refreshed today — skip")
+                        continue
 
                 # Each horizon has its own sensible depth (5y of weekly bars,
                 # but only 730d of hourly -- Yahoo's intraday ceiling).
@@ -830,6 +908,125 @@ def _reference_prices(store: Store, tickers: list) -> dict[str, float]:
     return out
 
 
+def cmd_universe(config: Config, args) -> int:
+    """Propose tickers to add to the watchlist.
+
+    Prints config.yaml lines, ready to paste or to append with --write. It
+    never removes anything: the watchlist only grows, and a name that has since
+    left an index keeps its card and its history.
+    """
+    from .tradingview import discover_market
+    from .universe import as_yaml_line, parse_candidates, select
+
+    wanted_indexes = tuple(
+        i.strip() for i in (args.indexes or "").split(",") if i.strip()
+    )
+    existing = {t.symbol.upper() for t in config.tickers}
+
+    try:
+        rows = discover_market(
+            args.market,
+            min_market_cap=args.min_cap,
+            min_volume=args.min_volume,
+            limit=args.scan_limit,
+        )
+    except MarketDataError as exc:
+        print(f"  ! {exc}")
+        return 1
+
+    # What the watchlist already covers, by company rather than by symbol. One
+    # extra request, and it is what stops GOOG being proposed as a new company
+    # when GOOGL is already tracked.
+    try:
+        tracked = fetch_live_batch(
+            [t.tradingview for t in config.tickers], [],
+            extra_fields=("description",),
+        )
+        tracked_companies = {row.get("description") for row in tracked.values()}
+    except MarketDataError as exc:
+        print(f"  ! could not read the watchlist's company names ({exc}) — "
+              f"a second share class of something you already track may slip through")
+        tracked_companies = set()
+
+    candidates = parse_candidates(rows)
+    proposed = select(
+        candidates,
+        market=args.market,
+        indexes=wanted_indexes,
+        min_volume=args.min_volume,
+        exclude=existing,
+        exclude_companies=tracked_companies,
+    )
+    if args.limit:
+        proposed = proposed[:args.limit]
+
+    print(f"{args.market}: {len(rows)} listings scanned, "
+          f"{len(existing)} already on the watchlist, {len(proposed)} proposed")
+    if wanted_indexes:
+        print(f"  restricted to: {', '.join(wanted_indexes)}")
+    if not proposed:
+        print("\nNothing new to add.")
+        return 0
+
+    missing_slug = [c.symbol for c in proposed if not c.morningstar]
+    print()
+    for candidate in proposed:
+        print(as_yaml_line(candidate))
+
+    if missing_slug:
+        print(f"\n  ! no Morningstar slug for {', '.join(missing_slug)} — "
+              f"fill in the TODO by hand before scraping those.")
+
+    if not args.write:
+        print(f"\n({len(proposed)} lines above. --write appends them to "
+              f"{config_path_hint()}; review the diff before committing.)")
+        return 0
+
+    _append_tickers(proposed)
+    print(f"\nAppended {len(proposed)} ticker(s). Next:")
+    print("  git diff config.yaml")
+    print("  python -m screener.cli backfill      # seeds their history")
+    return 0
+
+
+def config_path_hint() -> str:
+    from .config import DEFAULT_CONFIG
+
+    return DEFAULT_CONFIG.name
+
+
+def _append_tickers(candidates) -> None:
+    """Insert new entries at the end of the `tickers:` block.
+
+    Text insertion rather than a YAML round-trip on purpose: config.yaml is
+    heavily commented -- sector headings, notes on individual names, the
+    reasoning behind the horizons -- and dumping it back through PyYAML would
+    erase all of it.
+    """
+    from .config import DEFAULT_CONFIG
+    from .universe import as_yaml_line
+
+    lines = DEFAULT_CONFIG.read_text().splitlines()
+    last = None
+    in_tickers = False
+    for i, line in enumerate(lines):
+        if line.startswith("tickers:"):
+            in_tickers = True
+            continue
+        if in_tickers:
+            if line.startswith("  - {"):
+                last = i
+            elif line and not line[0].isspace():
+                break
+    if last is None:
+        raise ValueError("could not find the tickers: block in config.yaml")
+
+    block = ["", "  # --- Added by `screener universe` ---"]
+    block += [as_yaml_line(c) for c in candidates]
+    lines[last + 1:last + 1] = block
+    DEFAULT_CONFIG.write_text("\n".join(lines) + "\n")
+
+
 def cmd_scrape(config: Config, args) -> int:
     """Read fair values off Morningstar and record them in the YAML file.
 
@@ -1219,6 +1416,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="refetch even tickers that already have a full history",
     )
+    p_backfill.add_argument(
+        "--max-new", type=int, default=None, dest="max_new", metavar="N",
+        help="seed at most N never-seen tickers this run; the rest wait for the "
+             "next one (Yahoo is one request per ticker per horizon and cannot "
+             "be batched)",
+    )
     p_backfill.set_defaults(func=cmd_backfill)
 
     p_run = sub.add_parser("run", help="the daily job (RSI only by default)")
@@ -1236,6 +1439,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_fv.add_argument("--date", help="date to record it against (default: today)")
     p_fv.add_argument("--note", help="optional note, e.g. 'post-earnings cut'")
     p_fv.set_defaults(func=cmd_fair_value)
+
+    p_uni = sub.add_parser(
+        "universe", help="propose tickers to add to the watchlist"
+    )
+    p_uni.add_argument(
+        "--market", default="america",
+        help="TradingView's regional scanner: america, netherlands, uk, … (default: america)",
+    )
+    p_uni.add_argument(
+        "--indexes", default="S&P 500,NASDAQ 100",
+        help='comma-separated index names to require, e.g. "S&P 500,NASDAQ 100" '
+             'or "STOXX Europe 600". Empty means any listing that passes the filters.',
+    )
+    p_uni.add_argument(
+        "--min-cap", type=float, default=5e9, dest="min_cap",
+        help="minimum market capitalisation (default: 5e9)",
+    )
+    p_uni.add_argument(
+        "--min-volume", type=float, default=5e5, dest="min_volume",
+        help="minimum 10-day average volume, to exclude illiquid names (default: 5e5)",
+    )
+    p_uni.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help="propose at most N tickers (largest first)",
+    )
+    p_uni.add_argument(
+        "--scan-limit", type=int, default=1000, dest="scan_limit",
+        help="how many listings to pull from the scanner before filtering",
+    )
+    p_uni.add_argument(
+        "--write", action="store_true",
+        help="append the proposals to config.yaml instead of only printing them",
+    )
+    p_uni.set_defaults(func=cmd_universe)
 
     p_scrape = sub.add_parser(
         "scrape", help="read fair values off Morningstar (needs `login` first)"

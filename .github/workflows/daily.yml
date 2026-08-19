@@ -126,7 +126,13 @@ jobs:
       # trickling in one live row a day for months.
       - name: Backfill any tickers missing history
         # No --range: each horizon has its own depth (5y weekly, 730d hourly).
-        run: python -m screener.cli backfill
+        #
+        # --max-new caps how many never-seen tickers get seeded in one run.
+        # Yahoo is one request per ticker per horizon and cannot be batched the
+        # way TradingView's RSI can, so adding a hundred names at once is 400
+        # requests; at 25 a run they arrive over four runs instead of timing
+        # one out. Everything already seeded is untouched by the cap.
+        run: python -m screener.cli backfill --max-new 25
 
       - name: Run screener
         run: python -m screener.cli run

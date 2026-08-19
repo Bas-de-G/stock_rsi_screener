@@ -25,13 +25,16 @@ Data comes from two places:
 | Price and fair value | Morningstar | **yes** — subscriber-only, so v1 checks it by hand |
 | Historical closes (for backfill) | Yahoo Finance | no |
 
-Tracks **65 tickers** out of the box across four market groups you can switch
+Tracks **253 tickers** out of the box across five market groups you can switch
 between on the dashboard — **S&P 500**, **NASDAQ**, **Europe** (Amsterdam +
-London) and **Under $10**. A ticker can sit in more than one: Apple is both
-S&P 500 and Nasdaq-listed. Edit `config.yaml`
-to change the list. Every entry was checked against both data sources first,
-so none of them 404. Push a new ticker to `main` and the next scheduled run
-backfills its history automatically — nothing to run or push by hand.
+London), **Asia** and **Under $10**. A ticker can sit in more than one: Apple
+is both S&P 500 and Nasdaq-listed. Every entry was checked against both data
+sources first, so none of them 404. Push a new ticker to `main` and the next
+scheduled run backfills its history automatically — nothing to run or push by
+hand.
+
+`screener universe` proposes more from an index, deduplicated — see
+[Growing the watchlist](#growing-the-watchlist).
 
 Non-US listings work too, they just need their own identifiers:
 
@@ -95,9 +98,11 @@ All four are tunable in `config.yaml` under `horizons:`. Set every `margin` to
 > losses exactly as readily as gains, and 10x on an hourly signal is
 > aggressive by any standard. The dashboard carries the same caveat.
 
-Data collection runs **hourly on weekdays, 13:00–21:00 UTC**. That's what makes
-the intraday horizons meaningful — a once-a-day sample of an hourly RSI is up
-to 24 hours stale by the time you read it.
+Data collection runs **every 30 minutes on weekdays, 07:00–21:00 UTC**, plus two
+probes during the Hong Kong session. That's what makes the intraday horizons
+meaningful — a once-a-day sample of an hourly RSI is up to 24 hours stale by the
+time you read it. The window starts at the European open because the watchlist
+is no longer US-only.
 
 ---
 
@@ -128,6 +133,7 @@ decide how much conviction the dashboard shows:
 | **Strong buy 🚀** | Live pattern, **and** the fair value confirms, **and** nothing else known contradicts it |
 | **Buy signal** | Live pattern, but no fair value recorded — or one that disagrees |
 | **Strong sell 🔻** / **Sell signal** | The same two tiers on the overbought side |
+| **Suspended ⚠️** | A real pattern, but results are days away — see below |
 | **Pattern, gate failed** | Only in strict mode (below) |
 | Oversold / Near threshold / Neutral | No pattern; just where RSI sits now |
 
@@ -145,6 +151,30 @@ python -m screener.cli fair-value IBM 225
 
 If you'd rather nothing fired until a fair value confirms it, set
 `fire_without_valuation: false` in `config.yaml` for strict mode.
+
+### Earnings suspend a signal
+
+RSI cannot tell an ordinary correction from positioning ahead of results. Both
+look like a stock going oversold; only one is a technical setup. The other gaps
+on the release whatever the chart said.
+
+So from **three trading sessions before** a results date until a session has
+closed **after** it, the signal is suspended: the card stays, with an amber
+badge saying when results land, but it earns no rocket, cannot be the deal of
+the day, and sends no alert.
+
+> ⚠️ Earnings tomorrow — sell signal suspended
+
+Symmetrical, because an overbought stock gapping *down* on results is the same
+risk from the other side. The dates come from TradingView in the same request
+as the RSI, so this costs nothing. A ticker the feed has no date for is never
+suspended — refusing to signal on every stock whose calendar we can't see would
+quietly disable the screener.
+
+Three sessions rather than two because the count is in weekdays: real trading
+days only exist for the past, so a market holiday inside the window makes the
+release one session closer than the count says. Being a day early costs a
+deferred signal; being a day late means holding through the gap.
 
 ---
 
@@ -316,6 +346,43 @@ request, or just tell you the number.
 
 Delete an entry and it's removed everywhere — the file is the source of truth,
 and stale valuations are cleared from the database on the next run.
+
+---
+
+## Growing the watchlist
+
+```bash
+python -m screener.cli universe                      # propose S&P 500 / NASDAQ 100 names
+python -m screener.cli universe --limit 50 --write   # append the 50 largest to config.yaml
+python -m screener.cli universe --market netherlands --indexes "STOXX Europe 600"
+```
+
+It prints `config.yaml` lines and, with `--write`, appends them — leaving the
+file's comments intact, because a YAML round-trip would erase them. Review with
+`git diff config.yaml` before committing.
+
+**It only ever adds.** A ticker that has left an index keeps its entry, its
+history and its card. Dropping it would take its chart and its recorded
+patterns with it, and those are the record the screener gets judged against.
+
+Three kinds of duplicate get removed first, and all three are real:
+
+| | |
+|---|---|
+| the same company abroad | NVIDIA is also `MUN:NVD`, `EUROTLX:4NVDA`, `SIX:NVDA.USD` — Germany's scanner alone returns 15,079 "stocks", mostly foreign listings |
+| the same company's other share class | Alphabet is GOOGL *and* GOOG; the more traded one is kept |
+| not a share at all | `NASDAQ:GOOGN` is preferred stock reporting Alphabet's market cap against its own $48 price |
+
+Index membership and share class are read from TradingView's own `indexes` and
+`typespecs` fields rather than inferred, so a NYSE company outside the S&P 500
+isn't labelled as being in it.
+
+**Adding many at once is paced.** RSI is one batched request however long the
+list gets, but `backfill` is one Yahoo request per ticker *per horizon* and
+can't be batched — 100 new names is 400 requests. `backfill --max-new 25` (what
+CI runs) seeds 25 a run, so they arrive over a few runs instead of timing one
+out. Already-seeded tickers are untouched by the cap, and their intraday
+history is refreshed about once a day rather than every run.
 
 ---
 
@@ -673,7 +740,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 406 tests
+python -m pytest tests/ -q      # 480 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

@@ -37,6 +37,8 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/fairvalues.py` | the committed `fair_values.yaml` |
 | `screener/morningstar.py` | logged-in scraping of price + fair value |
 | `screener/dashboard.py` | the self-contained HTML page |
+| `screener/earnings.py` | the event-risk window around a results release |
+| `screener/universe.py` | choosing which companies belong on the watchlist |
 | `screener/notify.py` | the phone (ntfy), webhook and GitHub-issue transports |
 | `screener/notified.py` | the committed `notifications.json` — what's already been announced |
 | `screener/cli.py` | commands, and the glue between all of the above |
@@ -71,6 +73,20 @@ cleared from the database on the next run.
 **Never commit anything under `data/`.** It's gitignored. CI force-adds it, and
 only on `main` (see the branch guard in `.github/workflows/daily.yml`). A human
 committing it will collide with the bot.
+
+**The watchlist only ever grows.** `screener universe` proposes additions and
+nothing else. A ticker that has left an index, been renamed, or gone quiet
+keeps its entry, its history and its card — dropping it would take its chart
+and its recorded patterns with it, and those are the record the screener is
+judged against. If a name really has to go, that is a hand edit with a reason.
+
+**RSI is batched; Yahoo is not.** One TradingView scan covers every ticker on
+every horizon in a single request, so the watchlist can grow almost freely on
+that axis. `backfill` is one Yahoo request per ticker *per horizon* and cannot
+be batched, which makes it the real cost of a bigger watchlist — hence
+`--max-new` for first-time seeding and the ~daily refresh for intraday history
+(`INTRADAY_REFRESH_AFTER`). Check what a change does to *that* count, not the
+RSI one.
 
 **Notification state must never live in `data/screener.db`.** The database is
 only committed by the last run of the day (the deferral guard in `daily.yml` —
