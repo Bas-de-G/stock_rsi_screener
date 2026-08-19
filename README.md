@@ -339,16 +339,34 @@ to `auth/morningstar_state.json` (gitignored) and reused for weeks.
 Then, whenever you want fair values refreshed:
 
 ```bash
-python -m screener.cli scrape              # only tickers with a live signal
+python -m screener.cli scrape              # tickers with a signal, most urgent first
+python -m screener.cli scrape --limit 40   # cap the session; the rest wait
 python -m screener.cli scrape --dry-run    # see what it would visit first
 python -m screener.cli scrape --push       # ...and commit + push the result
 ```
 
-**It only visits tickers with a live signal.** A fair value only changes
-anything when a pattern has fired — it's what upgrades a plain buy to a strong
-one. A ticker sitting at RSI 60 with no pattern gains nothing from being
-scraped, so a typical run fetches three or four pages instead of thirty-five.
-Use `--all` to override, or `--symbols IBM,NVDA` to check something specific.
+**It only visits tickers with a signal.** A fair value only changes anything
+when a pattern has fired — it's what upgrades a plain buy to a strong one. A
+ticker sitting at RSI 60 with no pattern gains nothing from being scraped. Use
+`--all` to override, or `--symbols IBM,NVDA` to check something specific.
+
+**And it visits them in order of how much they matter today**, which is what
+makes `--limit` safe. Three tiers:
+
+| | |
+|---|---|
+| **just fired** | becomes a strong buy today if the valuation confirms |
+| **live signal** | on a dashboard page right now |
+| **signal on file** | inside the chart window; worth reading ahead, since a value is cached 14 days |
+
+Within a tier, the most recently completed pattern leads. On the current
+watchlist that's 10 / 41 / 80 — so `--limit 40` covers every signal that just
+fired plus most of the live ones, and leaves the read-ahead work for the next
+session. Without the ordering a cap would spend its budget on whatever the
+config file happened to list first.
+
+With ~8s per page plus the pacing gap, budget roughly **13 seconds a ticker**:
+40 pages is about 9 minutes.
 
 Results are written to `fair_values.yaml`, the same file you'd edit by hand —
 so scraped and hand-checked values flow through identical code, and every

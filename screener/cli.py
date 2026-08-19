@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from .signals import (
     is_strong,
     signal_fires,
     signal_is_fresh,
+    signal_is_live,
     valuation_passes,
 )
 from .storage import (
@@ -591,8 +593,18 @@ def _rescore_signals(
     return updated
 
 
+# How urgently a symbol wants a fair value. Lower sorts first, which is what a
+# capped session spends its pages on.
+_FRESH, _LIVE, _RECORDED = 0, 1, 2
+_URGENCY_LABEL = {
+    _FRESH: "just fired",
+    _LIVE: "live signal",
+    _RECORDED: "signal on file",
+}
+
+
 def _signalled_symbols(store: Store, config: Config) -> list[str]:
-    """Symbols whose fired signal is recent enough to still be on the dashboard.
+    """Symbols wanting a fair value, most actionable first.
 
     This is what makes scraping cheap. A fair value only changes anything when a
     pattern has fired — it's what upgrades a plain buy to a strong one. With
@@ -600,26 +612,72 @@ def _signalled_symbols(store: Store, config: Config) -> list[str]:
     gains nothing from being scraped, so don't fetch 35 subscriber pages to
     answer a question about three of them.
 
-    The chart-window rule is mirrored from `dashboard._collect`, so a signal
-    that's aged off the dashboard doesn't drag a scrape along with it.
+    The *order* matters as much as the membership once `--limit` caps a
+    session, and it is where this used to fall down. "Has a fired pattern in
+    the chart window" barely filters at all when every pattern fires: measured
+    on the live database it selected 131 of 153 tickers, while only 50 had a
+    signal actually live on a dashboard page. Nothing was wrong with scraping
+    the other 81 — a fair value is cached for a fortnight, so reading one early
+    often pays off later — but they were fetched in no particular order, so a
+    capped run could spend every page on stale candidates and never reach the
+    rocket that fired this morning.
+
+    So they are ranked rather than filtered, in three tiers:
+
+    * a pattern that *just* completed — the ones that become a strong buy today
+    * a pattern still live, so it is on the dashboard now
+    * a pattern on file inside the chart window — worth caching ahead
+
+    and within a tier, most recently completed first. Both directions count:
+    the same Morningstar number grades a sell against the mirrored rule.
     """
+    return [symbol for symbol, _, _ in _ranked_targets(store, config)]
+
+
+def _ranked_targets(store: Store, config: Config) -> list[tuple[str, int, str]]:
+    """(symbol, urgency, most recent completing cross), most urgent first."""
     window = config.dashboard.chart_days
-    out: list[str] = []
+    ranked: list[tuple[str, int, str]] = []
+
     for ticker in config.tickers:
-        # A signal on any horizon is reason enough to check the fair value --
-        # the same Morningstar number feeds all four gates.
+        best: tuple[int, str] | None = None
         for horizon in config.horizons:
             series = store.rsi_series(ticker.symbol, horizon.key)
             if not series:
                 continue
             chart_start = series[-window:][0].date
-            if any(
-                s.fired and s.up2_date >= chart_start
-                for s in store.all_signals(ticker.symbol, horizon.key)
-            ):
-                out.append(ticker.symbol)
-                break
-    return out
+            # Mirrors dashboard._collect: liveness is judged against the
+            # horizon's own lookback, not the global one.
+            liveness = replace(config.signal, window_days=horizon.window_days)
+            for signal in store.all_signals(ticker.symbol, horizon.key):
+                if not (signal.fired and signal.up2_date >= chart_start):
+                    continue
+                threshold = (
+                    config.rsi.threshold if signal.direction == BUY
+                    else config.rsi.overbought
+                )
+                if signal_is_fresh(signal, series, horizon):
+                    urgency = _FRESH
+                elif signal_is_live(signal, series, liveness, threshold):
+                    urgency = _LIVE
+                else:
+                    urgency = _RECORDED
+                # The most urgent signal on any horizon speaks for the ticker;
+                # within one tier, the one that completed most recently.
+                if best is None or urgency < best[0] or (
+                    urgency == best[0] and signal.up2_date > best[1]
+                ):
+                    best = (urgency, signal.up2_date)
+        if best is not None:
+            ranked.append((ticker.symbol, best[0], best[1]))
+
+    # Two stable passes, least significant first — cheaper to read than one key
+    # that has to invert a date to sort it descending. `ranked` starts in
+    # config order and both sorts are stable, so anything the ranking cannot
+    # separate stays in the order the watchlist lists it.
+    ranked.sort(key=lambda row: row[2], reverse=True)      # latest cross first
+    ranked.sort(key=lambda row: row[1])                    # urgency wins
+    return ranked
 
 
 # Morningstar analysts revise a fair value on earnings or a thesis change --
@@ -655,7 +713,13 @@ def _fresh_fair_values(config: Config, max_age_days: int) -> dict[str, int]:
 
 
 def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
-    """Work out which tickers `scrape` should visit."""
+    """Work out which tickers `scrape` should visit, most urgent first.
+
+    Named symbols keep the order they were typed in — that is an explicit
+    instruction, not a suggestion. Everything else comes back ranked, so
+    `--limit` cuts from the bottom rather than from wherever the config file
+    happened to list things.
+    """
     if args.symbols:
         wanted = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
         tickers = []
@@ -665,9 +729,26 @@ def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
             except KeyError as exc:
                 print(f"  ! {exc}")
         return tickers
-    if args.all:
-        return list(config.tickers)
-    return [config.ticker(s) for s in _signalled_symbols(store, config)]
+
+    ranked = [config.ticker(s) for s in _signalled_symbols(store, config)]
+    if not args.all:
+        return ranked
+    # --all still leads with the tickers a fair value would change something
+    # for; the rest follow in config order.
+    seen = {t.symbol for t in ranked}
+    return ranked + [t for t in config.tickers if t.symbol not in seen]
+
+
+def _cap_targets(tickers: list, args) -> tuple[list, list]:
+    """Split into (this session's pages, deferred to the next run).
+
+    Applied *after* the freshness filter so the budget counts pages actually
+    fetched, not candidates considered.
+    """
+    limit = getattr(args, "limit", None)
+    if not limit or limit >= len(tickers):
+        return tickers, []
+    return tickers[:limit], tickers[limit:]
 
 
 def _drop_recently_checked(config: Config, tickers: list, args) -> tuple[list, list]:
@@ -747,8 +828,23 @@ def cmd_scrape(config: Config, args) -> int:
                 print("  Use --all to scrape every ticker anyway, or --symbols SYM,SYM.")
             return 0
 
+        targets, deferred = _cap_targets(targets, args)
+        if deferred:
+            print(f"Capped at {len(targets)} this session; "
+                  f"{len(deferred)} deferred to the next run.")
+            print(f"  Next up: {', '.join(t.symbol for t in deferred[:8])}"
+                  f"{' …' if len(deferred) > 8 else ''}")
+
         names = ", ".join(t.symbol for t in targets)
         print(f"Scraping {len(targets)} ticker(s): {names}")
+        if not args.symbols:
+            urgency = {s: u for s, u, _ in _ranked_targets(store, config)}
+            tally = Counter(urgency[t.symbol] for t in targets if t.symbol in urgency)
+            if tally:
+                print("  " + ", ".join(
+                    f"{count} {_URGENCY_LABEL[level]}"
+                    for level, count in sorted(tally.items())
+                ))
         if args.dry_run:
             print("\n(--dry-run: nothing fetched, nothing written)")
             return 0
@@ -1103,6 +1199,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--all", action="store_true", help="every ticker, not just ones with a live signal"
     )
     p_scrape.add_argument("--symbols", help="explicit comma-separated list, e.g. IBM,NVDA")
+    p_scrape.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help="stop after N pages this session; the rest wait for the next run "
+             "(targets are ordered most actionable first)",
+    )
     p_scrape.add_argument(
         "--dry-run", action="store_true", help="list what would be scraped, fetch nothing"
     )

@@ -14,7 +14,12 @@ import argparse
 
 import pytest
 
-from screener.cli import _resolve_scrape_targets, _signalled_symbols
+from screener.cli import (
+    _cap_targets,
+    _ranked_targets,
+    _resolve_scrape_targets,
+    _signalled_symbols,
+)
 from screener.config import load_config
 from screener.storage import RsiPoint, Signal, Store
 
@@ -76,8 +81,8 @@ def signal(symbol, up2, fired=True):
     )
 
 
-def args(all=False, symbols=None):
-    return argparse.Namespace(all=all, symbols=symbols)
+def args(all=False, symbols=None, limit=None):
+    return argparse.Namespace(all=all, symbols=symbols, limit=limit)
 
 
 # --------------------------------------------------- the default selection
@@ -123,6 +128,97 @@ def test_selection_follows_config_order_not_database_order(store, config):
     store.record_signal(signal("IBM", "2026-07-01"))
     store.record_signal(signal("NVDA", "2026-07-01"))
     assert _signalled_symbols(store, config) == ["NVDA", "IBM"]
+
+
+# ---------------------------------------------------------- the ordering
+
+
+def live_history(store, symbol, rsi=35.0, days=25):
+    """Daily bars ending today, so freshness and liveness can be judged.
+
+    `history` above starts in April 2026 and is deliberately stale; these
+    ordering tests need a series whose last bar is recent, because
+    `signal_is_fresh` refuses to call anything fresh when the data itself has
+    stopped updating.
+    """
+    import datetime as dt
+
+    today = dt.date.today()
+    for i in range(days, 0, -1):
+        date = (today - dt.timedelta(days=i - 1)).isoformat()
+        store.upsert_rsi_point(RsiPoint(symbol, date, 100.0, rsi, "backfill:yahoo"))
+    return today
+
+
+def test_a_pattern_that_just_fired_outranks_one_that_is_merely_live(store, config):
+    """What a capped session must spend its first pages on: the signal that
+    becomes a strong buy today, not one that has been sitting there a week."""
+    import datetime as dt
+
+    today = live_history(store, "NVDA")
+    live_history(store, "IBM")
+    store.record_signal(signal("NVDA", (today - dt.timedelta(days=8)).isoformat()))
+    store.record_signal(signal("IBM", today.isoformat()))
+
+    assert _signalled_symbols(store, config) == ["IBM", "NVDA"]
+    assert [u for _, u, _ in _ranked_targets(store, config)] == [0, 1]
+
+
+def test_a_signal_no_longer_live_sorts_last_but_is_not_dropped(store, config):
+    """A fair value is cached for a fortnight, so reading one early often pays
+    off later — it just must not crowd out today's."""
+    import datetime as dt
+
+    today = live_history(store, "NVDA", rsi=25.0)   # RSI back under 30: not live
+    live_history(store, "IBM", rsi=35.0)
+    store.record_signal(signal("NVDA", (today - dt.timedelta(days=3)).isoformat()))
+    store.record_signal(signal("IBM", (today - dt.timedelta(days=3)).isoformat()))
+
+    ordered = _signalled_symbols(store, config)
+    assert ordered == ["IBM", "NVDA"], "the live one first, the other still present"
+
+
+def test_within_a_tier_the_most_recent_cross_leads(store, config):
+    import datetime as dt
+
+    today = live_history(store, "NVDA")
+    live_history(store, "IBM")
+    store.record_signal(signal("NVDA", (today - dt.timedelta(days=9)).isoformat()))
+    store.record_signal(signal("IBM", (today - dt.timedelta(days=6)).isoformat()))
+    assert _signalled_symbols(store, config) == ["IBM", "NVDA"]
+
+
+def test_a_sell_pattern_also_earns_a_scrape(store, config):
+    """The same Morningstar number grades a sell against the mirrored rule."""
+    today = live_history(store, "NVDA", rsi=75.0)
+    sell = Signal(
+        symbol="NVDA", up1_date="2026-01-01", down_date="2026-01-05",
+        up2_date=today.isoformat(), price=None, fair_value=None,
+        valuation_known=False, valuation_pass=False, fired=True,
+        recorded_at="now", direction="sell",
+    )
+    store.record_signal(sell)
+    assert _signalled_symbols(store, config) == ["NVDA"]
+
+
+# ------------------------------------------------------------- the cap
+
+
+def test_no_limit_takes_everything(config):
+    tickers = list(config.tickers)
+    assert _cap_targets(tickers, args()) == (tickers, [])
+
+
+def test_the_limit_splits_the_list_in_order(config):
+    tickers = list(config.tickers)
+    taken, deferred = _cap_targets(tickers, args(limit=2))
+    assert [t.symbol for t in taken] == ["NVDA", "IBM"]
+    assert [t.symbol for t in deferred] == ["TXN"]
+
+
+def test_a_limit_larger_than_the_list_defers_nothing(config):
+    tickers = list(config.tickers)
+    assert _cap_targets(tickers, args(limit=99)) == (tickers, [])
 
 
 # ------------------------------------------------------- flag resolution
