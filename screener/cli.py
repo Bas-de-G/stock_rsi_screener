@@ -28,6 +28,7 @@ from .morningstar import (
 from .earnings import earnings_window
 from .earnings import to_date as to_release_date
 from .notified import Ledger, key_for
+from .outcomes import FORWARD_BARS as OUTCOME_BARS
 from .notify import (
     format_signal,
     format_strong_buy,
@@ -1326,6 +1327,130 @@ def cmd_dashboard(config: Config, args) -> int:
     return 0
 
 
+def cmd_evaluate(config: Config, args) -> int:
+    """Measure what happened after every recorded pattern.
+
+    Reads only price history already on disk, so it is safe to re-run and
+    always gives the same answer for the same data. The first run measures the
+    whole back catalogue -- there is no need to have been collecting anything
+    special, because the prices were always there.
+    """
+    from .outcomes import FORWARD_BARS, forward_outcomes
+
+    with Store(config.storage.database) as store:
+        # The daily series is the common ruler for every horizon, so it is
+        # fetched once per symbol rather than once per signal.
+        daily: dict[str, list[tuple[str, float]]] = {}
+        entries: dict[tuple[str, str], dict[str, float]] = {}
+        measured, skipped = [], 0
+
+        for ticker in config.tickers:
+            daily[ticker.symbol] = [
+                (p.date, p.close) for p in store.rsi_series(ticker.symbol, DEFAULT_HORIZON)
+            ]
+
+        for horizon in config.horizons:
+            for ticker in config.tickers:
+                key = (ticker.symbol, horizon.key)
+                if key not in entries:
+                    entries[key] = {
+                        p.date: p.close
+                        for p in store.rsi_series(ticker.symbol, horizon.key)
+                    }
+                for signal in store.all_signals(ticker.symbol, horizon.key):
+                    # The close on the bar the pattern completed on -- the
+                    # price you could actually have paid. Deliberately not
+                    # `signal.price`, which `_rescore_signals` overwrites with
+                    # whatever the latest valuation says.
+                    entry = entries[key].get(signal.up2_date)
+                    results = forward_outcomes(
+                        ticker.symbol, horizon.key, signal.direction,
+                        signal.up2_date, entry, daily[ticker.symbol],
+                    )
+                    if not results:
+                        skipped += 1
+                    measured.extend(results)
+
+        written = store.replace_outcomes(measured)
+
+    print(f"Measured {written} outcome(s) across {len(FORWARD_BARS)} windows "
+          f"({', '.join(f'+{b}' for b in FORWARD_BARS)} trading days).")
+    if skipped:
+        print(f"  {skipped} pattern(s) not yet measurable — too recent, or no "
+              f"close recorded on the bar they completed on.")
+    return 0
+
+
+def cmd_backtest(config: Config, args) -> int:
+    """Report how the recorded patterns actually did, against a baseline.
+
+    The baseline is the point. Equities drift upward, so any long strategy
+    scores above half over a rising sample -- including buying on days picked
+    at random. What matters is the gap between the signal and the coin.
+    """
+    from .outcomes import FORWARD_BARS, baseline_outcomes, summarise
+
+    window = args.bars
+    with Store(config.storage.database) as store:
+        measured = store.all_outcomes(bars=window)
+        if not measured:
+            print("No outcomes recorded yet — run `evaluate` first.")
+            return 1
+
+        base = []
+        for ticker in config.tickers:
+            closes = [
+                (p.date, p.close) for p in store.rsi_series(ticker.symbol, DEFAULT_HORIZON)
+            ]
+            base.extend(baseline_outcomes(ticker.symbol, closes, bars=(window,)))
+
+    print(f"Outcome after {window} trading days\n")
+    header = f"{'cohort':<22}{'n':>7}{'hit rate':>11}{'mean':>9}{'median':>9}{'worst dd':>10}"
+    print(header)
+    print("-" * len(header))
+
+    def line(label: str, rows) -> None:
+        s = summarise(rows)
+        if not s["n"]:
+            print(f"{label:<22}{'—':>7}")
+            return
+        print(f"{label:<22}{s['n']:>7}{s['hit_rate'] * 100:>10.1f}%"
+              f"{s['mean'] * 100:>8.1f}%{s['median'] * 100:>8.1f}%"
+              f"{s['worst_drawdown'] * 100:>9.1f}%")
+
+    line("random entry (long)", base)
+    print()
+    for direction in (BUY, SELL):
+        for horizon in config.horizons:
+            rows = [o for o in measured
+                    if o.direction == direction and o.horizon == horizon.key]
+            line(f"{direction:<5} {horizon.label}", rows)
+        line(f"{direction} — all", [o for o in measured if o.direction == direction])
+        print()
+
+    print("Read with care:")
+    print("  · Survivorship — the watchlist is today's companies, which all still")
+    print("    exist and are still large. Historical returns read optimistically.")
+    print("  · No valuation cohort. Fair values only exist from 2026-07-27, and")
+    print("    `_rescore_signals` back-applies today's to every old pattern, so a")
+    print("    'strong buy' split of this sample would be reading the future.")
+    print("    That comparison starts from recommendations.csv, going forward.")
+
+    if args.csv:
+        import csv as _csv
+
+        path = Path(args.csv)
+        with path.open("w", newline="") as handle:
+            writer = _csv.writer(handle)
+            writer.writerow(["symbol", "horizon", "direction", "up2_date", "bars",
+                             "entry", "exit", "return_pct", "max_gain", "max_drawdown"])
+            for o in measured:
+                writer.writerow([o.symbol, o.horizon, o.direction, o.up2_date, o.bars,
+                                 o.entry, o.exit, o.return_pct, o.max_gain, o.max_drawdown])
+        print(f"\nWrote {len(measured)} rows to {path}")
+    return 0
+
+
 def cmd_signals(config: Config, args) -> int:
     with Store(config.storage.database) as store:
         signals = store.all_signals(args.symbol, getattr(args, 'horizon', None))
@@ -1467,6 +1592,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_fv.add_argument("--date", help="date to record it against (default: today)")
     p_fv.add_argument("--note", help="optional note, e.g. 'post-earnings cut'")
     p_fv.set_defaults(func=cmd_fair_value)
+
+    p_eval = sub.add_parser(
+        "evaluate", help="measure what happened after every recorded pattern"
+    )
+    p_eval.set_defaults(func=cmd_evaluate)
+
+    p_bt = sub.add_parser(
+        "backtest", help="hit rate and returns per cohort, against a random-entry baseline"
+    )
+    p_bt.add_argument(
+        "--bars", type=int, default=20, metavar="N",
+        help=f"trading days after the signal to measure at; one of "
+             f"{', '.join(str(b) for b in OUTCOME_BARS)} (default: 20)",
+    )
+    p_bt.add_argument("--csv", default=None, help="also write the raw rows here")
+    p_bt.set_defaults(func=cmd_backtest)
 
     p_uni = sub.add_parser(
         "universe", help="propose tickers to add to the watchlist"
