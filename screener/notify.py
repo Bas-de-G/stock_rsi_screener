@@ -1,8 +1,18 @@
 """Optional buy-signal notifications.
 
-Set SCREENER_WEBHOOK_URL in .env to a Slack or Discord incoming-webhook URL
-(both accept a JSON body with a "text" field) and fired signals get posted
-there. Unset, everything still lands in SQLite, the CSVs, and stdout.
+Three transports, all independent and all optional. Every one of them is
+skipped silently when its configuration is absent, so a laptop run just prints
+and CI sends whatever it has been given:
+
+* `send_push` -- ntfy, for phones. Several people, one topic, no app to build.
+* `send_webhook` -- Slack or Discord, via SCREENER_WEBHOOK_URL.
+* `send_github_issue` -- an issue, which GitHub emails to whoever watches the
+  repository. The only one that needs no credential of ours at all.
+
+Unset all three and everything still lands in SQLite, the CSVs, and stdout.
+
+What gets sent, and the once-only rule that governs it, live in
+`cli._notify_new_strong_buys` and `screener.notified`.
 """
 
 from __future__ import annotations
@@ -79,6 +89,70 @@ def issue_title(symbol: str, discount, horizon) -> str:
     """One line, because this is what lands in the email subject."""
     gap = f" — {discount * 100:.0f}% below fair value" if discount is not None else ""
     return f"🚀 {symbol} strong buy on the {horizon.label} chart{gap}"
+
+
+NTFY_SERVER = "https://ntfy.sh"
+
+
+def send_push(title: str, message: str, url: str = "") -> bool:
+    """Push to every phone subscribed to the ntfy topic.
+
+    The scrappy answer to "can several people get this on their phone without
+    us building an app": everyone installs ntfy, subscribes to one topic, and
+    a plain HTTP POST from CI reaches all of them. No account, no device
+    registry, no server of ours.
+
+    The topic name *is* the credential -- ntfy has no other access control, so
+    anyone who knows it can read the alerts (and post to them). It lives in
+    `SCREENER_NTFY_TOPIC`, and on this public repository an Actions secret is
+    readable by anyone who can push a workflow, exactly like the webhook URL.
+    Worth knowing rather than worrying about: the worst a leak buys is reading
+    which stocks the screener likes, and rotating it is a settings edit plus a
+    re-subscribe.
+
+    Returns False when no topic is configured, which is the normal case on a
+    laptop.
+    """
+    topic = os.environ.get("SCREENER_NTFY_TOPIC")
+    if not topic:
+        return False
+    # Headers rather than a JSON body: the plain-text form is ntfy's simplest
+    # API, and it keeps the message readable in the notification shade exactly
+    # as composed. Non-ASCII has to go, though -- headers are latin-1 on the
+    # wire, and the title is where the rocket would land.
+    headers = {"Title": _ascii(title), "Tags": "rocket", "Priority": "high"}
+    if url:
+        headers["Click"] = url
+    try:
+        response = requests.post(
+            f"{NTFY_SERVER}/{topic}",
+            data=message.encode("utf-8"),
+            headers=headers,
+            timeout=15,
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        print(f"  ! push failed: {exc}")
+        return False
+
+
+# Punctuation worth keeping in some form rather than deleting. The titles here
+# come from `issue_title`, which sets its clauses off with an em dash; dropping
+# it outright leaves two spaces where the pause should be.
+_TRANSLITERATE = str.maketrans({"—": "-", "–": "-", "’": "'", "“": '"', "”": '"'})
+
+
+def _ascii(text: str) -> str:
+    """Reduce a title to what an HTTP header can actually carry.
+
+    Headers are latin-1 on the wire, so the rocket emoji `issue_title` opens
+    with raises UnicodeEncodeError inside requests and takes the whole
+    notification down with it. Emoji are dropped; punctuation that carries
+    meaning is transliterated first.
+    """
+    plain = text.translate(_TRANSLITERATE).encode("ascii", "ignore").decode("ascii")
+    return " ".join(plain.split()) or "Strong buy"
 
 
 def issue_marker(key: str) -> str:

@@ -141,6 +141,13 @@ jobs:
         run: python -m screener.cli dashboard --output site/index.html
         env:
           SCREENER_WEBHOOK_URL: ${{ secrets.SCREENER_WEBHOOK_URL }}
+          # The ntfy topic everyone's phone subscribes to. Same caveat as the
+          # webhook above -- on a public repo this is readable by anyone who
+          # can push a workflow, and with ntfy the topic name is the only
+          # access control there is. Worst case is a stranger reading which
+          # stocks the screener likes; rotate by changing it here and
+          # re-subscribing in the app.
+          SCREENER_NTFY_TOPIC: ${{ secrets.SCREENER_NTFY_TOPIC }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Collected data belongs on the default branch only. Guarded rather

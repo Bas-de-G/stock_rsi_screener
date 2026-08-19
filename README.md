@@ -567,12 +567,30 @@ is 5 to 20 patterns a run and 251 the day new tickers are backfilled. And only
 while it's *fresh*, not merely live: a strong buy stays actionable for a
 fortnight on the daily chart, and announcing it for a fortnight is spam.
 
-**By email, with no credential anywhere.** The scheduled run opens a GitHub
+**On your phone**, for as many people as you like, with no app to build. Uses
+[ntfy](https://ntfy.sh) — free, no account, and adding someone is them
+installing an app and typing a topic name.
+
+1. Invent a long, unguessable topic name — `openssl rand -hex 12` is fine.
+2. Add it as the repository secret `SCREENER_NTFY_TOPIC`
+   (*Settings → Secrets and variables → Actions*).
+3. Everyone installs ntfy ([iOS](https://apps.apple.com/app/ntfy/id1625396347),
+   [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)),
+   taps **+**, and subscribes to that topic.
+
+Alerts arrive titled with the ticker and the discount, and tap through to the
+right dashboard page. Locally, put the same name in `.env` to test.
+
+> The topic name **is** the password — ntfy has no other access control, and on
+> a public repo an Actions secret is readable by anyone who can push a
+> workflow. Worst case is a stranger reading which stocks the screener likes.
+> To rotate: change the secret, re-subscribe in the app.
+
+**By email, with no credential anywhere.** The scheduled run also opens a GitHub
 issue; GitHub emails everyone watching the repository. Watch it with **Watch →
 Custom → Issues** and check email notifications are on in your GitHub settings.
 Nothing to configure in the repo — Actions injects its own token, scoped to
-this repository and expiring with the run, which matters because this repo is
-public and an Actions secret is readable by anyone who can push a workflow.
+this repository and expiring with the run.
 
 **By Slack or Discord**, optionally, with an incoming webhook in `.env`:
 
@@ -580,7 +598,8 @@ public and an Actions secret is readable by anyone who can push a workflow.
 SCREENER_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-Without either, everything still lands in SQLite, the CSVs, and stdout.
+The three are independent; set any, all, or none. Without any of them
+everything still lands in SQLite, the CSVs, and stdout.
 
 ### One signal, one email
 
@@ -600,6 +619,9 @@ deduplicated twice over:
   authoritative check, so even a lost ledger doesn't produce a second email.
   A closed issue counts as filed — reading and closing one is not a request to
   resend it.
+
+The dedupe sits above the transports, so the phone push and the webhook inherit
+it rather than each carrying their own copy.
 
 Only if the API can't be reached does it err towards sending: a repeat email is
 an annoyance, a missed strong buy defeats the point.

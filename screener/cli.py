@@ -30,6 +30,7 @@ from .notify import (
     format_strong_buy,
     issue_title,
     send_github_issue,
+    send_push,
     send_webhook,
 )
 from .rsi import wilder_rsi_series
@@ -924,9 +925,12 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # Both transports are optional and independent: a laptop run has
             # neither and simply prints, CI has the token and may have the
             # webhook too.
+            title = issue_title(row.symbol, discount, horizon)
+            if send_push(title, message, url):
+                print("  (pushed to phones)")
             if send_webhook(message):
                 print("  (sent to webhook)")
-            if send_github_issue(issue_title(row.symbol, discount, horizon), message, key):
+            if send_github_issue(title, message, key):
                 print("  (opened an issue — GitHub will email it)")
             ledger.record(key)
             sent += 1

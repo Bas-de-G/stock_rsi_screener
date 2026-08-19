@@ -139,6 +139,78 @@ def test_the_payload_suits_slack_and_discord(monkeypatch):
     assert sent == {"text": "hello", "content": "hello"}
 
 
+# ------------------------------------------------------------ the phone push
+
+
+def test_no_topic_configured_is_not_an_error(monkeypatch):
+    monkeypatch.delenv("SCREENER_NTFY_TOPIC", raising=False)
+    assert notify.send_push("t", "m") is False
+
+
+def test_the_push_goes_to_the_topic(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self): return None
+
+    monkeypatch.setenv("SCREENER_NTFY_TOPIC", "sekrit-topic-9f3")
+    monkeypatch.setattr(notify.requests, "post",
+                        lambda url, data, headers, timeout:
+                        captured.update(url=url, data=data, headers=headers) or _Resp())
+
+    assert notify.send_push("PTON strong buy", "the message", "https://x.test/1h.html") is True
+    assert captured["url"] == "https://ntfy.sh/sekrit-topic-9f3"
+    assert captured["data"] == b"the message"
+    assert captured["headers"]["Title"] == "PTON strong buy"
+    assert captured["headers"]["Click"] == "https://x.test/1h.html"
+
+
+def test_the_title_loses_what_a_header_cannot_carry(monkeypatch):
+    """`issue_title` opens with a rocket, and HTTP headers are latin-1 on the
+    wire -- sending it raw raises inside requests and kills the notification."""
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self): return None
+
+    monkeypatch.setenv("SCREENER_NTFY_TOPIC", "t")
+    monkeypatch.setattr(notify.requests, "post",
+                        lambda url, data, headers, timeout:
+                        captured.update(headers=headers) or _Resp())
+
+    notify.send_push(issue_title("PTON", 0.43, HOURLY), "body")
+    title = captured["headers"]["Title"]
+    assert title == "PTON strong buy on the 1 hour chart - 43% below fair value"
+    title.encode("latin-1")  # would raise if anything unsendable survived
+
+
+def test_a_title_of_nothing_but_emoji_still_says_something(monkeypatch):
+    class _Resp:
+        def raise_for_status(self): return None
+
+    captured = {}
+    monkeypatch.setenv("SCREENER_NTFY_TOPIC", "t")
+    monkeypatch.setattr(notify.requests, "post",
+                        lambda url, data, headers, timeout:
+                        captured.update(headers=headers) or _Resp())
+    notify.send_push("🚀🚀", "body")
+    assert captured["headers"]["Title"] == "Strong buy"
+
+
+def test_a_failing_push_does_not_raise(monkeypatch, capsys):
+    """A dead phone channel must never take the publish step down with it."""
+    import requests
+
+    monkeypatch.setenv("SCREENER_NTFY_TOPIC", "t")
+
+    def _boom(*a, **kw):
+        raise requests.RequestException("connection refused")
+
+    monkeypatch.setattr(notify.requests, "post", _boom)
+    assert notify.send_push("t", "m") is False
+    assert "push failed" in capsys.readouterr().out
+
+
 # ---------------------------------------------------- what actually gets sent
 
 
@@ -458,15 +530,32 @@ def test_the_title_survives_an_unknown_gap():
     assert issue_title("AD", None, HOURLY) == "🚀 AD strong buy on the 1 hour chart"
 
 
-def test_both_transports_fire_for_one_signal(config, store, monkeypatch):
-    """They are independent: CI has the token and may have the webhook too."""
-    posted, issues = [], []
+def test_every_transport_fires_for_one_signal(config, store, monkeypatch):
+    """They are independent: CI has the token and may have the topic and the
+    webhook too. One signal, one message down each channel it has."""
+    posted, issues, pushes = [], [], []
     monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
     monkeypatch.setattr("screener.cli.send_github_issue",
                         lambda t, b, k: issues.append((t, b, k)) or True)
+    monkeypatch.setattr("screener.cli.send_push",
+                        lambda t, m, u: pushes.append((t, m, u)) or True)
     assert _notify_new_strong_buys(store, config) == 1
-    assert len(posted) == 1 and len(issues) == 1
+    assert len(posted) == 1 and len(issues) == 1 and len(pushes) == 1
     assert issues[0][0].startswith("🚀 PTON strong buy")
     assert "STRONG BUY 🚀 — PTON" in issues[0][1]
     # The same key the ledger uses, so both defences dedupe on one identity.
     assert issues[0][2] == key_for("strong", "1h", "PTON", _stamp(2.5))
+    # The push carries the same title and taps through to the right page.
+    assert pushes[0][0] == issues[0][0]
+    assert pushes[0][2] == "https://example.test/screener/1h.html"
+
+
+def test_the_phone_inherits_the_no_duplicate_policy(config, store, monkeypatch):
+    """The dedupe sits above the transports, so adding one did not need its
+    own copy of it -- a repeat run pushes nothing."""
+    pushes = []
+    monkeypatch.setattr("screener.cli.send_push",
+                        lambda t, m, u: pushes.append(t) or True)
+    assert _notify_new_strong_buys(store, config) == 1
+    assert _notify_new_strong_buys(store, config) == 0
+    assert len(pushes) == 1

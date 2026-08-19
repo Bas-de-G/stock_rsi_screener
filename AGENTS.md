@@ -37,7 +37,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/fairvalues.py` | the committed `fair_values.yaml` |
 | `screener/morningstar.py` | logged-in scraping of price + fair value |
 | `screener/dashboard.py` | the self-contained HTML page |
-| `screener/notify.py` | the webhook and GitHub-issue transports |
+| `screener/notify.py` | the phone (ntfy), webhook and GitHub-issue transports |
 | `screener/notified.py` | the committed `notifications.json` — what's already been announced |
 | `screener/cli.py` | commands, and the glue between all of the above |
 
