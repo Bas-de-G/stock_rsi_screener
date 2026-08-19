@@ -1275,6 +1275,27 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
     return sent
 
 
+def _journal_recommendations(store: Store, config: Config) -> int:
+    """Record every live verdict the dashboard just published, once each.
+
+    Every fired signal on every horizon, in both directions, including the ones
+    suspended for earnings and the ones nobody was notified about. The ledger
+    is the sample that "does this work?" gets answered from, and a sample that
+    only contains the picks we liked answers a different question.
+    """
+    from .dashboard import _collect
+    from .journal import Journal, recommendation_from
+
+    journal = Journal(config.storage.recommendations)
+    for horizon in config.horizons:
+        for row in _collect(store, config, horizon):
+            for signal in row.signals:
+                if not signal.fired:
+                    continue
+                journal.record(recommendation_from(row, signal, horizon))
+    return journal.added
+
+
 def cmd_dashboard(config: Config, args) -> int:
     from .dashboard import build_all_dashboards, build_dashboard
 
@@ -1286,6 +1307,13 @@ def cmd_dashboard(config: Config, args) -> int:
             paths = [build_dashboard(store, config, output, horizon=args.horizon)]
         else:
             paths = build_all_dashboards(store, config, output)
+        # Logged before notifying, so a recommendation is on the record whether
+        # or not anyone was told about it -- the ones that were suppressed are
+        # exactly what makes "did suppressing them help?" answerable.
+        logged = _journal_recommendations(store, config)
+        if logged:
+            print(f"Logged {logged} new recommendation(s) to "
+                  f"{config.storage.recommendations.name}")
         if not args.no_notify:
             _notify_new_strong_buys(store, config)
 

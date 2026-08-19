@@ -186,6 +186,10 @@ class StorageConfig:
     # this has to be committed on every run or the same signal is announced
     # again half an hour later. See `screener.notified`.
     notifications: Path = Path("notifications.json")
+    # The append-only record of what was recommended, and when. Outside
+    # `csv_dir` for the same reason as `notifications`: it has to be committed
+    # on every run, and everything in there is regenerated and gitignored.
+    recommendations: Path = Path("recommendations.csv")
 
 
 @dataclass(frozen=True)
@@ -347,6 +351,7 @@ def load_config(path: str | Path | None = None) -> Config:
         csv_dir=_resolve(store_raw.get("csv_dir", "data")),
         fair_values=_resolve(store_raw.get("fair_values", "fair_values.yaml")),
         notifications=_resolve(store_raw.get("notifications", "notifications.json")),
+        recommendations=_resolve(store_raw.get("recommendations", "recommendations.csv")),
     )
 
     ms_raw = raw.get("morningstar", {})
