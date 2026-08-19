@@ -25,6 +25,8 @@ from .morningstar import (
     save_login_session,
     scrape_ticker,
 )
+from .earnings import earnings_window
+from .earnings import to_date as to_release_date
 from .notified import Ledger, key_for
 from .notify import (
     format_signal,
@@ -55,6 +57,9 @@ from .storage import (
     export_csv_snapshot,
 )
 from .tradingview import (
+    EARNINGS_FIELDS,
+    EARNINGS_LAST_FIELD,
+    EARNINGS_NEXT_FIELD,
     MarketDataError,
     NoHistoryYet,
     decode_quote,
@@ -199,10 +204,13 @@ def cmd_run(config: Config, args) -> int:
                 [t.tradingview for t in config.tickers],
                 [h.tv_interval for h in horizons],
                 period=config.rsi.period,
+                extra_fields=EARNINGS_FIELDS,
             )
         except MarketDataError as exc:
             print(f"\n  ! {exc}")
             return 1
+
+        _record_earnings_dates(store, config, rows)
 
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
@@ -563,6 +571,38 @@ def sync_fair_values(store: Store, config: Config, quiet: bool = False) -> int:
         _rescore_signals(store, config, symbol, latest.close, entry.fair_value)
         applied += 1
     return applied
+
+
+def _record_earnings_dates(store: Store, config: Config, rows: dict) -> int:
+    """Store when each company next reports, from the batch response.
+
+    Free: the dates are two more columns on the request that already fetched
+    RSI. A symbol the feed has no date for is recorded as such rather than
+    skipped, so a date that disappears (the release happened, the next one is
+    not scheduled) clears the old one instead of leaving it to go stale.
+    """
+    recorded = 0
+    for ticker in config.tickers:
+        row = rows.get(ticker.tradingview)
+        if row is None:
+            continue
+        nxt = to_release_date(row.get(EARNINGS_NEXT_FIELD))
+        last = to_release_date(row.get(EARNINGS_LAST_FIELD))
+        store.upsert_earnings(
+            ticker.symbol,
+            nxt.isoformat() if nxt else None,
+            _release_stamp(row.get(EARNINGS_NEXT_FIELD)),
+            last.isoformat() if last else None,
+        )
+        recorded += 1
+    return recorded
+
+
+def _release_stamp(value) -> str | None:
+    """The release timestamp in full, which says before-open vs after-close."""
+    if not isinstance(value, (int, float)):
+        return None
+    return dt.datetime.fromtimestamp(value, dt.timezone.utc).isoformat(timespec="minutes")
 
 
 def _rescore_signals(
@@ -991,6 +1031,11 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
     sent = 0
     for horizon in config.horizons:
         for row in _collect(store, config, horizon):
+            # A signal the page itself badges as un-actionable must not also
+            # ring someone's phone -- that is the one contradiction the warning
+            # could not survive.
+            if row.suspended:
+                continue
             fresh = [
                 s for s in row.buys
                 if s.fired

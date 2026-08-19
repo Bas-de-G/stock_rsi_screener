@@ -73,6 +73,15 @@ SUPPORTED_LIVE_PERIODS = tuple(sorted(_RSI_FIELD_BY_PERIOD))
 _EPS_GROWTH_TTM_FIELD = "earnings_per_share_diluted_yoy_growth_ttm"
 _EPS_GROWTH_FY_FIELD = "earnings_per_share_diluted_yoy_growth_fy"
 
+# When the company next reports, and when it last did -- epoch seconds, and
+# present for US, European and Hong Kong listings alike. Fundamentals fields
+# again, so they ride along in the same batch request as RSI at no extra cost.
+# The timestamp carries the time of day too, which is what distinguishes a
+# release before the open (06:45Z) from one after the close (20:00Z).
+EARNINGS_NEXT_FIELD = "earnings_release_next_date"
+EARNINGS_LAST_FIELD = "earnings_release_date"
+EARNINGS_FIELDS = (EARNINGS_NEXT_FIELD, EARNINGS_LAST_FIELD)
+
 
 def rsi_field_name(period: int, interval: str) -> str:
     """Build the scanner field name, e.g. RSI, RSI7, RSI|1W, RSI7|60."""

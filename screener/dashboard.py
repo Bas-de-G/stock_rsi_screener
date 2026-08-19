@@ -17,6 +17,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config, Horizon
+from .earnings import BEFORE, CLEAR_WINDOW, EarningsWindow, earnings_window
+from .earnings import to_date as to_release_date
 from .signals import (
     BUY,
     SELL,
@@ -49,6 +51,28 @@ class Row:
     markets: tuple[str, ...] = ()
     # Needed to judge freshness, which is measured in bars of this timeframe.
     horizon: Horizon | None = None
+    # Where this company sits relative to its next results. A signal inside
+    # that window is shown but not acted on -- see `screener.earnings`.
+    earnings: EarningsWindow = CLEAR_WINDOW
+
+    @property
+    def suspended(self) -> bool:
+        """Results are close enough that the technical signal isn't actionable."""
+        return self.earnings.suspended and (self.fired or self.sell_fired)
+
+    @property
+    def earnings_note(self) -> str:
+        """The warning as it reads on the card."""
+        if not self.suspended:
+            return ""
+        side = "buy" if self.fired else "sell"
+        if self.earnings.state == BEFORE:
+            sessions = self.earnings.sessions
+            when = "today" if sessions == 0 else (
+                "tomorrow" if sessions == 1 else f"in {sessions} trading days"
+            )
+            return f"Earnings {when} — {side} signal suspended"
+        return f"Earnings just reported — {side} signal suspended until the next session closes"
 
     @property
     def fresh(self) -> bool:
@@ -75,8 +99,12 @@ class Row:
         Sells are excluded by construction — exiting a position is not a
         bargain — and so is a gap that runs the wrong way: a fresh buy trading
         *above* fair value is timely, but it is not a deal.
+
+        A suspended signal is excluded too. Leading the page with a pick the
+        page itself calls un-actionable would be the one place the warning
+        could not be read as a warning.
         """
-        if self.horizon is None:
+        if self.horizon is None or self.suspended:
             return None
         best: float | None = None
         for s in self.buys:
@@ -150,6 +178,11 @@ class Row:
     @property
     def state(self) -> str:
         """Bucket used for the status pill, the card's accent, and sort order."""
+        # Checked before every verdict, because that is what "suspended" means:
+        # the pattern is real and still on the page, but results are close
+        # enough that acting on it is a coin flip rather than the model's edge.
+        if self.suspended:
+            return "suspended"
         if self.strong:
             return "strong"
         if self.fired:
@@ -224,10 +257,29 @@ def _visible_crosses(full: list[RsiPoint], window: int, threshold: float) -> lis
     return [i - offset for i in find_upward_crosses(lead, threshold) if i - offset >= 0]
 
 
+def _window_for(symbol: str, releases: dict, sessions: dict) -> EarningsWindow:
+    """Read one symbol's earnings window out of what the run recorded."""
+    next_date, last_date = releases.get(symbol, (None, None))
+    if next_date is None and last_date is None:
+        return CLEAR_WINDOW
+    trading_days = [
+        day for day in (to_release_date(p.date) for p in sessions.get(symbol, []))
+        if day is not None
+    ]
+    return earnings_window(
+        to_release_date(next_date), to_release_date(last_date), trading_days
+    )
+
+
 def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     horizon = horizon or config.horizon(DEFAULT_HORIZON)
     valuations = {v.symbol: v for v in store.latest_valuations()}
     signals = store.all_signals(horizon=horizon.key)
+    releases = store.earnings_dates()
+    # Whether results are near is a fact about the company, not the timeframe,
+    # so it is judged once against the daily bars -- "three trading days" means
+    # the same thing on the 1h page as on the 1w one.
+    sessions = {t.symbol: store.rsi_series(t.symbol, DEFAULT_HORIZON) for t in config.tickers}
     window = config.dashboard.chart_days
     rows: list[Row] = []
 
@@ -262,15 +314,19 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 currency=ticker.currency,
                 markets=ticker.markets,
                 horizon=horizon,
+                earnings=_window_for(ticker.symbol, releases, sessions),
             )
         )
 
     # Most actionable first: confirmed signals, then patterns awaiting a
     # fair-value check, then how oversold things currently are.
+    # Suspended sits below every actionable verdict and above the merely
+    # interesting: it is a real pattern you are being told to wait on, so it
+    # should be findable without being led with.
     order = {
         "strong": 0, "signal": 1, "signal_checked": 2,
-        "sell_strong": 3, "sell": 4, "rejected": 5,
-        "oversold": 6, "watch": 7, "neutral": 8, "nodata": 9,
+        "sell_strong": 3, "sell": 4, "suspended": 5, "rejected": 6,
+        "oversold": 7, "watch": 8, "neutral": 9, "nodata": 10,
     }
     rows.sort(key=lambda r: (order[r.state], r.rsi if r.rsi is not None else 999))
     return rows
@@ -472,6 +528,7 @@ def _card(row: Row, config: Config, horizon) -> str:
         "strong": "Strong buy 🚀",
         "signal": "Buy signal",
         "signal_checked": "Buy signal",
+        "suspended": "Suspended ⚠️",
         "sell_strong": "Strong sell 🔻",
         "sell": "Sell signal",
         "rejected": "Pattern, gate failed",
@@ -480,6 +537,11 @@ def _card(row: Row, config: Config, horizon) -> str:
         "neutral": "Neutral",
         "nodata": "No data",
     }[row.state]
+
+    earnings_block = (
+        f'<p class="earnings-warning">⚠️ {html.escape(row.earnings_note)}</p>'
+        if row.suspended else ""
+    )
 
     crosses = len(row.crosses)
     cross_note = (
@@ -560,6 +622,7 @@ def _card(row: Row, config: Config, horizon) -> str:
     </div>
   </header>
   {_chart_svg(row, threshold)}
+  {earnings_block}
   <p class="crosses">{cross_note}</p>
   {patterns}
   {valuation_block}
@@ -898,6 +961,27 @@ h1 {
   background: color-mix(in srgb, var(--crimson) 12%, transparent);
   color: var(--crimson);
   border-color: color-mix(in srgb, var(--crimson) 40%, transparent);
+}
+
+/* Suspended: a real pattern the page is telling you to wait on. Amber rather
+   than red because nothing is wrong -- the setup is fine, the timing isn't --
+   and dashed because it resolves itself the session after results. */
+.card.state-suspended { border-left-color: var(--warn); }
+.state-suspended .pill {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.earnings-warning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--warn) 38%, transparent);
+  border-radius: 6px;
 }
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
