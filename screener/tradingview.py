@@ -15,9 +15,18 @@ from dataclasses import dataclass
 import requests
 
 _SCANNER_URL = "https://scanner.tradingview.com/symbol"
+# The same data, for many symbols at once. One POST carries the whole
+# watchlist across every horizon: 637 symbols x 4 intervals answered in 0.75s
+# against 612 sequential GETs for the same thing.
+_SCAN_URL = "https://scanner.tradingview.com/global/scan"
 _YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 _HEADERS = {"User-Agent": "Mozilla/5.0 (screener; +https://github.com)"}
 _TIMEOUT = 20
+
+# How many symbols to put in one scan request. 637 has been measured working in
+# a single call; this leaves room under whatever the real ceiling is, and the
+# cost of an extra chunk is one round trip.
+SCAN_CHUNK = 500
 
 
 class MarketDataError(RuntimeError):
@@ -105,6 +114,37 @@ def fetch_live_rsi(tv_symbol: str, period: int = 14, interval: str = "1D") -> Li
     except (requests.RequestException, ValueError) as exc:
         raise MarketDataError(f"TradingView request failed for {tv_symbol}: {exc}") from exc
 
+    return decode_quote(tv_symbol, data, period=period, interval=interval)
+
+
+def quote_fields(intervals, period: int = 14) -> list[str]:
+    """The scanner columns needed to build a `LiveQuote` for each interval.
+
+    Deduplicated but order-preserving: the daily bar's RSI field is bare `RSI`
+    whichever way it is asked for, so passing ("1D", "D") must not ask for the
+    same column twice.
+    """
+    fields: list[str] = []
+    for interval in intervals:
+        for name in (rsi_field_name(period, interval), _close_field_name(interval)):
+            if name not in fields:
+                fields.append(name)
+    # Fundamentals, not price-interval fields, so one copy covers every horizon.
+    fields += [_EPS_GROWTH_TTM_FIELD, _EPS_GROWTH_FY_FIELD]
+    return fields
+
+
+def decode_quote(tv_symbol: str, data: dict, period: int = 14, interval: str = "1D") -> LiveQuote:
+    """Turn one symbol's scanner fields into a `LiveQuote` for one interval.
+
+    Shared by the single-symbol and batch paths so there is exactly one place
+    that decides what a null means -- which matters, because that distinction
+    (too young vs broken) is what keeps one recent listing from failing a whole
+    scheduled run.
+    """
+    rsi_field = rsi_field_name(period, interval)
+    close_field = _close_field_name(interval)
+
     if data.get(rsi_field) is None or data.get(close_field) is None:
         # A price with no RSI means the symbol is real and simply too young for
         # this interval's lookback -- distinguished from a broken response so
@@ -126,6 +166,53 @@ def fetch_live_rsi(tv_symbol: str, period: int = 14, interval: str = "1D") -> Li
         earnings_growth=growth,
         earnings_growth_period=growth_period,
     )
+
+
+def fetch_live_batch(
+    tv_symbols, intervals, period: int = 14, extra_fields=()
+) -> dict[str, dict]:
+    """Fetch every symbol's readings for every interval, in as few requests as possible.
+
+    Returns `{tv_symbol: {field: value}}` -- the raw scanner row, not a
+    `LiveQuote`, because one row serves all four horizons and later work wants
+    other columns out of the same request (earnings dates, fundamentals). Pass
+    a row to `decode_quote` to read one horizon out of it.
+
+    A symbol the scanner has no row for is simply absent from the result. That
+    is deliberate: the caller reports it per ticker, the same way a null field
+    is reported, so one delisted or mistyped symbol cannot fail the others.
+
+    Raises `MarketDataError` only when a whole request fails -- that is a real
+    outage, and the run should go red for it.
+    """
+    symbols = list(dict.fromkeys(tv_symbols))  # de-duplicated, order preserved
+    columns = quote_fields(intervals, period) + [f for f in extra_fields]
+    out: dict[str, dict] = {}
+
+    for start in range(0, len(symbols), SCAN_CHUNK):
+        chunk = symbols[start:start + SCAN_CHUNK]
+        try:
+            resp = requests.post(
+                _SCAN_URL,
+                json={"symbols": {"tickers": chunk}, "columns": columns},
+                headers={**_HEADERS, "Content-Type": "application/json"},
+                timeout=_TIMEOUT * 3,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise MarketDataError(
+                f"TradingView scan failed for {len(chunk)} symbols: {exc}"
+            ) from exc
+
+        for row in payload.get("data", []) or []:
+            try:
+                out[row["s"]] = dict(zip(columns, row["d"]))
+            except (KeyError, TypeError) as exc:
+                raise MarketDataError(
+                    f"Unexpected TradingView scan row: {row!r} ({exc})"
+                ) from exc
+    return out
 
 
 def _pick_earnings_growth(data: dict) -> tuple[float | None, str | None]:

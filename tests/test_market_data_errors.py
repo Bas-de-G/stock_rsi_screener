@@ -95,6 +95,108 @@ def test_a_request_failure_is_not_mistaken_for_a_young_listing(monkeypatch):
     assert not isinstance(caught.value, NoHistoryYet)
 
 
+# --------------------------------------------------- the batch scan endpoint
+
+
+@pytest.fixture()
+def scanned(monkeypatch):
+    """Serve one canned /global/scan payload, and capture what was asked for."""
+    sent = {}
+
+    def _serve(payload):
+        def _post(url, json, headers, timeout):
+            sent.update(url=url, body=json)
+            return _Response(payload)
+
+        monkeypatch.setattr(tradingview.requests, "post", _post)
+        return sent
+
+    return _serve
+
+
+def test_one_request_carries_every_horizon(scanned):
+    """The whole point: four horizons are four more columns, not four more
+    round trips."""
+    sent = scanned({"data": [
+        {"s": "NYSE:ORCL", "d": [31.9, 142.79, 47.3, 142.79, 49.4, 142.79, 43.6, 142.79, 12.0, None]},
+    ]})
+    rows = tradingview.fetch_live_batch(["NYSE:ORCL"], ["60", "240", "1D", "1W"])
+
+    assert sent["body"]["columns"][:8] == [
+        "RSI|60", "close|60", "RSI|240", "close|240", "RSI", "close", "RSI|1W", "close|1W",
+    ]
+    assert rows["NYSE:ORCL"]["RSI|60"] == 31.9
+    assert rows["NYSE:ORCL"]["RSI|1W"] == 43.6
+
+
+def test_the_daily_interval_is_not_asked_for_twice(scanned):
+    """`1D` and `D` both mean the bare `RSI` column; asking for both would send
+    a duplicate and misalign every value after it against its column."""
+    assert tradingview.quote_fields(["1D", "D", ""]).count("RSI") == 1
+
+
+def test_a_row_decodes_per_horizon(scanned):
+    scanned({"data": [{"s": "NYSE:ORCL", "d": [31.9, 142.79, 43.6, 140.0, 12.0, None]}]})
+    rows = tradingview.fetch_live_batch(["NYSE:ORCL"], ["60", "1W"])
+    hourly = tradingview.decode_quote("NYSE:ORCL", rows["NYSE:ORCL"], interval="60")
+    weekly = tradingview.decode_quote("NYSE:ORCL", rows["NYSE:ORCL"], interval="1W")
+    assert (hourly.rsi, hourly.close) == (31.9, 142.79)
+    assert (weekly.rsi, weekly.close) == (43.6, 140.0)
+    assert hourly.earnings_growth == 12.0
+
+
+def test_a_young_listing_in_a_batch_is_still_too_young(scanned):
+    """The null-means-too-young rule must survive the move to batching -- it is
+    what keeps one recent listing from reddening the run."""
+    scanned({"data": [{"s": "NASDAQ:BSP", "d": [None, 43.22, None, -100.14]}]})
+    rows = tradingview.fetch_live_batch(["NASDAQ:BSP"], ["1W"])
+    with pytest.raises(NoHistoryYet, match="43.22"):
+        tradingview.decode_quote("NASDAQ:BSP", rows["NASDAQ:BSP"], interval="1W")
+
+
+def test_a_symbol_with_no_row_is_simply_absent(scanned):
+    scanned({"data": [{"s": "NYSE:ORCL", "d": [55.0, 142.79, None, None]}]})
+    rows = tradingview.fetch_live_batch(["NYSE:ORCL", "NASDAQ:NOPE"], ["1D"])
+    assert "NASDAQ:NOPE" not in rows
+
+
+def test_a_failed_scan_is_a_market_data_error(monkeypatch):
+    """A whole request failing is an outage, not one ticker's problem."""
+    import requests
+
+    def _boom(*a, **kw):
+        raise requests.RequestException("503")
+
+    monkeypatch.setattr(tradingview.requests, "post", _boom)
+    with pytest.raises(MarketDataError):
+        tradingview.fetch_live_batch(["NYSE:ORCL"], ["1D"])
+
+
+def test_the_watchlist_is_split_into_chunks(monkeypatch):
+    calls = []
+
+    def _post(url, json, headers, timeout):
+        calls.append(len(json["symbols"]["tickers"]))
+        return _Response({"data": []})
+
+    monkeypatch.setattr(tradingview.requests, "post", _post)
+    monkeypatch.setattr(tradingview, "SCAN_CHUNK", 2)
+    tradingview.fetch_live_batch(["A", "B", "C", "D", "E"], ["1D"])
+    assert calls == [2, 2, 1]
+
+
+def test_a_repeated_symbol_is_only_asked_for_once(monkeypatch):
+    calls = []
+
+    def _post(url, json, headers, timeout):
+        calls.append(json["symbols"]["tickers"])
+        return _Response({"data": []})
+
+    monkeypatch.setattr(tradingview.requests, "post", _post)
+    tradingview.fetch_live_batch(["NYSE:ORCL", "NYSE:ORCL"], ["1D"])
+    assert calls == [["NYSE:ORCL"]]
+
+
 # ------------------------------------------- what it means for `run`
 
 
@@ -131,20 +233,123 @@ dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
     path.write_text(config_yaml)
     config = load_config(path)
 
-    def _fetch(tv_symbol, period=14, interval="1D"):
-        if tv_symbol == "NASDAQ:BSP" and interval == "1W":
-            raise NoHistoryYet("NASDAQ:BSP has no RSI|1W yet (close is 43.22)")
-        return tradingview.LiveQuote(
-            symbol=tv_symbol, close=100.0, rsi=55.0,
-            earnings_growth=None, earnings_growth_period=None,
-        )
+    def _batch(tv_symbols, intervals, period=14, extra_fields=()):
+        rows = {}
+        for symbol in tv_symbols:
+            row = {}
+            for interval in intervals:
+                rsi = tradingview.rsi_field_name(period, interval)
+                close = tradingview._close_field_name(interval)
+                young = symbol == "NASDAQ:BSP" and interval == "1W"
+                row[rsi] = None if young else 55.0
+                row[close] = 43.22 if young else 100.0
+            rows[symbol] = row
+        return rows
 
-    monkeypatch.setattr(cli_module, "fetch_live_rsi", _fetch)
+    monkeypatch.setattr(cli_module, "fetch_live_batch", _batch)
     args = Namespace(date="2026-08-05", with_morningstar=False, horizon=None)
     assert cmd_run(config, args) == 0
 
     out = capsys.readouterr().out
     assert "no 1 week RSI yet" in out, "the skip should still be visible in the log"
+
+
+def test_a_symbol_missing_from_the_batch_is_asked_for_on_its_own(tmp_path, monkeypatch, capsys):
+    """The scan index is not quite the set the symbol endpoint serves, so a
+    listing can resolve there and be absent here. Falling back is what stops a
+    ticker quietly dropping off the dashboard."""
+    from argparse import Namespace
+
+    from screener import cli as cli_module
+    from screener.cli import cmd_run
+    from screener.config import load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(f"""
+tickers:
+  - {{symbol: ORCL, tradingview: "NYSE:ORCL", morningstar: xnys/orcl, markets: [sp500]}}
+  - {{symbol: NOPE, tradingview: "NASDAQ:NOPE", morningstar: xnas/nope, markets: [nasdaq]}}
+rsi: {{period: 14, threshold: 30, overbought: 70, interval: "1D"}}
+signal:
+  window_days: 14
+  window_unit: calendar
+  valuation_rule: price_below_fair_value
+  fire_without_valuation: true
+storage:
+  database: "{tmp_path / 't.db'}"
+  csv_dir: "{tmp_path}"
+  fair_values: "{tmp_path / 'fv.yaml'}"
+dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
+""")
+
+    def _batch(tv_symbols, intervals, period=14, extra_fields=()):
+        row = {}
+        for interval in intervals:
+            row[tradingview.rsi_field_name(period, interval)] = 55.0
+            row[tradingview._close_field_name(interval)] = 100.0
+        return {"NYSE:ORCL": row}  # NOPE simply absent
+
+    asked = []
+
+    def _single(tv_symbol, period=14, interval="1D"):
+        asked.append(tv_symbol)
+        return tradingview.LiveQuote(symbol=tv_symbol, close=7.5, rsi=61.0)
+
+    monkeypatch.setattr(cli_module, "fetch_live_batch", _batch)
+    monkeypatch.setattr(cli_module, "fetch_live_rsi", _single)
+    args = Namespace(date="2026-08-05", with_morningstar=False, horizon=None)
+    assert cmd_run(load_config(path), args) == 0
+
+    out = capsys.readouterr().out
+    assert asked == ["NASDAQ:NOPE"] * 4, "only the missing symbol is fetched singly"
+    assert "NOPE: RSI  61.00" in out
+    assert "ORCL: RSI  55.00" in out
+
+
+def test_a_symbol_missing_everywhere_fails_only_itself(tmp_path, monkeypatch, capsys):
+    """And when the fallback fails too, it is still one ticker's problem."""
+    from argparse import Namespace
+
+    from screener import cli as cli_module
+    from screener.cli import cmd_run
+    from screener.config import load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(f"""
+tickers:
+  - {{symbol: ORCL, tradingview: "NYSE:ORCL", morningstar: xnys/orcl, markets: [sp500]}}
+  - {{symbol: NOPE, tradingview: "NASDAQ:NOPE", morningstar: xnas/nope, markets: [nasdaq]}}
+rsi: {{period: 14, threshold: 30, overbought: 70, interval: "1D"}}
+signal:
+  window_days: 14
+  window_unit: calendar
+  valuation_rule: price_below_fair_value
+  fire_without_valuation: true
+storage:
+  database: "{tmp_path / 't.db'}"
+  csv_dir: "{tmp_path}"
+  fair_values: "{tmp_path / 'fv.yaml'}"
+dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
+""")
+
+    def _batch(tv_symbols, intervals, period=14, extra_fields=()):
+        row = {}
+        for interval in intervals:
+            row[tradingview.rsi_field_name(period, interval)] = 55.0
+            row[tradingview._close_field_name(interval)] = 100.0
+        return {"NYSE:ORCL": row}
+
+    def _single(tv_symbol, period=14, interval="1D"):
+        raise MarketDataError(f"TradingView returned no RSI/close for {tv_symbol}")
+
+    monkeypatch.setattr(cli_module, "fetch_live_batch", _batch)
+    monkeypatch.setattr(cli_module, "fetch_live_rsi", _single)
+    args = Namespace(date="2026-08-05", with_morningstar=False, horizon=None)
+    assert cmd_run(load_config(path), args) == 1
+
+    out = capsys.readouterr().out
+    assert "NOPE: RSI unavailable" in out
+    assert "ORCL: RSI  55.00" in out, "the healthy ticker must still be recorded"
 
 
 def test_a_broken_fetch_still_fails_the_run(tmp_path, monkeypatch):
@@ -173,8 +378,8 @@ dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
 """)
 
     def _boom(*a, **kw):
-        raise MarketDataError("TradingView request failed: 500")
+        raise MarketDataError("TradingView scan failed for 1 symbols: 500")
 
-    monkeypatch.setattr(cli_module, "fetch_live_rsi", _boom)
+    monkeypatch.setattr(cli_module, "fetch_live_batch", _boom)
     args = Namespace(date="2026-08-05", with_morningstar=False, horizon=None)
     assert cmd_run(config := load_config(path), args) == 1

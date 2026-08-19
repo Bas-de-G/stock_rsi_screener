@@ -54,7 +54,9 @@ from .storage import (
 from .tradingview import (
     MarketDataError,
     NoHistoryYet,
+    decode_quote,
     fetch_daily_closes,
+    fetch_live_batch,
     fetch_live_rsi,
 )
 
@@ -178,15 +180,50 @@ def cmd_run(config: Config, args) -> int:
         # run every hour lays down a genuine intraday series rather than
         # overwriting a single row all day.
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M")
+
+        # Every ticker, every horizon, in one request -- TradingView's scan
+        # endpoint takes a list of symbols and a list of columns, and RSI|60,
+        # RSI|240, RSI and RSI|1W are just four more columns. This used to be a
+        # GET per (ticker, horizon): 153 x 4 = 612 sequential requests, which
+        # was most of the run's wall time and the reason the watchlist could
+        # not grow. Measured at 637 symbols x 4 horizons in 0.75 seconds.
+        #
+        # A failure here is a real outage and fails the run; a symbol simply
+        # missing from the response is reported per ticker below, exactly like
+        # a null field.
+        try:
+            rows = fetch_live_batch(
+                [t.tradingview for t in config.tickers],
+                [h.tv_interval for h in horizons],
+                period=config.rsi.period,
+            )
+        except MarketDataError as exc:
+            print(f"\n  ! {exc}")
+            return 1
+
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
             for ticker in config.tickers:
                 try:
-                    quote = fetch_live_rsi(
-                        ticker.tradingview,
-                        period=config.rsi.period,
-                        interval=horizon.tv_interval,
-                    )
+                    row = rows.get(ticker.tradingview)
+                    if row is not None:
+                        quote = decode_quote(
+                            ticker.tradingview, row,
+                            period=config.rsi.period,
+                            interval=horizon.tv_interval,
+                        )
+                    else:
+                        # The scan index is not quite the same set as the
+                        # symbol endpoint, so a listing can resolve there and
+                        # be absent here. Ask for it on its own rather than let
+                        # it drop off the dashboard unremarked -- one extra
+                        # request for a case that should never happen beats a
+                        # ticker quietly going missing.
+                        quote = fetch_live_rsi(
+                            ticker.tradingview,
+                            period=config.rsi.period,
+                            interval=horizon.tv_interval,
+                        )
                 except NoHistoryYet as exc:
                     # Expected for a recent listing, and it fixes itself as the
                     # bars accumulate. Not a failure: letting it set exit_code
