@@ -234,11 +234,16 @@ def build_all_dashboards(store: Store, config: Config, output: Path) -> list[Pat
 
     The default horizon becomes index.html so the published URL keeps working.
     """
+    from .scoreboard import build_scoreboard
+
     output.parent.mkdir(parents=True, exist_ok=True)
     written = []
     for h in config.horizons:
         name = output.name if h.key == DEFAULT_HORIZON else f"{h.key}{output.suffix}"
         written.append(build_dashboard(store, config, output.parent / name, horizon=h.key))
+    # The track record sits alongside rather than inside: those pages answer
+    # "what should I look at today", this one answers "should I believe them".
+    written.append(build_scoreboard(store, config, output.parent / "history.html"))
     return written
 
 
@@ -664,7 +669,7 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
         f'<a class="tf{" on" if h.key == horizon.key else ""}" '
         f'href="{page_for(h)}">{html.escape(h.label)}</a>'
         for h in config.horizons
-    )
+    ) + '<a class="tf" href="history.html">Track record</a>'
     market_tabs = '<label for="mk-all">All</label>' + "".join(
         f'<label for="mk-{m}">{html.escape(MARKET_LABELS[m])}</label>'
         for m in config.active_markets

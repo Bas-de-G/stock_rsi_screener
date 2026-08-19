@@ -106,7 +106,33 @@ CREATE TABLE IF NOT EXISTS earnings_calendar (
 );
 """
 
-SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL + _EARNINGS_DDL
+# What happened after each pattern, measured in daily bars from the signal.
+#
+# Safe to keep in the database, unlike the recommendation journal: every row
+# here is *derived* from price history that is itself reconstructable from
+# Yahoo, so losing the table costs one `evaluate` run and nothing else. The
+# journal records a judgement made at a moment and can never be recomputed;
+# this records arithmetic.
+_OUTCOMES_DDL = """
+CREATE TABLE IF NOT EXISTS outcomes (
+    symbol        TEXT NOT NULL,
+    horizon       TEXT NOT NULL,
+    direction     TEXT NOT NULL,
+    up2_date      TEXT NOT NULL,
+    bars          INTEGER NOT NULL,  -- trading days after the signal
+    entry         REAL NOT NULL,
+    exit          REAL NOT NULL,
+    -- Signed to the call: positive means the signal was right, so a sell
+    -- followed by a fall scores positive just as a buy followed by a rise does.
+    return_pct    REAL NOT NULL,
+    max_gain      REAL NOT NULL,
+    max_drawdown  REAL NOT NULL,
+    evaluated_at  TEXT NOT NULL,
+    PRIMARY KEY (symbol, horizon, direction, up2_date, bars)
+);
+"""
+
+SCHEMA = _RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL + _EARNINGS_DDL + _OUTCOMES_DDL
 
 
 
@@ -478,6 +504,59 @@ class Store:
                  _dt.datetime.now().isoformat(timespec="seconds")),
             )
         self._conn.commit()
+
+    def replace_outcomes(self, outcomes) -> int:
+        """Write measured outcomes, overwriting any earlier measurement.
+
+        Overwrite rather than skip: a window measured last week against a
+        history that has since been corrected should take the new answer. These
+        are derived numbers, so the latest computation is by definition the
+        best one.
+        """
+        import datetime as _dt
+
+        stamp = _dt.datetime.now().isoformat(timespec="seconds")
+        rows = [
+            (o.symbol, o.horizon, o.direction, o.up2_date, o.bars, o.entry,
+             o.exit, o.return_pct, o.max_gain, o.max_drawdown, stamp)
+            for o in outcomes
+        ]
+        if not rows:
+            return 0
+        with closing(self._conn.cursor()) as cur:
+            cur.executemany(
+                """INSERT INTO outcomes (symbol, horizon, direction, up2_date, bars,
+                                         entry, exit, return_pct, max_gain,
+                                         max_drawdown, evaluated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol, horizon, direction, up2_date, bars) DO UPDATE SET
+                       entry=excluded.entry, exit=excluded.exit,
+                       return_pct=excluded.return_pct, max_gain=excluded.max_gain,
+                       max_drawdown=excluded.max_drawdown,
+                       evaluated_at=excluded.evaluated_at""",
+                rows,
+            )
+        self._conn.commit()
+        return len(rows)
+
+    def all_outcomes(self, bars: int | None = None, horizon: str | None = None):
+        """Measured outcomes, optionally for one window or one timeframe."""
+        from .outcomes import Outcome
+
+        sql = ("SELECT symbol, horizon, direction, up2_date, bars, entry, exit,"
+               " return_pct, max_gain, max_drawdown FROM outcomes")
+        clauses, params = [], []
+        if bars is not None:
+            clauses.append("bars=?")
+            params.append(bars)
+        if horizon is not None:
+            clauses.append("horizon=?")
+            params.append(horizon)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(sql, params)
+            return [Outcome(*row) for row in cur.fetchall()]
 
     def earnings_dates(self) -> dict[str, tuple[str | None, str | None]]:
         """Every symbol's (next, last) release date, as ISO strings."""

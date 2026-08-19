@@ -38,6 +38,9 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/morningstar.py` | logged-in scraping of price + fair value |
 | `screener/dashboard.py` | the self-contained HTML page |
 | `screener/earnings.py` | the event-risk window around a results release |
+| `screener/journal.py` | the append-only `recommendations.csv` |
+| `screener/outcomes.py` | forward returns, and the random-entry baseline |
+| `screener/scoreboard.py` | the `history.html` track-record page |
 | `screener/universe.py` | choosing which companies belong on the watchlist |
 | `screener/notify.py` | the phone (ntfy), webhook and GitHub-issue transports |
 | `screener/notified.py` | the committed `notifications.json` — what's already been announced |
@@ -87,6 +90,29 @@ be batched, which makes it the real cost of a bigger watchlist — hence
 `--max-new` for first-time seeding and the ~daily refresh for intraday history
 (`INTRADAY_REFRESH_AFTER`). Check what a change does to *that* count, not the
 RSI one.
+
+**Never report a hit rate without the baseline next to it.** Equities drift
+upward, so any long strategy scores above half and returns positively over a
+rising sample — including entries picked by a coin. `outcomes.baseline_outcomes`
+is that coin, and the only number worth reading is the gap. A cohort table
+without it will be believed, and it should not be.
+
+**A forward return is only measurable where the daily history reaches back to
+the signal.** Each horizon is backfilled to its own depth — five years of weekly
+bars against two of daily ones — so a 2023 weekly pattern sits years before the
+first daily bar, and "the next twenty bars" silently becomes twenty bars from
+two years later. That one bug reported the 20-day buy cohort as +11.4% when it
+is +1.6%. `forward_outcomes` refuses to measure an uncovered signal; if you
+change how history is fetched, check that guard still holds.
+
+**The `signals` table is a live view, not a ledger.** `cli._rescore_signals`
+rewrites every pattern's `price`, `fair_value` and `valuation_pass` whenever a
+fair value is recorded, right back through the history. That is correct for the
+dashboard — an old pattern should show today's verdict — and fatal for
+measurement, because a March signal then carries August's valuation and any hit
+rate computed from it is reading the future. Anything asking "was this a good
+call?" must read `recommendations.csv`, which is written once and never
+touched again.
 
 **Notification state must never live in `data/screener.db`.** The database is
 only committed by the last run of the day (the deferral guard in `daily.yml` —

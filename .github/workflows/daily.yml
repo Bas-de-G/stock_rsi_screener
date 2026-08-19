@@ -137,6 +137,13 @@ jobs:
       - name: Run screener
         run: python -m screener.cli run
 
+      # Measures what happened after every pattern on record, from price
+      # history already on disk. Cheap (a few seconds) and idempotent, so it
+      # runs unconditionally: the track-record page is built from its output,
+      # and a stale one is worse than none.
+      - name: Measure past signals
+        run: python -m screener.cli evaluate
+
       # Writes index.html (1d) plus 1h.html, 4h.html and 1w.html alongside it.
       # SCREENER_WEBHOOK_URL is optional: unset, `send_webhook` returns False
       # and the deal is only printed. Note an Actions secret on a public repo
@@ -183,13 +190,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # notifications.json is committed on EVERY run, deferral or not. It
-          # records which strong buys have already been emailed, and it is
-          # useless unless the next run half an hour later can read it back --
-          # which is exactly what deferring it broke: the same signal was
-          # announced four or five times over an afternoon. A few hundred
-          # bytes of JSON, so it costs nothing to write every time.
-          git add notifications.json 2>/dev/null || true
+          # Both of these are committed on EVERY run, deferral or not.
+          #
+          # notifications.json records which strong buys have already been
+          # emailed, and is useless unless the next run half an hour later can
+          # read it back -- which is exactly what deferring it broke: the same
+          # signal was announced four or five times over an afternoon.
+          #
+          # recommendations.csv is the append-only record of what the screener
+          # said and when. Same reasoning, higher stakes: a row that never gets
+          # committed is a day of evidence gone, and it cannot be reconstructed
+          # afterwards because the verdict depended on what was known then.
+          #
+          # Both are small and text, so they cost nothing to write every time.
+          git add notifications.json recommendations.csv 2>/dev/null || true
 
           # Late-day runs snapshot the database; earlier ones defer.
           # Deliberately ">= 21" rather than "== 21": GitHub delivers this

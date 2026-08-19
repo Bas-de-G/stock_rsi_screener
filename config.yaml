@@ -452,6 +452,10 @@ storage:
   # Which strong buys have already been emailed. Committed on every run, so a
   # signal announced at 14:00 is still known to be announced at 14:30.
   notifications: notifications.json
+  # Append-only record of every verdict published, as it stood at the time.
+  # The sample "is any of this working?" gets answered from — see
+  # screener/journal.py for why it cannot live in the database.
+  recommendations: recommendations.csv
 
 dashboard:
   # Used only to link back from a webhook notification.

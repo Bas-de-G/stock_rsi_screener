@@ -349,6 +349,50 @@ and stale valuations are cleared from the database on the next run.
 
 ---
 
+## Has it worked?
+
+The dashboards say what to look at. `history.html` says whether to believe
+them, and it is linked from every page.
+
+```bash
+python -m screener.cli evaluate                       # measure every past pattern
+python -m screener.cli backtest --bars 20             # hit rate vs a random entry
+python -m screener.cli backtest --bars 60 --csv o.csv # ...and export the rows
+```
+
+Nothing is captured for this. Forward returns are derived from price history
+already on disk, so the first run measures the whole back catalogue and
+re-running gives the same answer.
+
+**Read the edge column, not the mean.** Equities drift upward, so any long
+strategy beats zero over a rising sample — including entries chosen by a coin.
+The baseline row *is* that coin. On the current data, at 20 trading days:
+
+| Cohort | n | Hit rate | Mean | Edge |
+|---|---|---|---|---|
+| Random entry | 7,490 | 50.4% | +1.4% | — |
+| Buy, all timeframes | 1,692 | 54.7% | +1.6% | **+0.3%** |
+| Sell, all timeframes | 1,901 | 45.0% | −2.7% | **−4.0%** |
+
+So the buy side has a small edge and the sell side has been actively wrong —
+consistently, on every timeframe. That is roughly what you would expect of a
+mean-reversion short in a market that spent the period rising, and it is the
+first thing worth testing further rather than a verdict.
+
+Two things these numbers are **not**. The watchlist is today's companies, all
+still listed and still large, so the sample quietly excludes everything that
+failed. And there is no "strong buy" cohort: fair values only exist from
+2026-07-27, and re-scoring back-applies today's to every old pattern, so
+splitting this sample by valuation would be reading the future.
+
+That last comparison is what `recommendations.csv` is for. Every verdict the
+dashboard publishes is appended to it once, as it stood at the time, and never
+rewritten — including the ones suspended for earnings that nobody was alerted
+to, because those are what make "did suspending them help?" answerable. It
+grows forward from now, and it is the honest sample.
+
+---
+
 ## Growing the watchlist
 
 ```bash
@@ -740,7 +784,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 480 tests
+python -m pytest tests/ -q      # 517 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and
