@@ -70,8 +70,9 @@ jobs:
           c = load_config()
           with Store(Path('/tmp/ci.db')) as s:
               outs = build_all_dashboards(s, c, Path('/tmp/ci/index.html'))
-          assert len(outs) == len(c.horizons), 'one page per horizon expected'
+          assert len(outs) == len(c.horizons) + 1, 'one page per horizon, plus the track record'
           assert any(o.name == 'index.html' for o in outs), 'default horizon must be index.html'
+          assert any(o.name == 'history.html' for o in outs), 'track record must be built too'
           for o in outs:
               assert o.stat().st_size > 0, f'{o.name} came out empty'
               assert '<script' not in o.read_text().lower(), f'{o.name} grew a script tag'
