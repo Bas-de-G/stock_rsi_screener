@@ -152,6 +152,92 @@ python -m screener.cli fair-value IBM 225
 If you'd rather nothing fired until a fair value confirms it, set
 `fire_without_valuation: false` in `config.yaml` for strict mode.
 
+### Rule #1, run backwards
+
+Phil Town's method, on every card. Run forwards — pick a growth rate, compute a
+sticker price, compare — it marked **204 of 226 companies red**. That is
+faithful to Phil, who expects to find a handful of businesses a year, and
+useless as a screen: a verdict that says "no" 90% of the time carries almost no
+information and cannot rank the 204.
+
+So it runs **backwards**. Instead of asking what a company is worth at a rate we
+picked, it asks what rate today's price already demands:
+
+> **Price demands 15.3% a year for ten years · this company has delivered 2.6–7.6%**
+
+That sentence needs no verdict to be useful. It is then scored against what the
+company has actually delivered, expressed as a **range** rather than a point:
+
+| | |
+|---|---|
+| **conservative** | the lowest of its growth rates — the pessimistic case |
+| **base** | the median, capped at sales growth + 5pp — the central case |
+| **headroom** | base minus what the price demands, in percentage points |
+
+Headroom is continuous, so it ranks. On the live watchlist the score fills all
+ten buckets with a median of 5, and the bands land at **18% green / 39% amber /
+43% red**.
+
+The two valuations run side by side. Morningstar's number is analyst-vetted and
+independent; Rule #1 is a formula dominated by one assumption — `MOS ≈ EPS ×
+(1+g)¹⁰ × P/E ÷ 8`, where g at 10% versus 15% moves the answer about 2.4×. The
+card therefore shows a score, the rate demanded and the range delivered, never a
+price to act on. `recommendations.csv` records both so it can eventually be
+settled.
+
+**Where it departs from the book**, since three of Phil's inputs are in no free
+feed:
+
+| His input | Substitute | Why |
+|---|---|---|
+| Equity (book value) growth, or analysts' estimate — the lower | Lowest of trailing EPS growth, full-year EPS growth **and sales growth** | No feed serves historical book value. Sales is in there because earnings can be engineered: without it AT&T scored a fictitious 20%/yr off one good year. |
+| Historical average P/E, capped at 2× growth | 2× growth, held between 8 and 25 | No historical average available, and current P/E is worst here — signals fire when a stock is oversold, i.e. at its multiple's trough. `2 × 0%` is a P/E of zero, hence the floor. |
+| Normalised EPS | Trailing EPS, with a large jump flagged | Can't normalise from here. LYFT reads +3,166% trailing growth — one year in the costume of a decade. Flagged readings can't be green. |
+
+Two further corrections. The **base case is capped at sales growth + 5pp**,
+because earnings cannot outgrow sales for a decade — without it AT&T's median
+reads 20% off the same one good year and scores 9/10 green. And growth is capped
+at **20%, not 15%**: capping at exactly the required return makes the model
+degenerate, since the `(1+g)¹⁰` and the `1.15¹⁰` cancel and every fast grower
+lands at a sticker identical to its market price — all 226, exactly 0.0% away.
+
+The **Big Four**, not five: ROIC, EPS growth, sales growth and cash-flow growth
+each clearing 10%. The fifth is equity growth, and counting an absent test as a
+pass would flatter every company equally. Quality shifts the score by up to
+1.5 points either way; it does not set it.
+
+27 of 253 get **no reading at all** — no positive earnings to project. Refusing
+is a real answer; refusing *everything* was the bug.
+
+On the card it is **one small coloured box**, between the fair value it seconds
+and the earnings growth it partly rests on:
+
+> **`10/10`  Buffett score   ✓ agrees with fair value**
+
+Called the *Buffett score* rather than *Rule #1* because that is what it is —
+Phil Town's method is an explicit mechanisation of Buffett's — and because
+"Rule #1" means nothing to anyone who hasn't read the book, whose title stays in
+the tooltip. Written `10/10` rather than `10` because a bare score says neither
+its scale nor whether high is good; in finance it is as often a risk rating.
+
+Hover for the reasoning: the rate the price demands, the range delivered, the
+sticker and margin-of-safety prices, the Big Four count. A second opinion that
+ranks the page and decides nothing should not out-shout the verdict beside it.
+
+**What it does with that verdict: ranks, never gates.** Rule #1 cannot add or
+remove a 🚀. It sorts cards *within* their category — the rocket category holds
+Rule #1 scores from 2 to 10 today and treated them identically — breaks ties for
+the deal of the day, and marks the rare cards where the two valuations agree
+(3 of 15 live strong buys) — beside the score, where it can name both parties,
+rather than as a bare "both agree" badge that named neither. A company Rule #1 cannot read ranks mid-table, not
+last: no opinion is not a bad opinion.
+
+It stays that way until it has been measured, and measuring it can only happen
+forwards. Its inputs are *current* fundamentals with no history behind them, so
+Rule #1 is no more backtestable than fair value is. `recommendations.csv`
+records the score on every published verdict from today, and that is the
+sample — months of it, not weeks.
+
 ### Earnings suspend a signal
 
 RSI cannot tell an ordinary correction from positioning ahead of results. Both
@@ -791,7 +877,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 540 tests
+python -m pytest tests/ -q      # 587 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

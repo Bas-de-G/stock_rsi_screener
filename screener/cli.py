@@ -29,6 +29,7 @@ from .earnings import earnings_window
 from .earnings import to_date as to_release_date
 from .notified import Ledger, key_for
 from .outcomes import FORWARD_BARS as OUTCOME_BARS
+from .ruleone import FIELDS as RULE_ONE_FIELDS
 from .notify import (
     format_signal,
     format_strong_buy,
@@ -283,13 +284,14 @@ def cmd_run(config: Config, args) -> int:
                 [t.tradingview for t in config.tickers],
                 [h.tv_interval for h in horizons],
                 period=config.rsi.period,
-                extra_fields=EARNINGS_FIELDS,
+                extra_fields=EARNINGS_FIELDS + RULE_ONE_FIELDS,
             )
         except MarketDataError as exc:
             print(f"\n  ! {exc}")
             return 1
 
         _record_earnings_dates(store, config, rows)
+        _record_rule_one(store, config, rows, horizons)
 
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
@@ -675,6 +677,43 @@ def _record_earnings_dates(store: Store, config: Config, rows: dict) -> int:
         )
         recorded += 1
     return recorded
+
+
+def _record_rule_one(store: Store, config: Config, rows: dict, horizons) -> int:
+    """Compute and store each company's Rule #1 reading.
+
+    Free, like the earnings dates: the six fundamentals it needs are more
+    columns on the batch request that already fetched RSI.
+
+    Priced off the live close from the batch response rather than a stored bar,
+    so the sticker gap is against what the stock costs right now.
+    """
+    from .ruleone import from_scanner
+
+    close_field = _close_field_for(horizons)
+    recorded = 0
+    for ticker in config.tickers:
+        row = rows.get(ticker.tradingview)
+        if row is None:
+            continue
+        store.upsert_rule_one(
+            ticker.symbol, from_scanner(row, price=row.get(close_field))
+        )
+        recorded += 1
+    return recorded
+
+
+def _close_field_for(horizons) -> str:
+    """The batch column carrying a usable current price.
+
+    The scan is asked for a close per horizon, and they are the same number
+    during a session. The daily one is preferred because it is the only one
+    that survives a weekend.
+    """
+    from .tradingview import _close_field_name
+
+    keys = [h.tv_interval for h in horizons]
+    return _close_field_name("1D" if "1D" in keys else keys[0])
 
 
 def _release_stamp(value) -> str | None:

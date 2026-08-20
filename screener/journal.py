@@ -22,8 +22,11 @@ before the next run reads it. It is also the format the analysis actually
 wants -- readable in a diff, openable in Excel, one `read_csv` from pandas.
 
 Columns are flat rather than a JSON blob so a spreadsheet is useful without
-parsing anything. `extra` carries whatever a later factor adds (a Rule #1
-score, a composite weighting) without a migration, and stays empty until then.
+parsing anything -- and a new factor gets real columns rather than being hidden
+in `extra`, because a spreadsheet is where these numbers get argued with. Rule
+#1 travels as seven of them, the growth rate included, since a sticker price
+without the assumption behind it cannot be argued with at all. `extra` remains
+for anything not worth a column of its own.
 """
 
 from __future__ import annotations
@@ -64,6 +67,19 @@ class Recommendation:
     earnings_sessions: int | None   # trading days to the release, if known
     margin: float                   # the horizon's required headroom
     leverage: int
+    # Phil Town's Rule #1, as it stood. Promoted to real columns rather than
+    # left in `extra`, because a spreadsheet is where these get argued with --
+    # and the growth rate has to travel with the sticker price it produced.
+    r1_score: int | None = None
+    r1_band: str = ""
+    r1_growth: float | None = None          # base case used for the sticker
+    r1_conservative_growth: float | None = None
+    r1_implied_growth: float | None = None  # what the price demanded
+    r1_headroom: float | None = None        # base minus implied, in points
+    r1_sticker: float | None = None
+    r1_mos: float | None = None
+    r1_to_sticker: float | None = None      # (sticker - price) / price
+    r1_big_four: int | None = None
     schema: int = SCHEMA_VERSION
     extra: str = ""                 # JSON, for factors added later
 
@@ -188,4 +204,27 @@ def recommendation_from(row, signal, horizon, now: dt.datetime | None = None) ->
         earnings_sessions=row.earnings.sessions,
         margin=horizon.margin,
         leverage=horizon.leverage,
+        **_rule_one_fields(getattr(row, "rule_one", None)),
     )
+
+
+def _rule_one_fields(reading) -> dict:
+    """The Rule #1 columns, or empties where there is no reading.
+
+    A company with no usable earnings gets blanks rather than zeros: zero is a
+    score, and "we could not value this" is not one.
+    """
+    if reading is None or not reading.applicable:
+        return {"r1_band": reading.band if reading is not None else ""}
+    return {
+        "r1_score": reading.score,
+        "r1_band": reading.band,
+        "r1_growth": reading.growth,
+        "r1_conservative_growth": reading.conservative_growth,
+        "r1_implied_growth": reading.implied_growth,
+        "r1_headroom": reading.headroom,
+        "r1_sticker": reading.sticker,
+        "r1_mos": reading.mos,
+        "r1_to_sticker": reading.to_sticker,
+        "r1_big_four": reading.big_four,
+    }
