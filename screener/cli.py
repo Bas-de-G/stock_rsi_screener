@@ -27,7 +27,7 @@ from .morningstar import (
 )
 from .earnings import earnings_window
 from .earnings import to_date as to_release_date
-from .notified import Ledger, key_for
+from .notified import COOLDOWN, Ledger, key_for
 from .outcomes import FORWARD_BARS as OUTCOME_BARS
 from .ruleone import FIELDS as RULE_ONE_FIELDS
 from .notify import (
@@ -1255,12 +1255,12 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
     of noise. Only a pattern that just completed is worth interrupting someone
     for.
 
-    One message per symbol per horizon: a name that fires three times in six
-    hours on the 1h chart is one piece of news, not three.
-
-    And once ever, not once per run. The ledger is a small committed file
-    rather than a table in the database, because the database is only
-    committed by the last run of the day -- see `screener.notified`.
+    Two dedupe rules, because one was not enough. Once per *pattern*, ever --
+    the ledger is a small committed file rather than a table in the database,
+    because the database is only committed by the last run of the day. And
+    once per *symbol per horizon* per trading session, because intraday
+    patterns complete often enough that eleven distinct ones can be genuinely
+    new and still be one piece of news. See `screener.notified`.
     """
     from .dashboard import _collect
 
@@ -1287,6 +1287,19 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             up2 = max(s.up2_date for s in fresh)
             key = key_for("strong", horizon.key, row.symbol, up2)
             if ledger.seen(key):
+                continue
+            # A new pattern on a name announced hours ago is a better entry on
+            # the same idea, not a new idea. Deliberately *not* recorded in the
+            # ledger: recording it would restart the clock on every run and the
+            # quiet period would never end. Not recording is safe because the
+            # freshness window on the intraday charts is measured in hours, so
+            # a pattern held back today has aged out by the time the cooldown
+            # lifts.
+            last = ledger.last_sent("strong", horizon.key, row.symbol)
+            if last is not None and (elapsed := dt.datetime.now() - last) < COOLDOWN:
+                hours = elapsed.total_seconds() / 3600
+                print(f"  {row.symbol} [{horizon.key}] — new pattern, but announced "
+                      f"{hours:.0f}h ago; holding off")
                 continue
             best = max(fresh, key=lambda s: s.up2_date)
             discount = (

@@ -848,6 +848,30 @@ it rather than each carrying their own copy.
 Only if the API can't be reached does it err towards sending: a repeat email is
 an annoyance, a missed strong buy defeats the point.
 
+### One name, one alert a session
+
+Both checks above are keyed on the *pattern*, which was correct and turned out
+not to be enough. Intraday bars are stamped with the minute the run happened, so
+a genuinely new pattern can complete on almost every half-hourly run. ANET
+announced itself eleven times on the 1 hour chart in six hours on 19 August, and
+every one of those alerts passed both checks honestly. Thirty alerts that day
+were really about a dozen opportunities.
+
+So a symbol also stays quiet on a timeframe for **12 hours** after it's been
+announced, however many new patterns complete in the meantime. Replaying the 58
+alerts on file, that turns them into 34 — the worst day drops from 30 to 13 —
+without losing a single distinct opportunity.
+
+Twelve hours rather than a day, and the difference is not arbitrary: anywhere
+from 8 to 18 hours gives exactly the same result, but at 24 hours four names
+that came back the following morning (18 to 21 hours later) are silenced,
+because the market opens at roughly the same time every day. Twelve sits in the
+middle of that plateau — longer than a trading session, shorter than the gap to
+the next one.
+
+A held signal isn't written to the ledger. Recording it would push the quiet
+period forward on every run and the name would never be heard from again.
+
 ---
 
 ## When Morningstar changes its layout
