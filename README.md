@@ -349,10 +349,17 @@ and stale valuations are cleared from the database on the next run.
 
 ---
 
-## Has it worked?
+## The Historical Dashboard
 
-The dashboards say what to look at. `history.html` says whether to believe
-them, and it is linked from every page.
+The four screener pages say what to look at. `history.html` says whether to
+believe them, and it is linked from every one.
+
+Every past recommendation is rebased to **100** on the day it fired and drawn
+forward for 60 trading days, so a $5 stock and a $500 one share an axis. The
+heavy line is the cohort average, the dashed one a randomly-timed entry over
+the same span. Pick a **cohort** (strong buy by default; buy and sell sit
+behind *Other signals*) and a **timeframe**, and the panel redraws — with no
+JavaScript, because the selectors are radio buttons and CSS sibling rules.
 
 ```bash
 python -m screener.cli evaluate                       # measure every past pattern
@@ -784,7 +791,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 517 tests
+python -m pytest tests/ -q      # 540 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

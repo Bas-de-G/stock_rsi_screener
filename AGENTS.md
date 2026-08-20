@@ -40,7 +40,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/earnings.py` | the event-risk window around a results release |
 | `screener/journal.py` | the append-only `recommendations.csv` |
 | `screener/outcomes.py` | forward returns, and the random-entry baseline |
-| `screener/scoreboard.py` | the `history.html` track-record page |
+| `screener/historical.py` | the `history.html` Historical Dashboard |
 | `screener/universe.py` | choosing which companies belong on the watchlist |
 | `screener/notify.py` | the phone (ntfy), webhook and GitHub-issue transports |
 | `screener/notified.py` | the committed `notifications.json` — what's already been announced |
