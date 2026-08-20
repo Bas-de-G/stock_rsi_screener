@@ -144,6 +144,25 @@ jobs:
       - name: Measure past signals
         run: python -m screener.cli evaluate
 
+      # The database only ever grew: bars are upserted and never removed, so
+      # three years of hourly history had piled up behind a dashboard that
+      # draws ninety bars. 78 MB, past the 50 MB at which GitHub starts
+      # warning about a file in a repository.
+      #
+      # This drops intraday bars older than BOTH the chart window and the
+      # symbol's first daily bar. Nothing can read those: the chart never
+      # plots back that far, and `evaluate` already refuses to measure a
+      # signal the daily series doesn't cover. Verified by replaying a copy of
+      # the live database -- 283,005 bars removed, every dashboard page
+      # byte-identical, all 17,828 measured outcomes unchanged, 78 MB → 46 MB.
+      #
+      # Unconditional because it is a no-op once the backlog is gone: the
+      # delete matches nothing and the VACUUM is skipped. Backfill's Yahoo
+      # windows (2 months hourly, 6 months 4-hourly) sit well inside what is
+      # kept, so there is nothing to re-fetch and re-prune each day.
+      - name: Prune unreadable history
+        run: python -m screener.cli prune
+
       # Writes index.html (1d) plus 1h.html, 4h.html and 1w.html alongside it.
       # SCREENER_WEBHOOK_URL is optional: unset, `send_webhook` returns False
       # and the deal is only printed. Note an Actions secret on a public repo

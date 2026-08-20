@@ -1379,6 +1379,30 @@ def cmd_dashboard(config: Config, args) -> int:
     return 0
 
 
+def cmd_prune(config: Config, args) -> int:
+    """Throw away intraday bars no reader can reach.
+
+    The database is committed to git and only ever grew: three years of hourly
+    history behind a dashboard that draws ninety bars, 78 MB against GitHub's
+    50 MB warning. See `Store.prune_unmeasurable_intraday` for why a bar older
+    than both the chart window and the symbol's first daily bar is unreachable
+    rather than merely old.
+
+    Safe to run on every schedule -- it is a no-op once the backlog is gone.
+    """
+    path = config.storage.database
+    before = path.stat().st_size if path.exists() else 0
+    with Store(path) as store:
+        removed = store.prune_unmeasurable_intraday(config.dashboard.chart_days)
+    after = path.stat().st_size if path.exists() else 0
+    if not removed:
+        print("Nothing to prune — every intraday bar on file is still readable.")
+        return 0
+    print(f"Pruned {removed:,} unreadable intraday bar(s); "
+          f"{before / 1e6:.1f} MB → {after / 1e6:.1f} MB.")
+    return 0
+
+
 def cmd_evaluate(config: Config, args) -> int:
     """Measure what happened after every recorded pattern.
 
@@ -1649,6 +1673,11 @@ def build_parser() -> argparse.ArgumentParser:
         "evaluate", help="measure what happened after every recorded pattern"
     )
     p_eval.set_defaults(func=cmd_evaluate)
+
+    p_prune = sub.add_parser(
+        "prune", help="drop intraday bars older than both the chart and the daily history"
+    )
+    p_prune.set_defaults(func=cmd_prune)
 
     p_bt = sub.add_parser(
         "backtest", help="hit rate and returns per cohort, against a random-entry baseline"

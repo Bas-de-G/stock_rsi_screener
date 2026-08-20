@@ -704,6 +704,28 @@ repo root — see "Where fair values are stored".
 Reruns of the same day update in place rather than duplicating, and a
 backfilled RSI never overwrites a live TradingView reading.
 
+`screener.db` is committed, so it can't be allowed to grow forever — and it
+only ever grew, because bars are upserted and never removed. Three years of
+hourly history had accumulated behind a dashboard that draws ninety bars, at
+which point the file was 78 MB and GitHub warns above 50 MB.
+
+```bash
+python -m screener.cli prune      # drop history nothing can read
+```
+
+This drops intraday bars older than *both* the chart window and the symbol's
+first daily bar. Those two conditions together mean unreadable, not merely old:
+the chart never plots back that far, and the forward-return measurement already
+refuses to score a signal the daily series doesn't cover, so an hourly bar from
+before the daily history prices a pattern whose outcome is unknowable. Both
+halves matter — SPCX listed recently enough that its 4h history predates its
+daily history, and testing the daily line alone shortened its chart from 90
+bars to 76.
+
+Checked by replaying a copy of the live database: 283,005 bars removed, every
+dashboard page byte-identical, all 17,828 measured outcomes unchanged, 78 MB →
+46 MB. It runs on every scheduled run and is a no-op once the backlog is gone.
+
 Inspect it without SQL:
 
 ```bash
