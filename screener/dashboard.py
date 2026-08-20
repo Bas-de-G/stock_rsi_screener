@@ -54,6 +54,8 @@ class Row:
     # Where this company sits relative to its next results. A signal inside
     # that window is shown but not acted on -- see `screener.earnings`.
     earnings: EarningsWindow = CLEAR_WINDOW
+    # Phil Town's Rule #1 reading, or None where it has never been computed.
+    rule_one: object | None = None
 
     @property
     def suspended(self) -> bool:
@@ -281,6 +283,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     valuations = {v.symbol: v for v in store.latest_valuations()}
     signals = store.all_signals(horizon=horizon.key)
     releases = store.earnings_dates()
+    readings = store.rule_one_readings()
     # Whether results are near is a fact about the company, not the timeframe,
     # so it is judged once against the daily bars -- "three trading days" means
     # the same thing on the 1h page as on the 1w one.
@@ -320,6 +323,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 markets=ticker.markets,
                 horizon=horizon,
                 earnings=_window_for(ticker.symbol, releases, sessions),
+                rule_one=readings.get(ticker.symbol),
             )
         )
 
@@ -600,6 +604,8 @@ def _card(row: Row, config: Config, horizon) -> str:
     else:
         growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
 
+    rule_one_block = _rule_one_block(row.rule_one)
+
     leverage_block = ""
     if row.fired or row.sell_fired:
         leverage_block = (
@@ -632,6 +638,7 @@ def _card(row: Row, config: Config, horizon) -> str:
   {patterns}
   {valuation_block}
   {growth_block}
+  {rule_one_block}
   {leverage_block}
   <div class="actions">
     <a class="btn primary" href="{html.escape(row.morningstar_url)}"
@@ -640,6 +647,36 @@ def _card(row: Row, config: Config, horizon) -> str:
        target="_blank" rel="noopener noreferrer">TradingView</a>
   </div>
 </article>"""
+
+
+def _rule_one_block(reading) -> str:
+    """The Rule #1 verdict on a card: a band, a score, and the assumption.
+
+    The growth rate is printed next to the score deliberately. A sticker price
+    moves about 2.4x between a 10% and a 15% assumption, so the number is only
+    honest in the company of the guess it rests on.
+    """
+    if reading is None:
+        return ""
+    if not reading.applicable:
+        return (f'<p class="ruleone none">Rule #1: not applicable — '
+                f'{html.escape(reading.reason)}.</p>')
+
+    gap = reading.to_sticker
+    gap_text = f"{gap * 100:+.0f}% to sticker" if gap is not None else ""
+    caution = (
+        f'<span class="r1-caution" title="{html.escape(reading.caution)}">⚠</span>'
+        if reading.caution else ""
+    )
+    return f"""<div class="ruleone r1-{reading.band}">
+  <p class="r1-head">
+    <span class="r1-score">{reading.score}<span class="r1-of">/10</span></span>
+    <span class="r1-band">Rule&nbsp;#1</span>{caution}
+    <span class="r1-gap">{gap_text}</span>
+  </p>
+  <p class="r1-detail">Sticker {reading.sticker:,.2f} · MOS {reading.mos:,.2f}
+     · {reading.growth:.1f}% growth assumed · Big Four {reading.big_four}/4</p>
+</div>"""
 
 
 def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bool]:
@@ -988,6 +1025,39 @@ h1 {
   border: 1px dashed color-mix(in srgb, var(--warn) 38%, transparent);
   border-radius: 6px;
 }
+
+/* Rule #1: a band and a score, with the assumption it rests on printed beside
+   it. A sticker price moves about 2.4x between a 10% and a 15% growth guess,
+   so the number is only honest in the company of the guess. */
+.ruleone {
+  margin: 10px 0 0; padding: 8px 10px;
+  border: 1px solid var(--rule); border-left-width: 3px; border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+.ruleone.r1-green { border-left-color: var(--green); }
+.ruleone.r1-amber { border-left-color: var(--warn); }
+.ruleone.r1-red   { border-left-color: var(--ink-3); }
+.r1-head { margin: 0; display: flex; align-items: baseline; gap: 8px; }
+.r1-score {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 19px; font-weight: 700; letter-spacing: -.03em;
+}
+.r1-green .r1-score { color: var(--green); }
+.r1-amber .r1-score { color: var(--warn); }
+.r1-red   .r1-score { color: var(--ink-3); }
+.r1-of { font-size: 11px; font-weight: 500; color: var(--ink-3); }
+.r1-band {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 700;
+}
+.r1-caution { color: var(--warn); font-size: 12px; cursor: help; }
+.r1-gap {
+  margin-left: auto; font-size: 12px; color: var(--ink-2);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.r1-detail { margin: 4px 0 0; font-size: 11.5px; color: var(--ink-3); line-height: 1.4; }
+.ruleone.none { font-size: 12px; color: var(--ink-3); border-left-color: var(--rule); }
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
 .card.state-oversold { border-top: 3px solid var(--crimson); }

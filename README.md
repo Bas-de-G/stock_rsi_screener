@@ -152,6 +152,42 @@ python -m screener.cli fair-value IBM 225
 If you'd rather nothing fired until a fair value confirms it, set
 `fire_without_valuation: false` in `config.yaml` for strict mode.
 
+### Rule #1, alongside fair value
+
+Phil Town's method, on every card: project earnings ten years out, apply a
+future multiple, discount back at a 15% required return, halve it. That gives a
+**sticker price** and a **margin-of-safety price**, plus a 1–10 score and a
+traffic light.
+
+It runs *alongside* Morningstar fair value, not instead of it. Morningstar's
+number is analyst-vetted and independent; Rule #1 is a formula dominated by one
+assumption — `MOS ≈ EPS × (1+g)¹⁰ × P/E ÷ 8`, and **g at 10% versus 15% moves
+the answer about 2.4×**. So the card shows a band, a score, and the growth rate
+it assumed, never a price to act on. The two disagreeing is the interesting
+case, and `recommendations.csv` records both so it can eventually be settled.
+
+Three of Phil's inputs are not in any free feed, so each has a stated
+substitute rather than a silent guess:
+
+| His input | Substitute | Why |
+|---|---|---|
+| Equity (book value) growth, or analysts' estimate — the lower | Lowest of trailing EPS growth, full-year EPS growth, **and sales growth** | No feed serves historical book value. Sales is in there because earnings can be engineered: without it, AT&T scored a fictitious 20%/yr off one good year and read 361% below sticker; with it, 2.6% and *above* sticker. |
+| Historical average P/E, capped at 2× growth | 2× growth, held between 8 and 25 | No historical average available, and current P/E is worst here — our signals fire when a stock is oversold, i.e. at its multiple's trough. `2 × 0%` is a P/E of zero, hence the floor. |
+| Normalised EPS | Trailing EPS, with a large jump flagged | Can't normalise from here. LYFT reads +3,166% trailing growth — one year in the costume of a decade. Flagged readings can't be green. |
+
+The **Big Four**, not five: ROIC, EPS growth, sales growth and cash-flow growth
+each clearing 10%. The fifth is equity growth, and counting an absent test as a
+pass would flatter every company equally.
+
+Growth is capped at **20%, not 15%**. Capping at exactly the required return
+makes the model degenerate: the `(1+g)¹⁰` and the `1.15¹⁰` cancel, and every
+fast grower lands at a sticker price identical to its market price — all 226 of
+them, exactly 0.0% away.
+
+On the current watchlist: 226 of 253 evaluable (27 have no positive earnings to
+project), 2 green, 20 amber, 204 red. Rule #1 is meant to refuse almost
+everything.
+
 ### Earnings suspend a signal
 
 RSI cannot tell an ordinary correction from positioning ahead of results. Both
@@ -791,7 +827,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 540 tests
+python -m pytest tests/ -q      # 570 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

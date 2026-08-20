@@ -40,6 +40,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/earnings.py` | the event-risk window around a results release |
 | `screener/journal.py` | the append-only `recommendations.csv` |
 | `screener/outcomes.py` | forward returns, and the random-entry baseline |
+| `screener/ruleone.py` | Phil Town's Rule #1 sticker price, MOS and score |
 | `screener/historical.py` | the `history.html` Historical Dashboard |
 | `screener/universe.py` | choosing which companies belong on the watchlist |
 | `screener/notify.py` | the phone (ntfy), webhook and GitHub-issue transports |
@@ -104,6 +105,15 @@ first daily bar, and "the next twenty bars" silently becomes twenty bars from
 two years later. That one bug reported the 20-day buy cohort as +11.4% when it
 is +1.6%. `forward_outcomes` refuses to measure an uncovered signal; if you
 change how history is fetched, check that guard still holds.
+
+**Rule #1 is dominated by one assumption, so never print it as a price.**
+`sticker ~= EPS x (1+g)^10 x PE / 8`, and g at 10% versus 15% moves it about
+2.4x. `ruleone` returns a band and a 1-10 score for that reason, and the card
+prints the growth rate beside them — a sticker price without the guess behind it
+cannot be argued with. Three of Phil's inputs are unavailable from a free feed
+(equity growth rate, historical average P/E, normalised EPS) and each has a
+stated substitute in the module docstring; if you change one, change the
+docstring and the test that pins the live case which forced it.
 
 **The `signals` table is a live view, not a ledger.** `cli._rescore_signals`
 rewrites every pattern's `price`, `fair_value` and `valuation_pass` whenever a
