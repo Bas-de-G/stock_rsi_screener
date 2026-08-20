@@ -77,6 +77,22 @@ class Row:
         return f"Earnings just reported — {side} signal suspended until the next session closes"
 
     @property
+    def both_valuations_agree(self) -> bool:
+        """Morningstar and Rule #1 independently like the same stock.
+
+        Two methods with almost nothing in common: one is an analyst's
+        discounted cash flow, the other a mechanical projection of earnings.
+        Agreement is not proof — neither has been measured yet — but it is the
+        rarest thing on the page, and worth a mark. Three of fifteen live
+        strong buys have it.
+        """
+        reading = self.rule_one
+        return bool(
+            self.strong and reading is not None
+            and reading.applicable and reading.band == "green"
+        )
+
+    @property
     def fresh(self) -> bool:
         """A live signal that completed within the last couple of bars."""
         if self.horizon is None:
@@ -337,8 +353,29 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
         "sell_strong": 3, "sell": 4, "suspended": 5, "rejected": 6,
         "oversold": 7, "watch": 8, "neutral": 9, "nodata": 10,
     }
-    rows.sort(key=lambda r: (order[r.state], r.rsi if r.rsi is not None else 999))
+    # Within a state, the second valuation ranks but never gates. The rocket
+    # category currently holds Rule #1 scores from 2 to 10 and treats them
+    # identically, so this is discrimination the page already needed -- and it
+    # cannot suppress anything, which matters while Rule #1 is still unmeasured.
+    rows.sort(key=lambda r: (
+        order[r.state],
+        -_rule_one_rank(r),
+        r.rsi if r.rsi is not None else 999,
+    ))
     return rows
+
+
+def _rule_one_rank(row: Row) -> int:
+    """A row's Rule #1 score for sorting, with no reading ranking mid-table.
+
+    A company Rule #1 cannot read is not the worst in its category, it is
+    unknown -- so it sits where a middling score would rather than at the
+    bottom.
+    """
+    reading = row.rule_one
+    if reading is None or not reading.applicable:
+        return 5
+    return reading.score
 
 
 # ----------------------------------------------------------------- chart
@@ -462,9 +499,12 @@ def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
     """The single best fresh, confirmed buy — or nothing at all.
 
     One pick rather than a badge on several, because the point is to answer
-    "what do I look at first" on a phone. Ties are broken by the largest
-    discount to fair value, which is the only ranking that matters once
-    freshness and the valuation gate have already been satisfied.
+    "what do I look at first" on a phone. Ranked by the largest discount to
+    fair value, which is the ranking that matters once freshness and the
+    valuation gate have already been satisfied — and *tied* on Rule #1, so
+    when two picks are equally cheap against Morningstar the one the second
+    valuation also likes wins. Rule #1 breaks ties here; it does not do the
+    ranking, which was deliberately tuned and is left alone.
 
     Renders empty on the days nothing qualifies, which will be most of them:
     it needs a buy that fired, cleared the horizon's margin, has nothing
@@ -475,7 +515,7 @@ def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
     if not candidates:
         return _no_deal(rows, horizon, threshold)
 
-    best = max(candidates, key=lambda r: r.deal_discount)
+    best = max(candidates, key=lambda r: (r.deal_discount, _rule_one_rank(r)))
     val = best.valuation
     price = f"{val.price:,.2f}" if val else "—"
     fair = f"{val.fair_value:,.2f}" if val else "—"
@@ -488,6 +528,7 @@ def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
     <span class="lead-leader" aria-hidden="true"></span>
     <p class="lead-figure">{best.deal_discount * 100:.0f}<span class="lead-unit">%</span></p>
   </div>
+  {_deal_rule_one(best)}
   <p class="lead-note">The pick of what fired today: second cross of
      {threshold:g} within the last {html.escape(horizon.fresh_label)}, and the
      widest gap to fair value of any of them — {price}{ccy} against
@@ -495,6 +536,28 @@ def _deal_of_the_day(rows: list[Row], horizon, threshold: float) -> str:
      {horizon.margin_pct} a strong buy needs.
      <span class="lead-lev">{horizon.leverage}× suggested</span></p>
 </section>"""
+
+
+def _deal_rule_one(row: Row) -> str:
+    """The second valuation's read on the day's pick.
+
+    Shown rather than ranked on. The deal is chosen by discount to fair value
+    -- a ranking tuned deliberately and left alone -- and this says whether the
+    other method agrees with the choice.
+    """
+    reading = row.rule_one
+    if reading is None:
+        return ""
+    if not reading.applicable:
+        return ('<p class="lead-r1">Rule #1 has no read on this one — '
+                f'{html.escape(reading.reason)}.</p>')
+    verdict = {
+        "green": "agrees", "amber": "is lukewarm", "red": "disagrees",
+    }.get(reading.band, "")
+    return (f'<p class="lead-r1 lead-r1-{reading.band}">Rule&nbsp;#1 {verdict}: '
+            f'<strong>{reading.score}/10</strong> — price demands '
+            f'{reading.implied_growth:.1f}% a year, delivered '
+            f'{reading.conservative_growth:.1f}–{reading.growth:.1f}%.</p>')
 
 
 def _no_deal(rows: list[Row], horizon, threshold: float) -> str:
@@ -621,11 +684,17 @@ def _card(row: Row, config: Config, horizon) -> str:
         f'<span class="fresh" title="Second cross within the last '
         f'{html.escape(horizon.fresh_label)}">fresh</span>' if row.fresh else ""
     )
+    # The rarest thing on the page: two valuation methods with almost nothing
+    # in common reaching the same conclusion.
+    agree_badge = (
+        '<span class="agree" title="Morningstar fair value and Rule #1 '
+        'independently agree">both agree</span>' if row.both_valuations_agree else ""
+    )
     return f"""<article class="card state-{row.state} {market_classes}">
   <header class="card-head">
     <div class="ident">
       <h3>{symbol}</h3>
-      <span class="pill">{pill_label}</span>{fresh_badge}
+      <span class="pill">{pill_label}</span>{fresh_badge}{agree_badge}
     </div>
     <div class="readout">
       <div class="metric"><span class="k">RSI</span><span class="v">{rsi_text}</span></div>

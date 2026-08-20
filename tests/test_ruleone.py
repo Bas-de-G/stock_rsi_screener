@@ -318,3 +318,148 @@ def test_a_scanner_row_evaluates_directly():
 
 def test_a_scanner_row_missing_everything_is_refused():
     assert not from_scanner({}).applicable
+
+
+# ------------------------------------------- how the page uses the reading
+#
+# Rule #1 ranks and annotates; it never gates. Nothing here may add or remove
+# a signal, because the factor is still unmeasured — and the only honest way
+# to measure it is forward, from the journal, since its inputs are current
+# fundamentals with no history to backtest against.
+
+
+@pytest.fixture()
+def page_config(tmp_path):
+    from screener.config import load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(f"""
+tickers:
+  - {{symbol: AAA, tradingview: "NASDAQ:AAA", morningstar: xnas/aaa, markets: [nasdaq]}}
+  - {{symbol: BBB, tradingview: "NASDAQ:BBB", morningstar: xnas/bbb, markets: [nasdaq]}}
+  - {{symbol: CCC, tradingview: "NASDAQ:CCC", morningstar: xnas/ccc, markets: [nasdaq]}}
+rsi: {{period: 14, threshold: 30, overbought: 70, interval: "1D"}}
+signal:
+  window_days: 14
+  window_unit: calendar
+  valuation_rule: price_below_fair_value
+  fire_without_valuation: true
+storage:
+  database: "{tmp_path / 't.db'}"
+  csv_dir: "{tmp_path}"
+  fair_values: "{tmp_path / 'fv.yaml'}"
+  notifications: "{tmp_path / 'n.json'}"
+  recommendations: "{tmp_path / 'r.csv'}"
+dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
+""")
+    return load_config(path)
+
+
+def _seed_signal(store, symbol, fair_value=1000.0, confirms=True):
+    """A fired buy on the daily chart, with the valuation gate set explicitly.
+
+    `confirms` is passed rather than derived so a test can produce the case
+    that matters here: a fired pattern whose Morningstar gate *failed*.
+    """
+    import datetime as dt
+
+    from screener.storage import RsiPoint, Signal, Valuation
+
+    now = dt.datetime.now()
+    stamps = [(now - dt.timedelta(days=40 - i)).date().isoformat() for i in range(40)]
+    for stamp in stamps:
+        store.upsert_rsi_point(RsiPoint(symbol, stamp, 50.0, 33.0, "test", horizon="1d"))
+    store.record_signal(Signal(
+        symbol, stamps[-6], stamps[-4], stamps[-2], 50.0, fair_value,
+        True, confirms, True, "now", horizon="1d", direction="buy",
+    ))
+    store.upsert_valuation(
+        Valuation(symbol, "2026-08-10", 50.0, fair_value, "2026-08-10", "manual")
+    )
+
+
+def _reading(score, band="amber", applicable=True):
+    from screener.ruleone import RuleOne
+
+    return RuleOne(applicable=applicable, score=score, band=band, growth=12.0,
+                   conservative_growth=8.0, implied_growth=10.0, price=50.0,
+                   sticker=80.0, mos=40.0, big_four=3,
+                   reason="" if applicable else "no positive earnings to project")
+
+
+def test_rule_one_ranks_within_a_category_without_changing_it(page_config):
+    """The rocket category holds Rule #1 scores from 2 to 10 and treats them
+    identically. This sorts inside it; membership is untouched."""
+    from screener.dashboard import _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        for symbol in ("AAA", "BBB", "CCC"):
+            _seed_signal(store, symbol)
+        store.upsert_rule_one("AAA", _reading(2, "red"))
+        store.upsert_rule_one("BBB", _reading(9, "green"))
+        store.upsert_rule_one("CCC", _reading(6))
+        rows = _collect(store, page_config, page_config.horizon("1d"))
+
+    assert [r.symbol for r in rows] == ["BBB", "CCC", "AAA"]
+    assert all(r.state == "strong" for r in rows), "every one is still a rocket"
+
+
+def test_an_unreadable_company_ranks_mid_table_not_last(page_config):
+    """Rule #1 having no opinion is not the same as a bad opinion."""
+    from screener.dashboard import _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        for symbol in ("AAA", "BBB", "CCC"):
+            _seed_signal(store, symbol)
+        store.upsert_rule_one("AAA", _reading(9, "green"))
+        store.upsert_rule_one("BBB", _reading(1, "red"))
+        store.upsert_rule_one("CCC", _reading(0, "n/a", applicable=False))
+        rows = _collect(store, page_config, page_config.horizon("1d"))
+
+    assert [r.symbol for r in rows] == ["AAA", "CCC", "BBB"]
+
+
+def test_agreement_between_the_two_valuations_is_marked(page_config):
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(9, "green"))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+
+    assert row.both_valuations_agree
+    assert "both agree" in _card(row, page_config, page_config.horizon("1d"))
+
+
+def test_a_rule_one_red_strong_buy_is_not_marked_but_stays_a_rocket(page_config):
+    from screener.dashboard import _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(2, "red"))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+
+    assert not row.both_valuations_agree
+    assert row.strong, "ranking must never gate"
+    assert row.state == "strong"
+
+
+def test_only_a_strong_buy_can_carry_the_agreement_mark(page_config):
+    """A Rule #1 green with no Morningstar confirmation is one opinion, not
+    two agreeing."""
+    from screener.dashboard import _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA", fair_value=1.0, confirms=False)
+        store.upsert_rule_one("AAA", _reading(9, "green"))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+
+    assert not row.both_valuations_agree

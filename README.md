@@ -209,6 +209,19 @@ pass would flatter every company equally. Quality shifts the score by up to
 27 of 253 get **no reading at all** — no positive earnings to project. Refusing
 is a real answer; refusing *everything* was the bug.
 
+**What it does with that verdict: ranks, never gates.** Rule #1 cannot add or
+remove a 🚀. It sorts cards *within* their category — the rocket category holds
+Rule #1 scores from 2 to 10 today and treated them identically — breaks ties for
+the deal of the day, and marks the rare cards where **both valuations agree**
+(3 of 15 live strong buys). A company Rule #1 cannot read ranks mid-table, not
+last: no opinion is not a bad opinion.
+
+It stays that way until it has been measured, and measuring it can only happen
+forwards. Its inputs are *current* fundamentals with no history behind them, so
+Rule #1 is no more backtestable than fair value is. `recommendations.csv`
+records the score on every published verdict from today, and that is the
+sample — months of it, not weeks.
+
 ### Earnings suspend a signal
 
 RSI cannot tell an ordinary correction from positioning ahead of results. Both
@@ -848,7 +861,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 578 tests
+python -m pytest tests/ -q      # 583 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and
