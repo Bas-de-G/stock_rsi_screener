@@ -143,7 +143,9 @@ _RULE_ONE_DDL = """
 CREATE TABLE IF NOT EXISTS rule_one (
     symbol      TEXT PRIMARY KEY,
     price       REAL,
-    growth      REAL,   -- annual rate used, in percent
+    growth      REAL,   -- base-case annual rate, in percent
+    conservative_growth REAL,   -- the pessimistic case
+    implied_growth      REAL,   -- what today's price already demands
     future_pe   REAL,
     sticker     REAL,   -- intrinsic value at a 15% required return
     mos         REAL,   -- sticker halved: the margin-of-safety price
@@ -589,17 +591,21 @@ class Store:
 
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                """INSERT INTO rule_one (symbol, price, growth, future_pe, sticker, mos,
+                """INSERT INTO rule_one (symbol, price, growth, conservative_growth,
+                                         implied_growth, future_pe, sticker, mos,
                                          big_four, score, band, caution, reason, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol) DO UPDATE SET
                        price=excluded.price, growth=excluded.growth,
+                       conservative_growth=excluded.conservative_growth,
+                       implied_growth=excluded.implied_growth,
                        future_pe=excluded.future_pe, sticker=excluded.sticker,
                        mos=excluded.mos, big_four=excluded.big_four,
                        score=excluded.score, band=excluded.band,
                        caution=excluded.caution, reason=excluded.reason,
                        updated_at=excluded.updated_at""",
-                (symbol, reading.price, reading.growth, reading.future_pe,
+                (symbol, reading.price, reading.growth, reading.conservative_growth,
+                 reading.implied_growth, reading.future_pe,
                  reading.sticker, reading.mos, reading.big_four, reading.score,
                  reading.band, reading.caution, reading.reason,
                  _dt.datetime.now().isoformat(timespec="seconds")),
@@ -612,13 +618,17 @@ class Store:
 
         with closing(self._conn.cursor()) as cur:
             cur.execute(
-                "SELECT symbol, price, growth, future_pe, sticker, mos, big_four,"
-                " score, band, caution, reason FROM rule_one"
+                "SELECT symbol, price, growth, conservative_growth, implied_growth,"
+                " future_pe, sticker, mos, big_four, score, band, caution,"
+                " reason FROM rule_one"
             )
             return {
                 r["symbol"]: RuleOne(
                     applicable=r["band"] != "n/a", reason=r["reason"] or "",
-                    growth=r["growth"], future_pe=r["future_pe"], sticker=r["sticker"],
+                    growth=r["growth"],
+                    conservative_growth=r["conservative_growth"],
+                    implied_growth=r["implied_growth"],
+                    future_pe=r["future_pe"], sticker=r["sticker"],
                     mos=r["mos"], price=r["price"], big_four=r["big_four"] or 0,
                     score=r["score"] or 0, band=r["band"], caution=r["caution"] or "",
                 )

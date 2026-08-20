@@ -14,6 +14,7 @@ import pytest
 
 from screener.ruleone import (
     AMBER,
+    base_growth,
     EPS_SPIKE,
     FUTURE_PE_CEILING,
     FUTURE_PE_FLOOR,
@@ -28,6 +29,7 @@ from screener.ruleone import (
     from_scanner,
     future_pe,
     growth_rate,
+    implied_growth,
     mos_price,
     sticker_price,
 )
@@ -64,9 +66,49 @@ def test_growth_equal_to_the_required_return_collapses_the_model():
 # ------------------------------------------------------- the growth rate
 
 
-def test_the_growth_rate_is_the_lowest_on_offer():
+def test_the_conservative_case_is_the_lowest_on_offer():
     """Every error here is multiplied ten times over, so take the worst view."""
     assert growth_rate(30.0, 18.0, 12.0) == 12.0
+
+
+def test_the_base_case_is_the_median():
+    """A range says more than a point does, so both cases are kept."""
+    assert base_growth(30.0, 18.0, 16.0) == 18.0
+
+
+def test_the_base_case_cannot_outgrow_sales_for_a_decade():
+    """AT&T's median reads 20% because two of its three rates are the same one
+    good earnings year, against sales of 2.6%. Margin expansion is finite, so
+    the base case is held to sales plus five points — 9/10 and green becomes
+    6/10 and amber."""
+    assert base_growth(20.0, 20.0, 2.6) == pytest.approx(7.6)
+
+
+def test_the_base_case_never_falls_below_the_conservative_one():
+    assert base_growth(18.0, 2.0, 1.0) >= growth_rate(18.0, 2.0, 1.0)
+
+
+# ---------------------------------------------------- what the price demands
+
+
+def test_the_implied_growth_prices_back_to_the_sticker():
+    """Rule #1 backwards: the rate for which sticker(g) == price."""
+    g = implied_growth(eps=5.0, price=100.0)
+    assert sticker_price(5.0, g, future_pe(g)) == pytest.approx(100.0, rel=1e-3)
+
+
+def test_a_dear_price_demands_more_growth_than_a_cheap_one():
+    assert implied_growth(5.0, 500.0) > implied_growth(5.0, 50.0)
+
+
+def test_a_price_below_any_assumption_returns_the_floor():
+    """Cheap however pessimistic you are."""
+    assert implied_growth(eps=5.0, price=0.5) == -10.0
+
+
+def test_a_price_beyond_modelling_returns_the_ceiling():
+    """Past this the number has stopped meaning anything."""
+    assert implied_growth(eps=0.01, price=10_000.0) == 60.0
 
 
 def test_sales_growth_can_veto_an_earnings_spike():
@@ -190,47 +232,62 @@ def test_ordinary_growth_is_not_flagged():
 # ---------------------------------------------------------- the verdict
 
 
-def _quality(price, sticker_target=None, **kw):
+def _quality(price, **kw):
     """A company good enough to pass the Big Four, priced as asked."""
     return evaluate(price=price, eps_ttm=5.0, eps_growth_ttm=15.0,
                     eps_growth_fy=14.0, sales_growth_ttm=13.0,
                     fcf_growth_ttm=20.0, roic=25.0, **kw)
 
 
-def test_a_quality_company_below_the_mos_price_is_green():
-    at_mos = _quality(price=100.0)
-    reading = _quality(price=at_mos.mos * 0.9)
-    assert reading.band == GREEN
+def test_a_price_demanding_less_than_the_company_delivers_scores_well():
+    """The verdict, in one comparison. Cheap enough that the growth already on
+    record clears what the price is asking for."""
+    reading = _quality(price=20.0)
+    assert reading.implied_growth < reading.growth
+    assert reading.headroom > 0
     assert reading.score >= 8
+    assert reading.band == GREEN
 
 
-def test_the_same_company_above_sticker_is_red():
-    at_mos = _quality(price=100.0)
-    reading = _quality(price=at_mos.sticker * 2)
+def test_a_price_demanding_far_more_than_it_delivers_scores_badly():
+    reading = _quality(price=2000.0)
+    assert reading.implied_growth > reading.growth
+    assert reading.headroom < 0
     assert reading.band == RED
 
 
-def test_between_the_two_prices_is_amber():
-    base = _quality(price=100.0)
-    reading = _quality(price=(base.sticker + base.mos) / 2)
-    assert reading.band == AMBER
+def test_the_score_moves_continuously_with_the_price():
+    """Why this replaced the sticker comparison: that marked 204 of 226
+    companies red and could not rank the 204. This has to be a ranking."""
+    scores = [_quality(price=p).score for p in (10, 40, 80, 150, 400, 1200)]
+    assert scores == sorted(scores, reverse=True)
+    assert len(set(scores)) >= 4, "a rank, not two buckets"
 
 
-def test_a_cheap_price_alone_is_not_a_green_light():
+def test_quality_shifts_the_score_without_setting_it():
+    """A business clearing all of the Big Four is not read the same as one
+    clearing none at the same price — but the price still dominates."""
+    priced = dict(price=120.0, eps_ttm=5.0, eps_growth_ttm=15.0,
+                  eps_growth_fy=14.0, sales_growth_ttm=13.0)
+    good = evaluate(**priced, fcf_growth_ttm=20.0, roic=25.0)
+    poor = evaluate(**priced, fcf_growth_ttm=-5.0, roic=2.0)
+    assert good.score > poor.score
+    assert good.score - poor.score <= 4, "quality moves it, it does not decide it"
+
+
+def test_a_cheap_price_alone_is_not_a_top_score():
     """Phil's condition is a wonderful business at an attractive price. Cheap
     on its own is how value traps are bought."""
     poor = evaluate(price=1.0, eps_ttm=5.0, eps_growth_ttm=1.0,
                     eps_growth_fy=1.0, sales_growth_ttm=1.0,
                     fcf_growth_ttm=-10.0, roic=2.0)
-    assert poor.price <= poor.mos
-    assert poor.big_four < 3
-    assert poor.band == AMBER, "cheap, but not a business Rule #1 would own"
+    rich = _quality(price=1.0)
+    assert poor.score < rich.score
 
 
-def test_the_score_stays_inside_one_to_ten():
-    for price in (0.01, 1.0, 50.0, 1e6):
-        reading = _quality(price=price)
-        assert 1 <= reading.score <= 10
+def test_the_headroom_is_the_base_case_minus_what_the_price_demands():
+    reading = _quality(price=100.0)
+    assert reading.headroom == pytest.approx(reading.growth - reading.implied_growth)
 
 
 def test_the_gap_to_sticker_is_relative_to_the_price():
@@ -254,7 +311,8 @@ def test_a_scanner_row_evaluates_directly():
     }
     reading = from_scanner(row)
     assert reading.applicable
-    assert reading.growth == 19.3
+    assert reading.conservative_growth == 19.3, "the pessimistic case is the lowest rate"
+    assert reading.growth == 20.0, "the base case is the median, capped"
     assert reading.big_four == 4
 
 

@@ -72,10 +72,13 @@ class Recommendation:
     # and the growth rate has to travel with the sticker price it produced.
     r1_score: int | None = None
     r1_band: str = ""
-    r1_growth: float | None = None
+    r1_growth: float | None = None          # base case used for the sticker
+    r1_conservative_growth: float | None = None
+    r1_implied_growth: float | None = None  # what the price demanded
+    r1_headroom: float | None = None        # base minus implied, in points
     r1_sticker: float | None = None
     r1_mos: float | None = None
-    r1_to_sticker: float | None = None   # (sticker - price) / price
+    r1_to_sticker: float | None = None      # (sticker - price) / price
     r1_big_four: int | None = None
     schema: int = SCHEMA_VERSION
     extra: str = ""                 # JSON, for factors added later
@@ -217,6 +220,9 @@ def _rule_one_fields(reading) -> dict:
         "r1_score": reading.score,
         "r1_band": reading.band,
         "r1_growth": reading.growth,
+        "r1_conservative_growth": reading.conservative_growth,
+        "r1_implied_growth": reading.implied_growth,
+        "r1_headroom": reading.headroom,
         "r1_sticker": reading.sticker,
         "r1_mos": reading.mos,
         "r1_to_sticker": reading.to_sticker,

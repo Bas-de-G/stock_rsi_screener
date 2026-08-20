@@ -652,9 +652,11 @@ def _card(row: Row, config: Config, horizon) -> str:
 def _rule_one_block(reading) -> str:
     """The Rule #1 verdict on a card: a band, a score, and the assumption.
 
-    The growth rate is printed next to the score deliberately. A sticker price
-    moves about 2.4x between a 10% and a 15% assumption, so the number is only
-    honest in the company of the guess it rests on.
+    Led by what the price *demands* rather than by a sticker price. "This price
+    requires 15% a year for a decade" is a complete thought a reader can argue
+    with; "sticker 121.36" is a number that hides the assumption producing it.
+    The company's own delivered range sits beside it, so the comparison the
+    score is made of is on the card.
     """
     if reading is None:
         return ""
@@ -662,8 +664,8 @@ def _rule_one_block(reading) -> str:
         return (f'<p class="ruleone none">Rule #1: not applicable — '
                 f'{html.escape(reading.reason)}.</p>')
 
-    gap = reading.to_sticker
-    gap_text = f"{gap * 100:+.0f}% to sticker" if gap is not None else ""
+    headroom = reading.headroom
+    head_text = f"{headroom:+.1f}pp" if headroom is not None else ""
     caution = (
         f'<span class="r1-caution" title="{html.escape(reading.caution)}">⚠</span>'
         if reading.caution else ""
@@ -672,10 +674,13 @@ def _rule_one_block(reading) -> str:
   <p class="r1-head">
     <span class="r1-score">{reading.score}<span class="r1-of">/10</span></span>
     <span class="r1-band">Rule&nbsp;#1</span>{caution}
-    <span class="r1-gap">{gap_text}</span>
+    <span class="r1-gap" title="Base-case growth minus what the price demands">{head_text}</span>
   </p>
+  <p class="r1-demand">Price demands <strong>{reading.implied_growth:.1f}%</strong> a year
+     for ten years · this company has delivered
+     <strong>{reading.conservative_growth:.1f}–{reading.growth:.1f}%</strong></p>
   <p class="r1-detail">Sticker {reading.sticker:,.2f} · MOS {reading.mos:,.2f}
-     · {reading.growth:.1f}% growth assumed · Big Four {reading.big_four}/4</p>
+     · Big Four {reading.big_four}/4</p>
 </div>"""
 
 
@@ -1056,7 +1061,9 @@ h1 {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
-.r1-detail { margin: 4px 0 0; font-size: 11.5px; color: var(--ink-3); line-height: 1.4; }
+.r1-demand { margin: 5px 0 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.r1-demand strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.r1-detail { margin: 3px 0 0; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
 .ruleone.none { font-size: 12px; color: var(--ink-3); border-left-color: var(--rule); }
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
