@@ -706,8 +706,8 @@ def _card(row: Row, config: Config, horizon) -> str:
   <p class="crosses">{cross_note}</p>
   {patterns}
   {valuation_block}
-  {growth_block}
   {rule_one_block}
+  {growth_block}
   {leverage_block}
   <div class="actions">
     <a class="btn primary" href="{html.escape(row.morningstar_url)}"
@@ -719,38 +719,38 @@ def _card(row: Row, config: Config, horizon) -> str:
 
 
 def _rule_one_block(reading) -> str:
-    """The Rule #1 verdict on a card: a band, a score, and the assumption.
+    """The Rule #1 verdict as one small coloured box holding a number.
 
-    Led by what the price *demands* rather than by a sticker price. "This price
-    requires 15% a year for a decade" is a complete thought a reader can argue
-    with; "sticker 121.36" is a number that hides the assumption producing it.
-    The company's own delivered range sits beside it, so the comparison the
-    score is made of is on the card.
+    Sized to what it is worth. This is a second opinion that ranks the page and
+    decides nothing, sitting between the fair value it seconds and the earnings
+    growth it partly rests on — so it gets a chip, not the panel it started as.
+    An edge colour and three lines of arithmetic made an unmeasured factor look
+    like the loudest thing on the card.
+
+    Everything cut goes into the tooltip rather than away: the rate the price
+    demands, the range the company has delivered, the sticker and
+    margin-of-safety prices, and the Big Four count. The score alone is what
+    ranks; the reasoning is one hover away for anyone arguing with it.
     """
     if reading is None:
         return ""
     if not reading.applicable:
-        return (f'<p class="ruleone none">Rule #1: not applicable — '
-                f'{html.escape(reading.reason)}.</p>')
+        return (f'<p class="ruleone"><span class="r1-box r1-na" '
+                f'title="Rule #1: {html.escape(reading.reason)}">–</span>'
+                f'<span class="r1-label">Rule #1</span></p>')
 
-    headroom = reading.headroom
-    head_text = f"{headroom:+.1f}pp" if headroom is not None else ""
-    caution = (
-        f'<span class="r1-caution" title="{html.escape(reading.caution)}">⚠</span>'
-        if reading.caution else ""
+    detail = (
+        f"Rule #1 {reading.score}/10 — price demands "
+        f"{reading.implied_growth:.1f}% a year for ten years; this company has "
+        f"delivered {reading.conservative_growth:.1f}–{reading.growth:.1f}%. "
+        f"Sticker {reading.sticker:,.2f}, margin of safety {reading.mos:,.2f}, "
+        f"Big Four {reading.big_four}/4."
+        + (f" ⚠ {reading.caution}." if reading.caution else "")
     )
-    return f"""<div class="ruleone r1-{reading.band}">
-  <p class="r1-head">
-    <span class="r1-score">{reading.score}<span class="r1-of">/10</span></span>
-    <span class="r1-band">Rule&nbsp;#1</span>{caution}
-    <span class="r1-gap" title="Base-case growth minus what the price demands">{head_text}</span>
-  </p>
-  <p class="r1-demand">Price demands <strong>{reading.implied_growth:.1f}%</strong> a year
-     for ten years · this company has delivered
-     <strong>{reading.conservative_growth:.1f}–{reading.growth:.1f}%</strong></p>
-  <p class="r1-detail">Sticker {reading.sticker:,.2f} · MOS {reading.mos:,.2f}
-     · Big Four {reading.big_four}/4</p>
-</div>"""
+    warn = '<span class="r1-warn">⚠</span>' if reading.caution else ""
+    return (f'<p class="ruleone"><span class="r1-box r1-{reading.band}" '
+            f'title="{html.escape(detail)}">{reading.score}</span>'
+            f'<span class="r1-label">Rule #1</span>{warn}</p>')
 
 
 def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bool]:
@@ -1100,40 +1100,29 @@ h1 {
   border-radius: 6px;
 }
 
-/* Rule #1: a band and a score, with the assumption it rests on printed beside
-   it. A sticker price moves about 2.4x between a 10% and a 15% growth guess,
-   so the number is only honest in the company of the guess. */
-.ruleone {
-  margin: 10px 0 0; padding: 8px 10px;
-  border: 1px solid var(--rule); border-left-width: 3px; border-radius: 3px;
-  background: color-mix(in srgb, var(--ink) 3%, transparent);
-}
-.ruleone.r1-green { border-left-color: var(--green); }
-.ruleone.r1-amber { border-left-color: var(--warn); }
-.ruleone.r1-red   { border-left-color: var(--ink-3); }
-.r1-head { margin: 0; display: flex; align-items: baseline; gap: 8px; }
-.r1-score {
+/* Rule #1: one small box with a number in it. A second opinion that ranks the
+   page and decides nothing should not out-shout the verdict it is seconding —
+   the reasoning lives in the box's tooltip. */
+.ruleone { margin: 8px 0 0; display: flex; align-items: center; gap: 7px; }
+.r1-box {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 22px; padding: 0 5px; border-radius: 3px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 19px; font-weight: 700; letter-spacing: -.03em;
+  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  cursor: help; border: 1px solid transparent;
 }
-.r1-green .r1-score { color: var(--green); }
-.r1-amber .r1-score { color: var(--warn); }
-.r1-red   .r1-score { color: var(--ink-3); }
-.r1-of { font-size: 11px; font-weight: 500; color: var(--ink-3); }
-.r1-band {
+.r1-green { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green);
+            border-color: color-mix(in srgb, var(--green) 38%, transparent); }
+.r1-amber { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn);
+            border-color: color-mix(in srgb, var(--warn) 38%, transparent); }
+.r1-red   { background: color-mix(in srgb, var(--crimson) 13%, transparent); color: var(--crimson);
+            border-color: color-mix(in srgb, var(--crimson) 32%, transparent); }
+.r1-na    { background: transparent; color: var(--ink-3); border-color: var(--rule); }
+.r1-label {
   font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
   color: var(--ink-3); font-weight: 700;
 }
-.r1-caution { color: var(--warn); font-size: 12px; cursor: help; }
-.r1-gap {
-  margin-left: auto; font-size: 12px; color: var(--ink-2);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-variant-numeric: tabular-nums;
-}
-.r1-demand { margin: 5px 0 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
-.r1-demand strong { color: var(--ink); font-variant-numeric: tabular-nums; }
-.r1-detail { margin: 3px 0 0; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
-.ruleone.none { font-size: 12px; color: var(--ink-3); border-left-color: var(--rule); }
+.r1-warn { color: var(--warn); font-size: 11px; cursor: help; }
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
 .card.state-oversold { border-top: 3px solid var(--crimson); }

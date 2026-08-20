@@ -209,6 +209,12 @@ pass would flatter every company equally. Quality shifts the score by up to
 27 of 253 get **no reading at all** — no positive earnings to project. Refusing
 is a real answer; refusing *everything* was the bug.
 
+On the card it is **one small coloured box with the score in it**, sitting
+between the fair value it seconds and the earnings growth it partly rests on.
+Hover for the reasoning — the rate the price demands, the range delivered, the
+sticker and margin-of-safety prices, the Big Four count. A second opinion that
+ranks the page and decides nothing should not out-shout the verdict beside it.
+
 **What it does with that verdict: ranks, never gates.** Rule #1 cannot add or
 remove a 🚀. It sorts cards *within* their category — the rocket category holds
 Rule #1 scores from 2 to 10 today and treated them identically — breaks ties for
@@ -861,7 +867,7 @@ in but not a subscriber session. Re-run `login`.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 583 tests
+python -m pytest tests/ -q      # 587 tests
 ```
 
 CI runs them on every push and pull request against Python 3.10, 3.11 and

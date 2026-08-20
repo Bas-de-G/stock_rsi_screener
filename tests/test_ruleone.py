@@ -463,3 +463,70 @@ def test_only_a_strong_buy_can_carry_the_agreement_mark(page_config):
                if r.symbol == "AAA"][0]
 
     assert not row.both_valuations_agree
+
+
+def test_the_card_shows_a_chip_not_a_panel(page_config):
+    """A second opinion that ranks the page and decides nothing should not be
+    the loudest thing on the card."""
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(7))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+    card = _card(row, page_config, page_config.horizon("1d"))
+
+    assert '<span class="r1-box r1-amber"' in card
+    assert ">7</span>" in card
+    for gone in ("r1-head", "r1-demand", "r1-detail", "r1-score", "r1-gap"):
+        assert gone not in card, f"{gone} belonged to the panel this replaced"
+
+
+def test_the_chip_sits_between_fair_value_and_earnings_growth(page_config):
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(7))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+    card = _card(row, page_config, page_config.horizon("1d"))
+
+    assert card.index('class="valuation') < card.index('class="ruleone"') < card.index('class="earnings')
+
+
+def test_the_reasoning_moves_to_the_tooltip_rather_than_away(page_config):
+    """Cut from the card, not lost: the rate the price demands, the range
+    delivered, the sticker and the Big Four are all one hover away."""
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(7))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+    card = _card(row, page_config, page_config.horizon("1d"))
+
+    tip = card.split('title="')[1].split('"')[0]
+    assert "price demands 10.0%" in tip
+    assert "delivered 8.0–12.0%" in tip
+    assert "Sticker" in tip and "Big Four 3/4" in tip
+
+
+def test_an_unreadable_company_shows_a_muted_dash(page_config):
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(0, "n/a", applicable=False))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+    card = _card(row, page_config, page_config.horizon("1d"))
+
+    assert 'class="r1-box r1-na"' in card
+    assert "no positive earnings to project" in card
