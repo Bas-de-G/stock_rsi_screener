@@ -704,6 +704,28 @@ repo root — see "Where fair values are stored".
 Reruns of the same day update in place rather than duplicating, and a
 backfilled RSI never overwrites a live TradingView reading.
 
+`screener.db` is committed, so it can't be allowed to grow forever — and it
+only ever grew, because bars are upserted and never removed. Three years of
+hourly history had accumulated behind a dashboard that draws ninety bars, at
+which point the file was 78 MB and GitHub warns above 50 MB.
+
+```bash
+python -m screener.cli prune      # drop history nothing can read
+```
+
+This drops intraday bars older than *both* the chart window and the symbol's
+first daily bar. Those two conditions together mean unreadable, not merely old:
+the chart never plots back that far, and the forward-return measurement already
+refuses to score a signal the daily series doesn't cover, so an hourly bar from
+before the daily history prices a pattern whose outcome is unknowable. Both
+halves matter — SPCX listed recently enough that its 4h history predates its
+daily history, and testing the daily line alone shortened its chart from 90
+bars to 76.
+
+Checked by replaying a copy of the live database: 283,005 bars removed, every
+dashboard page byte-identical, all 17,828 measured outcomes unchanged, 78 MB →
+46 MB. It runs on every scheduled run and is a no-op once the backlog is gone.
+
 Inspect it without SQL:
 
 ```bash
@@ -847,6 +869,30 @@ it rather than each carrying their own copy.
 
 Only if the API can't be reached does it err towards sending: a repeat email is
 an annoyance, a missed strong buy defeats the point.
+
+### One name, one alert a session
+
+Both checks above are keyed on the *pattern*, which was correct and turned out
+not to be enough. Intraday bars are stamped with the minute the run happened, so
+a genuinely new pattern can complete on almost every half-hourly run. ANET
+announced itself eleven times on the 1 hour chart in six hours on 19 August, and
+every one of those alerts passed both checks honestly. Thirty alerts that day
+were really about a dozen opportunities.
+
+So a symbol also stays quiet on a timeframe for **12 hours** after it's been
+announced, however many new patterns complete in the meantime. Replaying the 58
+alerts on file, that turns them into 34 — the worst day drops from 30 to 13 —
+without losing a single distinct opportunity.
+
+Twelve hours rather than a day, and the difference is not arbitrary: anywhere
+from 8 to 18 hours gives exactly the same result, but at 24 hours four names
+that came back the following morning (18 to 21 hours later) are silenced,
+because the market opens at roughly the same time every day. Twelve sits in the
+middle of that plateau — longer than a trading session, shorter than the gap to
+the next one.
+
+A held signal isn't written to the ledger. Recording it would push the quiet
+period forward on every run and the name would never be heard from again.
 
 ---
 

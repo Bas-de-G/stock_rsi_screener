@@ -18,6 +18,9 @@ a notification did or didn't go out.
 The key is the pattern -- kind, horizon, symbol, and the completing cross --
 not a timestamp. A strong buy sits on the dashboard for as long as it stays
 fresh, and the same pattern re-derived after a rebuild is still the same news.
+
+That covers the same pattern twice. It does not cover the same *name* twice,
+which turned out to be the louder problem -- see `COOLDOWN` below.
 """
 
 from __future__ import annotations
@@ -31,6 +34,28 @@ from pathlib import Path
 # that the file stays a readable few hundred bytes rather than a year of
 # history nobody reads.
 KEEP_FOR = dt.timedelta(days=60)
+
+# How long a symbol stays quiet on one timeframe after it has been announced.
+#
+# Keying on the pattern alone was correct and not sufficient. Intraday bars are
+# labelled with the minute the run happened, so a fresh pattern can complete on
+# almost every half-hourly run -- each one genuinely new, each one passing the
+# per-pattern check. ANET announced itself eleven times on the 1h chart in six
+# hours on 2026-08-19: 15:29, 15:59, 16:41, 17:26, 17:51, 18:34, 19:24, 19:50,
+# 20:26, 20:55, 21:31. Thirty of that day's alerts were really about a dozen
+# opportunities.
+#
+# Rolling rather than per calendar day, so a signal at 23:50 cannot be followed
+# by another at 00:10.
+#
+# Twelve hours, not twenty-four, and the difference matters. Replaying the 58
+# alerts on file: anything from 8 to 18 hours cuts them to 34 and loses nothing.
+# At 24 hours five real next-session signals disappear -- DECK, GRAB, HEIA and
+# JOBY each came back the following morning 18 to 21 hours later, and a full day
+# swallows them, because the market opens at roughly the same hour every day.
+# Twelve sits in the middle of that plateau: longer than a trading session,
+# shorter than the gap to the next one.
+COOLDOWN = dt.timedelta(hours=12)
 
 
 def key_for(kind: str, horizon: str, symbol: str, up2_date: str) -> str:
@@ -62,6 +87,25 @@ class Ledger:
 
     def seen(self, key: str) -> bool:
         return key in self._sent
+
+    def last_sent(self, kind: str, horizon: str, symbol: str) -> dt.datetime | None:
+        """When this symbol was last announced on this timeframe, any pattern.
+
+        `seen` answers "is this exact news old?"; this answers "have we bothered
+        them about this name recently?" -- the question the cooldown needs.
+        """
+        prefix = f"{kind}/{horizon}/{symbol}/"
+        stamps = []
+        for key, stamp in self._sent.items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                stamps.append(dt.datetime.fromisoformat(stamp))
+            except ValueError:
+                # An unparseable stamp can't place the record in time. Skipping
+                # it risks one extra alert; guessing risks silencing a real one.
+                continue
+        return max(stamps, default=None)
 
     def record(self, key: str, now: dt.datetime | None = None) -> None:
         """Mark one announcement as made. Idempotent."""

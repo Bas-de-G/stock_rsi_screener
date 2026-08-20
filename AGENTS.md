@@ -142,6 +142,18 @@ committed on every run. This started as a table in the database and had to be
 moved: the same strong buy was emailed four or five times in an afternoon. See
 `screener/notified.py`.
 
+**`rsi_history` only ever grew, and had to be pruned.** Bars are upserted and
+never removed, so three years of hourly history accumulated behind a dashboard
+that draws ninety bars — 78 MB, past the 50 MB where GitHub starts warning.
+`screener prune` (in `daily.yml`, unconditional) drops intraday bars older than
+*both* the chart window and the symbol's first daily bar. Those are unreadable,
+not merely old: the chart never plots that far back, and `forward_outcomes`
+already refuses to measure a signal the daily series doesn't cover. Both halves
+of the test are needed — SPCX's 4h history predates its daily history, and the
+daily test alone shortened its chart from 90 bars to 76. Verified by replaying
+a copy of the live database: 283,005 bars removed, every page byte-identical,
+all 17,828 outcomes unchanged, 78 MB → 46 MB.
+
 **Running the screener locally modifies a tracked file, which blocks `git
 pull`.** `data/screener.db` (and the CSVs) are force-added by CI, so they stay
 tracked even though `.gitignore` covers them. Any local `backfill`/`run`/

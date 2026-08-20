@@ -16,7 +16,7 @@ import pytest
 from screener import notify
 from screener.cli import _notify_new_strong_buys
 from screener.config import DEFAULT_HORIZONS, load_config
-from screener.notified import KEEP_FOR, Ledger, key_for
+from screener.notified import COOLDOWN, KEEP_FOR, Ledger, key_for
 from screener.notify import format_signal, format_strong_buy, issue_title, send_webhook
 from screener.storage import RsiPoint, Signal, Store, Valuation
 
@@ -303,6 +303,106 @@ def test_the_record_outlives_the_database(config, store, monkeypatch):
     assert len(posted) == 1
 
 
+# ------------------------------------------------------------- the cooldown
+
+
+def _another_pattern(store, hours_ago: float) -> None:
+    """A second, genuinely distinct double-cross completing `hours_ago`.
+
+    This is what the half-hourly intraday runs really produce: the bars are
+    stamped with the minute the run happened, so a pattern that completes at
+    15:29 and one that completes at 15:59 are different patterns by every test
+    the per-pattern ledger can apply.
+    """
+    store.record_signal(Signal(
+        "PTON", _stamp(hours_ago + 3), _stamp(hours_ago + 2), _stamp(hours_ago),
+        5.45, 7.81, True, True, True, "now", horizon="1h", direction="buy",
+    ))
+
+
+def test_a_new_pattern_hours_later_waits_its_turn(config, store, monkeypatch):
+    """The gap the per-pattern ledger left open. Both patterns are real and
+    neither has been announced -- but they are the same idea about the same
+    name, hours apart."""
+    posted = []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    assert _notify_new_strong_buys(store, config) == 1
+    _another_pattern(store, 1.0)
+    assert _notify_new_strong_buys(store, config) == 0
+    assert len(posted) == 1
+
+
+def test_the_anet_afternoon_collapses_to_one_alert(config, store, monkeypatch):
+    """ANET announced itself eleven times on the 1h chart between 15:29 and
+    21:31 on 2026-08-19, and every one of those alerts passed the per-pattern
+    check honestly. Thirty alerts that day were about a dozen opportunities."""
+    posted = []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    for minutes_in in (0, 30, 72, 117, 142, 185, 235, 261, 297, 326, 362):
+        _another_pattern(store, 6.0 - minutes_in / 60)
+        _notify_new_strong_buys(store, config)
+    assert len(posted) == 1
+
+
+def test_the_cooldown_lifts_before_the_next_session(config, store, monkeypatch):
+    """Quiet for a session, not quiet forever.
+
+    The window has to clear the overnight gap. DECK, GRAB, HEIA and JOBY each
+    came back the next morning 18 to 21 hours after the previous alert; a
+    twenty-four hour window would have silenced all four.
+    """
+    assert COOLDOWN < dt.timedelta(hours=18)
+    posted = []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    Ledger(config.storage.notifications).record(
+        key_for("strong", "1h", "PTON", "yesterday"),
+        now=NOW - COOLDOWN - dt.timedelta(hours=1),
+    )
+    assert _notify_new_strong_buys(store, config) == 1
+    assert len(posted) == 1
+
+
+def test_a_held_pattern_does_not_restart_the_clock(config, store, monkeypatch):
+    """The trap in the obvious implementation.
+
+    If a suppressed pattern were recorded, every half-hourly run would push the
+    window forward by half an hour and the name would never be heard from
+    again. Only what was actually sent goes in the ledger.
+    """
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: True)
+    assert _notify_new_strong_buys(store, config) == 1
+    _another_pattern(store, 1.0)
+    assert _notify_new_strong_buys(store, config) == 0
+    # Only the announced pattern is on file. The held one left no trace, so the
+    # 24 hours run from when the friend was actually told.
+    assert list(Ledger(config.storage.notifications)._sent) == [
+        key_for("strong", "1h", "PTON", _stamp(2.5))
+    ]
+
+
+def test_the_cooldown_says_why_it_stayed_quiet(config, store, monkeypatch, capsys):
+    """A silent suppression is indistinguishable from a broken pipeline -- which
+    is exactly the fright that started this."""
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: True)
+    _notify_new_strong_buys(store, config)
+    capsys.readouterr()
+    _another_pattern(store, 1.0)
+    _notify_new_strong_buys(store, config)
+    out = capsys.readouterr().out
+    assert "PTON" in out and "holding off" in out
+
+
+def test_one_quiet_timeframe_does_not_quiet_the_others(config, store, monkeypatch):
+    """A daily cross on a name that fired on the hourly chart this morning is a
+    different piece of news, and the cooldown is keyed to say so."""
+    ledger = Ledger(config.storage.notifications)
+    ledger.record(key_for("strong", "4h", "PTON", "recent"), now=NOW)
+    posted = []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    assert _notify_new_strong_buys(store, config) == 1
+    assert len(posted) == 1
+
+
 # ------------------------------------------------- the GitHub issue transport
 
 
@@ -505,6 +605,38 @@ def test_old_entries_are_pruned(tmp_path):
     reloaded = Ledger(path)
     assert reloaded.seen("recent")
     assert not reloaded.seen("ancient")
+
+
+def test_the_ledger_finds_the_last_time_a_name_was_heard(tmp_path):
+    """Across patterns, which is the whole point -- `seen` deliberately cannot
+    answer this."""
+    path = tmp_path / "notified.json"
+    ledger = Ledger(path)
+    ledger.record(key_for("strong", "1h", "PTON", "morning"), now=NOW - dt.timedelta(hours=5))
+    ledger.record(key_for("strong", "1h", "PTON", "midday"), now=NOW - dt.timedelta(hours=2))
+    ledger.record(key_for("strong", "1h", "ANET", "midday"), now=NOW)
+    last = Ledger(path).last_sent("strong", "1h", "PTON")
+    assert last == (NOW - dt.timedelta(hours=2)).replace(microsecond=0)
+
+
+def test_a_name_never_heard_has_no_last_time(tmp_path):
+    ledger = Ledger(tmp_path / "notified.json")
+    assert ledger.last_sent("strong", "1h", "PTON") is None
+
+
+def test_a_prefix_does_not_count_as_the_symbol(tmp_path):
+    """PT and PTON share three characters; nothing about PTON should mute PT."""
+    path = tmp_path / "notified.json"
+    Ledger(path).record(key_for("strong", "1h", "PTON", "midday"), now=NOW)
+    assert Ledger(path).last_sent("strong", "1h", "PT") is None
+
+
+def test_an_unreadable_stamp_does_not_mute_a_name(tmp_path):
+    """A record that cannot be placed in time cannot justify silence. One extra
+    alert is the safe failure here; a missed one is not."""
+    path = tmp_path / "notified.json"
+    path.write_text('{"sent": {"strong/1h/PTON/midday": "sometime tuesday"}}\n')
+    assert Ledger(path).last_sent("strong", "1h", "PTON") is None
 
 
 def test_a_corrupt_ledger_does_not_stop_the_run(tmp_path, capsys):

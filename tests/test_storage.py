@@ -323,3 +323,101 @@ def test_csv_snapshot_includes_earnings_growth(store, tmp_path):
     text = path.read_text()
     assert "earnings_growth" in text.splitlines()[0]
     assert "32.6" in text
+
+
+# ------------------------------------------------------- pruning intraday bars
+
+
+def _hourly(store, symbol, days, per_day=7, horizon="1h"):
+    for day in days:
+        for hour in range(13, 13 + per_day):
+            store.upsert_rsi_point(
+                RsiPoint(symbol, f"{day}T{hour:02d}:30", 100.0, 50.0, "live:tradingview",
+                         horizon=horizon)
+            )
+
+
+def _dates(store, symbol, horizon):
+    return [p.date for p in store.rsi_series(symbol, horizon)]
+
+
+def test_intraday_older_than_the_daily_history_goes(store):
+    """The bars nothing can reach.
+
+    `forward_outcomes` refuses to measure a signal the daily series doesn't
+    reach back to, so an intraday bar from before the first daily bar prices a
+    pattern whose outcome is unknowable -- and the chart never plots back that
+    far either.
+    """
+    _hourly(store, "NVDA", ["2024-01-02", "2024-01-03", "2026-01-05"])
+    for day in ("2026-01-05", "2026-01-06"):
+        store.upsert_rsi_point(RsiPoint("NVDA", day, 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=7) == 14
+    assert all(d.startswith("2026-01-05") for d in _dates(store, "NVDA", "1h"))
+
+
+def test_the_chart_window_is_never_pruned(store):
+    """SPCX listed recently enough that its 4h history predates its daily
+    history. Testing the daily line alone shortened its chart from 90 bars to
+    76 -- a visible regression on a page nobody would have thought to check."""
+    _hourly(store, "SPCX", ["2026-01-02", "2026-01-03"], horizon="4h")
+    store.upsert_rsi_point(RsiPoint("SPCX", "2026-01-04", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    # Every 4h bar predates the daily history, but they are all the chart has.
+    assert store.prune_unmeasurable_intraday(keep_bars=90) == 0
+    assert len(_dates(store, "SPCX", "4h")) == 14
+
+
+def test_daily_and_weekly_bars_are_left_alone(store):
+    """The daily series is the ruler every forward return is measured with, and
+    the weekly one is 5 years deep by design."""
+    for day in ("2021-01-04", "2024-06-03"):
+        store.upsert_rsi_point(RsiPoint("NVDA", day, 100.0, 50.0, "live:tradingview", horizon="1w"))
+    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=1) == 0
+    assert len(_dates(store, "NVDA", "1w")) == 2
+
+
+def test_a_symbol_with_no_daily_history_keeps_its_chart(store):
+    """A ticker seeded on the hourly chart but not yet on the daily one has no
+    line to measure against. Dropping everything would blank its card."""
+    _hourly(store, "NEW", ["2026-01-02", "2026-01-03"])
+    assert store.prune_unmeasurable_intraday(keep_bars=90) == 0
+    assert len(_dates(store, "NEW", "1h")) == 14
+
+
+def test_pruning_twice_removes_nothing_the_second_time(store):
+    """It runs on a schedule, so it has to be a no-op once the backlog is gone."""
+    _hourly(store, "NVDA", ["2024-01-02", "2026-01-05"])
+    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=7) == 7
+    assert store.prune_unmeasurable_intraday(keep_bars=7) == 0
+
+
+def test_a_bar_on_the_first_daily_day_survives(store):
+    """The boundary. The daily series covers that day, so the outcome of a
+    pattern completing on it is measurable."""
+    _hourly(store, "NVDA", ["2026-01-05"])
+    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=0) == 0
+    assert len(_dates(store, "NVDA", "1h")) == 7
+
+
+def test_one_symbol_does_not_set_the_line_for_another(store):
+    """The daily line is per symbol -- a long-listed name must not license
+    pruning a young one's history."""
+    _hourly(store, "OLD", ["2024-01-02"])
+    _hourly(store, "NEW", ["2024-01-02"])
+    store.upsert_rsi_point(RsiPoint("OLD", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    store.upsert_rsi_point(RsiPoint("NEW", "2023-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=0) == 7
+    assert len(_dates(store, "NEW", "1h")) == 7
+    assert _dates(store, "OLD", "1h") == []
+
+
+def test_the_floor_keeps_exactly_the_bars_it_says(store):
+    """It was off by one -- `keep_bars=90` kept 91, because the offset counts
+    from zero. Harmless on a chart, wrong in a function that names a number."""
+    _hourly(store, "NVDA", ["2024-01-02", "2024-01-03"])  # 14 bars, all unmeasurable
+    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=5) == 9
+    assert len(_dates(store, "NVDA", "1h")) == 5

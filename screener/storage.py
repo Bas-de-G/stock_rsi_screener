@@ -345,6 +345,68 @@ class Store:
                 for row in cur.fetchall()
             ]
 
+    def prune_unmeasurable_intraday(self, keep_bars: int, horizons=("1h", "4h")) -> int:
+        """Drop intraday bars that nothing can read, and return how many went.
+
+        The database is committed to git, and it only ever grows: bars are
+        upserted and never removed, so three years of hourly history had piled
+        up behind a dashboard that draws ninety bars. 78 MB, past the 50 MB at
+        which GitHub starts warning.
+
+        Two things read an intraday bar, and both have a horizon:
+
+        * The chart draws the newest `keep_bars` of a series, and liveness is
+          judged within a couple of days of the latest bar. Nothing older than
+          the chart window is ever plotted.
+        * `outcomes.forward_outcomes` reads the close on the bar a pattern
+          completed on, then walks *daily* closes forward -- and it already
+          refuses to measure a signal the daily series doesn't reach back to.
+          An intraday bar older than the symbol's first daily bar therefore
+          prices a pattern whose outcome is unknowable.
+
+        So a bar that is both older than the chart window and older than the
+        first daily bar is one no reader can reach. Deleting 283,005 of them
+        left every dashboard page byte-identical and every one of the 17,828
+        measured outcomes unchanged, and took the file to 46 MB.
+
+        The floor is not redundant with the daily test. SPCX listed recently
+        enough that its 4h history predates its daily history, so the daily
+        test alone shortened its chart from 90 bars to 76.
+        """
+        placeholders = ",".join("?" for _ in horizons)
+        # The floor is the date of the `keep_bars`-th newest bar; anything
+        # strictly older than it goes, so exactly `keep_bars` survive. Offset
+        # counts from zero, hence the minus one. A `keep_bars` of nothing means
+        # no floor at all rather than an offset of -1.
+        floor, params = "", tuple(horizons)
+        if keep_bars > 0:
+            floor = """AND r.date < COALESCE((
+                         SELECT k.date FROM rsi_history k
+                         WHERE k.symbol = r.symbol AND k.horizon = r.horizon
+                         ORDER BY k.date DESC LIMIT 1 OFFSET ?
+                       ), '')"""
+            params = (*horizons, keep_bars - 1)
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                f"""DELETE FROM rsi_history WHERE rowid IN (
+                      SELECT r.rowid FROM rsi_history r
+                      WHERE r.horizon IN ({placeholders})
+                        AND r.date < COALESCE((
+                              SELECT MIN(substr(d.date, 1, 10)) FROM rsi_history d
+                              WHERE d.symbol = r.symbol AND d.horizon = '1d'
+                            ), '9999-99-99')
+                        {floor}
+                    )""",
+                params,
+            )
+            removed = cur.rowcount
+        self._conn.commit()
+        if removed:
+            # Deleting rows leaves the pages allocated, and the point of the
+            # exercise is the size of the committed file.
+            self._conn.execute("VACUUM")
+        return removed
+
     # -- valuations ------------------------------------------------------
 
     def upsert_valuation(self, val: Valuation) -> None:
