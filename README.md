@@ -209,17 +209,27 @@ pass would flatter every company equally. Quality shifts the score by up to
 27 of 253 get **no reading at all** — no positive earnings to project. Refusing
 is a real answer; refusing *everything* was the bug.
 
-On the card it is **one small coloured box with the score in it**, sitting
-between the fair value it seconds and the earnings growth it partly rests on.
-Hover for the reasoning — the rate the price demands, the range delivered, the
+On the card it is **one small coloured box**, between the fair value it seconds
+and the earnings growth it partly rests on:
+
+> **`10/10`  Buffett score   ✓ agrees with fair value**
+
+Called the *Buffett score* rather than *Rule #1* because that is what it is —
+Phil Town's method is an explicit mechanisation of Buffett's — and because
+"Rule #1" means nothing to anyone who hasn't read the book, whose title stays in
+the tooltip. Written `10/10` rather than `10` because a bare score says neither
+its scale nor whether high is good; in finance it is as often a risk rating.
+
+Hover for the reasoning: the rate the price demands, the range delivered, the
 sticker and margin-of-safety prices, the Big Four count. A second opinion that
 ranks the page and decides nothing should not out-shout the verdict beside it.
 
 **What it does with that verdict: ranks, never gates.** Rule #1 cannot add or
 remove a 🚀. It sorts cards *within* their category — the rocket category holds
 Rule #1 scores from 2 to 10 today and treated them identically — breaks ties for
-the deal of the day, and marks the rare cards where **both valuations agree**
-(3 of 15 live strong buys). A company Rule #1 cannot read ranks mid-table, not
+the deal of the day, and marks the rare cards where the two valuations agree
+(3 of 15 live strong buys) — beside the score, where it can name both parties,
+rather than as a bare "both agree" badge that named neither. A company Rule #1 cannot read ranks mid-table, not
 last: no opinion is not a bad opinion.
 
 It stays that way until it has been measured, and measuring it can only happen

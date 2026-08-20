@@ -432,7 +432,12 @@ def test_agreement_between_the_two_valuations_is_marked(page_config):
                if r.symbol == "AAA"][0]
 
     assert row.both_valuations_agree
-    assert "both agree" in _card(row, page_config, page_config.horizon("1d"))
+    card = _card(row, page_config, page_config.horizon("1d"))
+    # Beside the score it qualifies, where it can say what it means. As a bare
+    # "both agree" badge next to the status pill it named neither party.
+    assert "agrees with fair value" in card
+    assert card.index('class="ruleone"') < card.index("agrees with fair value")
+    assert "both agree" not in card
 
 
 def test_a_rule_one_red_strong_buy_is_not_marked_but_stays_a_rocket(page_config):
@@ -479,7 +484,8 @@ def test_the_card_shows_a_chip_not_a_panel(page_config):
     card = _card(row, page_config, page_config.horizon("1d"))
 
     assert '<span class="r1-box r1-amber"' in card
-    assert ">7</span>" in card
+    assert '>7<span class="r1-of">/10</span>' in card, "the scale has to be on the chip"
+    assert "Buffett score" in card, "'Rule #1' alone means nothing to a reader"
     for gone in ("r1-head", "r1-demand", "r1-detail", "r1-score", "r1-gap"):
         assert gone not in card, f"{gone} belonged to the panel this replaced"
 

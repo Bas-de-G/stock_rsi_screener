@@ -667,7 +667,7 @@ def _card(row: Row, config: Config, horizon) -> str:
     else:
         growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
 
-    rule_one_block = _rule_one_block(row.rule_one)
+    rule_one_block = _rule_one_block(row.rule_one, row.both_valuations_agree)
 
     leverage_block = ""
     if row.fired or row.sell_fired:
@@ -684,17 +684,11 @@ def _card(row: Row, config: Config, horizon) -> str:
         f'<span class="fresh" title="Second cross within the last '
         f'{html.escape(horizon.fresh_label)}">fresh</span>' if row.fresh else ""
     )
-    # The rarest thing on the page: two valuation methods with almost nothing
-    # in common reaching the same conclusion.
-    agree_badge = (
-        '<span class="agree" title="Morningstar fair value and Rule #1 '
-        'independently agree">both agree</span>' if row.both_valuations_agree else ""
-    )
     return f"""<article class="card state-{row.state} {market_classes}">
   <header class="card-head">
     <div class="ident">
       <h3>{symbol}</h3>
-      <span class="pill">{pill_label}</span>{fresh_badge}{agree_badge}
+      <span class="pill">{pill_label}</span>{fresh_badge}
     </div>
     <div class="readout">
       <div class="metric"><span class="k">RSI</span><span class="v">{rsi_text}</span></div>
@@ -718,39 +712,53 @@ def _card(row: Row, config: Config, horizon) -> str:
 </article>"""
 
 
-def _rule_one_block(reading) -> str:
-    """The Rule #1 verdict as one small coloured box holding a number.
+def _rule_one_block(reading, agrees: bool = False) -> str:
+    """The Buffett score: a small coloured box, and what it is.
 
-    Sized to what it is worth. This is a second opinion that ranks the page and
-    decides nothing, sitting between the fair value it seconds and the earnings
-    growth it partly rests on — so it gets a chip, not the panel it started as.
-    An edge colour and three lines of arithmetic made an unmeasured factor look
-    like the loudest thing on the card.
+    Three things were unreadable when this said `[10] RULE #1`:
 
-    Everything cut goes into the tooltip rather than away: the rate the price
-    demands, the range the company has delivered, the sticker and
-    margin-of-safety prices, and the Big Four count. The score alone is what
-    ranks; the reasoning is one hover away for anyone arguing with it.
+    * **the scale** -- ten out of what? So it reads `10/10`.
+    * **the polarity** -- in finance a high score is as often a risk rating as
+      a recommendation. Colour carries it, and `/10` beside green/amber/red is
+      a pattern nobody has to be taught.
+    * **the name** -- "Rule #1" is Phil Town's title and means nothing to
+      someone who has not read him. "Buffett score" is what it actually is:
+      his method is explicitly a mechanisation of Buffett's. The book's name
+      stays in the tooltip for anyone who wants to look it up.
+
+    The agreement mark rides here rather than in the header for the same
+    reason. As a bare "both agree" badge beside the status pill it left the
+    reader to guess both *what* and agreeing about *what*; next to the score it
+    can simply say what it means, and the header goes back to carrying the
+    verdict and its freshness alone.
     """
     if reading is None:
         return ""
     if not reading.applicable:
-        return (f'<p class="ruleone"><span class="r1-box r1-na" '
-                f'title="Rule #1: {html.escape(reading.reason)}">–</span>'
-                f'<span class="r1-label">Rule #1</span></p>')
+        return ('<p class="ruleone"><span class="r1-box r1-na" '
+                'title="Buffett score (Phil Town&#39;s Rule #1): '
+                f'{html.escape(reading.reason)}">–</span>'
+                '<span class="r1-label">Buffett score</span></p>')
 
     detail = (
-        f"Rule #1 {reading.score}/10 — price demands "
-        f"{reading.implied_growth:.1f}% a year for ten years; this company has "
-        f"delivered {reading.conservative_growth:.1f}–{reading.growth:.1f}%. "
+        f"Buffett score (Phil Town's Rule #1): {reading.score} out of 10. "
+        f"Today's price demands {reading.implied_growth:.1f}% growth a year for "
+        f"ten years; this company has delivered "
+        f"{reading.conservative_growth:.1f}–{reading.growth:.1f}%. "
         f"Sticker {reading.sticker:,.2f}, margin of safety {reading.mos:,.2f}, "
         f"Big Four {reading.big_four}/4."
         + (f" ⚠ {reading.caution}." if reading.caution else "")
     )
-    warn = '<span class="r1-warn">⚠</span>' if reading.caution else ""
+    warn = '<span class="r1-warn" title="See the score for why">⚠</span>' if reading.caution else ""
+    agree = (
+        '<span class="r1-agree" title="Morningstar&#39;s fair value and the Buffett '
+        'score are worked out in completely different ways, and here they reach the '
+        'same conclusion">✓ agrees with fair value</span>' if agrees else ""
+    )
     return (f'<p class="ruleone"><span class="r1-box r1-{reading.band}" '
-            f'title="{html.escape(detail)}">{reading.score}</span>'
-            f'<span class="r1-label">Rule #1</span>{warn}</p>')
+            f'title="{html.escape(detail)}">{reading.score}'
+            f'<span class="r1-of">/10</span></span>'
+            f'<span class="r1-label">Buffett score</span>{warn}{agree}</p>')
 
 
 def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bool]:
@@ -1103,10 +1111,11 @@ h1 {
 /* Rule #1: one small box with a number in it. A second opinion that ranks the
    page and decides nothing should not out-shout the verdict it is seconding —
    the reasoning lives in the box's tooltip. */
-.ruleone { margin: 8px 0 0; display: flex; align-items: center; gap: 7px; }
+.ruleone { margin: 8px 0 0; display: flex; align-items: center; gap: 7px;
+           flex-wrap: wrap; }
 .r1-box {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 26px; height: 22px; padding: 0 5px; border-radius: 3px;
+  min-width: 34px; height: 22px; padding: 0 6px; border-radius: 3px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   cursor: help; border: 1px solid transparent;
@@ -1123,6 +1132,13 @@ h1 {
   color: var(--ink-3); font-weight: 700;
 }
 .r1-warn { color: var(--warn); font-size: 11px; cursor: help; }
+.r1-of { font-size: 9.5px; font-weight: 500; opacity: .72; letter-spacing: -.02em; }
+/* Reads as a sentence with the score it qualifies, which "both agree" beside
+   the status pill never could. */
+.r1-agree {
+  margin-left: auto; font-size: 11px; color: var(--green); cursor: help;
+  white-space: nowrap;
+}
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
 .card.state-oversold { border-top: 3px solid var(--crimson); }
