@@ -121,6 +121,48 @@ def forward_outcomes(
     return out
 
 
+def trajectory(entry: float | None, daily_closes, up2_date: str, days: int) -> list[float]:
+    """The price path after a signal, rebased so the signal day is 100.
+
+    What an event-study chart draws: every recommendation starting from the
+    same point, so paths of a $5 stock and a $500 one can be read on one axis.
+    Index 0 is the signal itself and always 100.
+
+    Shorter than `days + 1` when the history runs out, which is the honest
+    shape -- a line that stops is a signal too recent to have finished, not one
+    that went flat.
+    """
+    if not entry:
+        return []
+    closes = list(daily_closes)
+    if not closes or closes[0][0][:10] > up2_date[:10]:
+        # Same coverage rule as `forward_outcomes`, and for the same reason: a
+        # path drawn from bars that begin after the signal is a picture of a
+        # different fortnight.
+        return []
+    ahead = [c for d, c in closes if d[:10] > up2_date[:10]][:days]
+    return [100.0] + [100.0 * c / entry for c in ahead]
+
+
+def mean_path(paths, min_paths: int = 3) -> list[float]:
+    """The average of many trajectories, day by day.
+
+    Truncated where fewer than `min_paths` signals still have data, so the tail
+    of the line is not one lucky ticker drawn with the authority of a cohort
+    average. That is the failure mode of every event-study chart: the mean
+    keeps going long after the sample has thinned to nothing.
+    """
+    if not paths:
+        return []
+    out = []
+    for day in range(max(len(p) for p in paths)):
+        values = [p[day] for p in paths if day < len(p)]
+        if len(values) < min_paths:
+            break
+        out.append(sum(values) / len(values))
+    return out
+
+
 def _span_is_plausible(start: str, end: str, bars: int) -> bool:
     """Whether `bars` trading days could really span these two dates.
 
