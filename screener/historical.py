@@ -93,6 +93,10 @@ class Entry:
     path: list[float]
     ret: float | None            # signed to the call, at HEADLINE_BARS
     right: bool | None
+    # The conviction score this recommendation actually went out with, read
+    # from the journal. None for anything published before the score existed.
+    conviction: int | None = None
+    conviction_band: str = ""
 
 
 @dataclass
@@ -128,7 +132,10 @@ def _retrospective_strong(signal, price_then, fair_value, config, margin) -> boo
 
 def collect_panels(store: Store, config: Config) -> dict[tuple[str, str], Panel]:
     """Build every (cohort, horizon) panel in one pass over the history."""
+    from .journal import published_convictions
+
     valuations = {v.symbol: v for v in store.latest_valuations()}
+    convictions = published_convictions(config.storage.recommendations)
     outcomes = {
         (o.symbol, o.horizon, o.direction, o.up2_date): o
         for o in store.all_outcomes(bars=HEADLINE_BARS)
@@ -177,12 +184,17 @@ def collect_panels(store: Store, config: Config) -> dict[tuple[str, str], Panel]
                 outcome = outcomes.get(
                     (ticker.symbol, horizon.key, signal.direction, signal.up2_date)
                 )
+                scored = convictions.get(
+                    (ticker.symbol, horizon.key, signal.direction, signal.up2_date)
+                )
                 entry = Entry(
                     symbol=ticker.symbol,
                     up2_date=signal.up2_date,
                     path=path,
                     ret=outcome.return_pct if outcome else None,
                     right=(outcome.return_pct > 0) if outcome else None,
+                    conviction=scored[0] if scored else None,
+                    conviction_band=scored[1] if scored else "",
                 )
                 strong = _retrospective_strong(
                     signal, price_then,
@@ -439,16 +451,28 @@ def _table(panel: Panel) -> str:
             outcome = (f'<td class="num open" title="Measured at +{HEADLINE_BARS} '
                        f'trading days; this one is {done} in">day {done}'
                        f'<span class="of">/{HEADLINE_BARS}</span></td>')
+        if e.conviction is None:
+            # Published before the score existed. An em dash rather than a
+            # blank, so "we did not score this" reads differently from "this
+            # scored nothing".
+            score = '<td class="num cv-na" title="Published before the '
+            score += 'conviction score existed">—</td>'
+        else:
+            score = (f'<td class="num cvcell cv-{html.escape(e.conviction_band)}" '
+                     f'title="The conviction this went out with, from the '
+                     f'journal — not recomputed today">{e.conviction}</td>')
         body += (
             f'<tr><td class="num idx">{n}</td>'
             f'<th scope="row">{html.escape(e.symbol)}</th>'
             f'<td class="num date">{html.escape(e.up2_date[:10])}</td>'
+            f'{score}'
             f'<td class="num">{e.path[-1] - 100:+.1f}%</td>{outcome}</tr>'
         )
     return f"""<table class="names">
   <caption>The {len(rows)} numbered lines above, newest first</caption>
   <thead><tr><th scope="col"><span class="vh">Line</span>#</th>
     <th scope="col">Symbol</th><th scope="col">Signal</th>
+    <th scope="col" title="The weighted conviction score this went out with">Conv.</th>
     <th scope="col">So far</th><th scope="col">At +{HEADLINE_BARS}d</th></tr></thead>
   <tbody>{body}</tbody>
 </table>"""
@@ -815,6 +839,13 @@ _EXTRA_CSS = """
   font-size: 11px;
 }
 .names .open { color: var(--ink-2); cursor: help; font-weight: 500; }
+/* The conviction each row went out with. Muted next to the returns — this is
+   the input being tested, not the result. */
+.names .cvcell { font-weight: 700; cursor: help; }
+.names .cv-green { color: var(--green); }
+.names .cv-amber { color: var(--warn); }
+.names .cv-red   { color: var(--crimson); }
+.names .cv-na    { color: var(--ink-3); cursor: help; }
 .names .open .of { opacity: .6; font-size: 10px; }
 /* Visually hidden: "Line #" for a screen reader, "#" on the page. */
 .vh {

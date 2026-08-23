@@ -206,6 +206,42 @@ class Journal:
         return self._rows_written
 
 
+def published_convictions(path: Path | str) -> dict[tuple[str, str, str, str], tuple[int, str]]:
+    """The conviction score each recommendation actually went out with.
+
+    Read from the journal rather than recomputed, which is the whole point: a
+    score recomputed today would use today's fair value and today's Rule #1
+    reading, and be a fact about the present dressed up as one about the past.
+    This is what the page said at the time.
+
+    It follows that history is thin here -- the score did not exist before
+    today, so older rows have the column empty and simply do not get a number.
+    That is the honest shape of it, and it fills in from now on.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    out: dict[tuple[str, str, str, str], tuple[int, str]] = {}
+    try:
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                score = row.get("conviction") or ""
+                if not score.strip():
+                    continue
+                try:
+                    value = int(score)
+                except ValueError:
+                    continue
+                out[(row.get("symbol", ""), row.get("horizon", ""),
+                     row.get("direction", ""), row.get("up2_date", ""))] = (
+                    value, row.get("conviction_band", "")
+                )
+    except (OSError, csv.Error, UnicodeDecodeError):
+        # A damaged journal costs a column on one page, never the build.
+        return {}
+    return out
+
+
 def verdict_for(signal, direction: str, strong: bool, suspended: bool) -> str:
     """The label this pattern was published under.
 
