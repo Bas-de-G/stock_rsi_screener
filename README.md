@@ -838,6 +838,15 @@ Each segment of the bar is one factor's actual contribution — its weight times
 how well it scored — so its width answers *why is this an 8?* and the empty
 remainder answers *what would have made it a 10?*
 
+It appears in three places on the site: the chip and bar on every card, a
+**Conviction ≥7** count in each page's summary strip, and a **Conv.** column in
+the Historical Dashboard's key, showing what each recommendation actually went
+out with. That last one is read from `recommendations.csv`, never recomputed —
+a score worked out today would use today's fair value and today's Rule #1
+reading, and be a fact about the present dressed up as one about the past. It
+follows that rows published before the score existed show an em dash rather
+than a number, and the column fills in from here.
+
 **It decides nothing.** The rocket and the phone alert still come from the older
 rule (fair value required, everything else a veto). That rule has a track record
 on the Historical Dashboard and this has none, so the score is computed, shown

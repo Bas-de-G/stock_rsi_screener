@@ -427,3 +427,60 @@ def test_an_open_path_is_not_coloured_as_a_win_or_a_loss():
     trace = svg.split('<polyline class="')[1].split('"')[0]
     assert "open" in trace
     assert "win" not in trace and "loss" not in trace
+
+
+# ------------------------------------------- the conviction each one went out with
+
+
+def test_the_key_shows_the_score_a_recommendation_went_out_with(tmp_path):
+    """Read from the journal, not recomputed. A score recomputed today would
+    use today's fair value and today's Rule #1 reading, and be a fact about the
+    present dressed up as one about the past."""
+    from screener.historical import _table
+
+    html = _table(_panel_with([("AAA", "2026-08-19", [100.0, 101.0], None)]))
+    assert "Conv." in html
+
+    panel = _panel_with([("AAA", "2026-08-19", [100.0, 101.0], None)])
+    panel.entries[0].conviction = 9
+    panel.entries[0].conviction_band = "green"
+    html = _table(panel)
+    assert '>9</td>' in html
+    assert "cv-green" in html
+
+
+def test_a_recommendation_older_than_the_score_says_so(tmp_path):
+    """An em dash, not a blank: "we did not score this" has to read differently
+    from "this scored nothing"."""
+    from screener.historical import _table
+
+    html = _table(_panel_with([("AAA", "2025-01-02", [100.0, 101.0], 0.05)]))
+    assert "—" in html and "cv-na" in html
+
+
+def test_the_scores_are_read_from_the_journal(tmp_path):
+    from screener.journal import published_convictions
+
+    path = tmp_path / "r.csv"
+    path.write_text(
+        "symbol,horizon,direction,up2_date,conviction,conviction_band\n"
+        "AAA,1d,buy,2026-08-19,9,green\n"
+        "BBB,1d,buy,2026-08-19,,\n"          # published before the score existed
+    )
+    found = published_convictions(path)
+    assert found[("AAA", "1d", "buy", "2026-08-19")] == (9, "green")
+    assert ("BBB", "1d", "buy", "2026-08-19") not in found
+
+
+def test_a_missing_journal_costs_a_column_not_the_build(tmp_path):
+    from screener.journal import published_convictions
+
+    assert published_convictions(tmp_path / "nope.csv") == {}
+
+
+def test_a_damaged_journal_costs_a_column_not_the_build(tmp_path):
+    from screener.journal import published_convictions
+
+    path = tmp_path / "r.csv"
+    path.write_bytes(b"\xff\xfe\x00binary rubbish")
+    assert published_convictions(path) == {}

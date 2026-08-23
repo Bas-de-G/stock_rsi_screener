@@ -333,3 +333,35 @@ def test_no_score_renders_nothing():
 def test_the_block_carries_no_javascript():
     """CI asserts the whole page has none; this is the piece most tempted."""
     assert "<script" not in _block() and "onclick" not in _block()
+
+
+def test_the_page_counts_its_high_conviction_names(tmp_path):
+    """The score belongs at site level too, not only on a card at a time."""
+    from screener.config import load_config
+    from screener.dashboard import _collect, render
+    from screener.storage import RsiPoint, Store
+
+    path = tmp_path / "config.yaml"
+    path.write_text(f"""
+tickers:
+  - {{symbol: AAA, tradingview: "NASDAQ:AAA", morningstar: xnas/aaa, markets: [nasdaq]}}
+rsi: {{period: 14, threshold: 30, overbought: 70, interval: "1D"}}
+signal: {{window_days: 14, window_unit: calendar,
+          valuation_rule: price_below_fair_value, fire_without_valuation: true}}
+storage:
+  database: "{tmp_path / 't.db'}"
+  csv_dir: "{tmp_path}"
+  fair_values: "{tmp_path / 'fv.yaml'}"
+  notifications: "{tmp_path / 'n.json'}"
+  recommendations: "{tmp_path / 'r.csv'}"
+dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
+""")
+    config = load_config(path)
+    with Store(config.storage.database) as store:
+        store.upsert_rsi_point(
+            RsiPoint("AAA", "2026-08-19", 10.0, 25.0, "live:tradingview", horizon="1d")
+        )
+        rows = _collect(store, config, config.horizon("1d"))
+    page = render(rows, config, config.horizon("1d"))
+    assert "Conviction ≥7" in page
+    assert "<script" not in page

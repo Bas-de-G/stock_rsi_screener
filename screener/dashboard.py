@@ -19,7 +19,7 @@ from pathlib import Path
 from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config, Horizon
 from .earnings import BEFORE, CLEAR_WINDOW, EarningsWindow, earnings_window
 from .earnings import to_date as to_release_date
-from .scoring import MAX_SCORE as SCORE_MAX, MIN_SCORE as SCORE_MIN
+from .scoring import GREEN_AT, MAX_SCORE as SCORE_MAX, MIN_SCORE as SCORE_MIN
 from .signals import (
     BUY,
     SELL,
@@ -953,6 +953,10 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     strong = sum(1 for r in rows if r.strong)
     fired = sum(1 for r in rows if r.fired)
     sells = sum(1 for r in rows if r.sell_fired)
+    high_conviction = sum(
+        1 for r in rows
+        if r.conviction is not None and r.conviction.score >= GREEN_AT
+    )
     dated = [r.latest.date for r in rows if r.latest]
     as_of = max(dated) if dated else "—"
 
@@ -999,6 +1003,10 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
     <div><dt>Signals</dt><dd class="{'warn' if fired else ''}">{fired}</dd></div>
     <div><dt>Strong 🚀</dt><dd class="{'good' if strong else ''}">{strong}</dd></div>
     <div><dt>Sells 🔻</dt><dd class="{'hot' if sells else ''}">{sells}</dd></div>
+    <div title="Names scoring {GREEN_AT:g} or better on the weighted conviction
+      score. It ranks and explains; it does not decide — the rocket above still
+      comes from the fair-value rule."><dt>Conviction ≥{GREEN_AT:g}</dt>
+      <dd class="{'good' if high_conviction else ''}">{high_conviction}</dd></div>
   </dl>
 </header>"""
 
