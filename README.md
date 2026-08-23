@@ -447,6 +447,23 @@ the same span. Pick a **cohort** (strong buy by default; buy and sell sit
 behind *Other signals*) and a **timeframe**, and the panel redraws — with no
 JavaScript, because the selectors are radio buttons and CSS sibling rules.
 
+**The lines are numbered, and the table underneath is the key.** The twelve
+most recent recommendations get a number at the end of their line and a row
+below with the symbol, the date and how it has done; the rest are drawn faintly
+behind them for the shape of the cohort. One company per number — an intraday
+pattern completes on almost every run, so the twelve newest 1h strong buys were
+eight companies from a single afternoon with four of them listed twice. Only
+the key is deduplicated; every figure on the page still runs over the whole
+sample.
+
+**Recommendations still inside their twenty days are listed too**, dotted
+rather than coloured, showing the return so far and how far through they are.
+They are excluded from the cohort statistics, which need the full window to
+compare like with like. This used to be a filter on "has a +20d return", which
+sounds like tidiness and meant the newest row on the page was always a month
+old — on the 1h panel, where every drawn line is days old, nothing recent
+appeared at all. The page looked stale while working perfectly.
+
 ```bash
 python -m screener.cli evaluate                       # measure every past pattern
 python -m screener.cli backtest --bars 20             # hit rate vs a random entry
@@ -802,6 +819,46 @@ unauthenticated one RSI comes from. Any positive number confirms; the sign is
 the only question being asked, same as the valuation gate's plain boolean.
 
 ---
+
+## The conviction score
+
+Every card carries a **Buy conviction** out of 10, and a segmented bar beneath
+it showing what produced it. Five factors, each reduced to a strength between 0
+and 1, weighted by `scoring.weights` in `config.yaml`:
+
+| Factor | Full marks at | Default weight |
+|---|---|---|
+| Fair value | double the horizon's margin under fair value | 3.0 |
+| Buffett score | 10/10 on Rule #1 | 2.0 |
+| EPS growth | +30% year on year | 1.5 |
+| Earnings timing | no release near (binary) | 1.0 |
+| RSI depth | 6 points below the threshold at the dip | 1.0 |
+
+Each segment of the bar is one factor's actual contribution — its weight times
+how well it scored — so its width answers *why is this an 8?* and the empty
+remainder answers *what would have made it a 10?*
+
+**It decides nothing.** The rocket and the phone alert still come from the older
+rule (fair value required, everything else a veto). That rule has a track record
+on the Historical Dashboard and this has none, so the score is computed, shown
+and written into `recommendations.csv` alongside the weights that produced it —
+and once it has run forward for a few months the two can be compared on
+evidence. Re-weighting is a config edit; the weights in force are stamped into
+every journal row, so a re-weighting shows up in the results rather than
+silently rewriting the past.
+
+**An unread factor is dropped and the rest reweighted, not scored zero.**
+Otherwise "nobody has recorded a fair value" and "this stock is dear" would give
+the same number, and 88 of the 253 names have no fair value on file. The cost is
+that a name with one factor known still gets a confident-looking score, so each
+card reports what share of the weighted evidence was actually available — a 9 on
+40% coverage is a different claim from a 9 on 100%.
+
+The saturation points above were calibrated against the live watchlist, not
+picked. Two first guesses were wrong by a lot: scoring the dip at 10 points put
+97% of patterns under full marks, and subtracting the margin from the discount
+scored 87% of the watchlist at exactly zero — a factor that is zero for seven
+names in eight cannot rank them, which is the one job it has.
 
 ## Notifications
 

@@ -147,8 +147,10 @@ class RuleOne:
     conservative_growth: float | None = None   # the pessimistic case
     implied_growth: float | None = None        # what today's price demands
     future_pe: float | None = None
-    sticker: float | None = None
+    sticker: float | None = None       # at the base-case growth rate
+    sticker_low: float | None = None   # at the conservative rate
     mos: float | None = None
+    eps: float | None = None
     price: float | None = None
     big_four: int = 0
     score: int = 0                # 1-10, 0 when not applicable
@@ -174,6 +176,38 @@ class RuleOne:
             return f"not applicable — {self.reason}"
         return (f"price demands {self.implied_growth:.1f}%/yr · "
                 f"delivered {self.conservative_growth:.1f}–{self.growth:.1f}%")
+
+    @property
+    def value_band(self) -> tuple[float, float] | None:
+        """What Rule #1 says the company is worth, as a low-high pair of prices.
+
+        `None` when the number would not be a valuation.
+
+        Both growth rates floor at zero, and `future_pe` floors at 8, so a
+        company whose earnings are flat or shrinking prices out at
+        `EPS x 8 / 1.15^10` -- that is, `EPS x 1.98`, a P/E of 2, whatever the
+        company is. 47 of the 226 readable names on the watchlist land on that
+        constant exactly. It is arithmetically correct and it is not a value:
+        it is the formula demanding 15% a year from a business that is not
+        growing, and printing "$52.50" beside META's Morningstar fair value
+        would read as a second opinion when it is an artefact of the floor.
+
+        The score stays valid in that case -- it is built on implied growth,
+        which handles a flat company perfectly well -- so the card shows the
+        score and omits the price.
+        """
+        if not self.applicable or self.sticker is None or self.sticker_low is None:
+            return None
+        if not self.growth:
+            return None
+        return (self.sticker_low, self.sticker)
+
+    @property
+    def mos_band(self) -> tuple[float, float] | None:
+        """The same band after the margin of safety -- what you'd pay, not what
+        it's worth."""
+        band = self.value_band
+        return (mos_price(band[0]), mos_price(band[1])) if band else None
 
     @property
     def to_sticker(self) -> float | None:
@@ -338,6 +372,13 @@ def evaluate(
     pe = future_pe(growth)
     sticker = sticker_price(eps_ttm, growth, pe)
     mos = mos_price(sticker)
+    # The pessimistic end of the same calculation. Quoting one sticker implies a
+    # precision the method does not have -- the two rates are both defensible
+    # readings of the same filings, and across the watchlist they straddle a
+    # median 1.4x and a 90th-percentile 5.6x. A band says that out loud.
+    sticker_floor = sticker_price(
+        eps_ttm, conservative, future_pe(max(conservative, 0.0))
+    )
     demanded = implied_growth(eps_ttm, price)
     quality = big_four(roic, eps_growth_ttm, sales_growth_ttm, fcf_growth_ttm)
     score, band = _score(growth - demanded, quality)
@@ -357,6 +398,7 @@ def evaluate(
     return RuleOne(
         applicable=True, growth=growth, conservative_growth=conservative,
         implied_growth=demanded, future_pe=pe, sticker=sticker, mos=mos,
+        sticker_low=min(sticker_floor, sticker), eps=eps_ttm,
         price=price, big_four=quality, score=score, band=band, caution=caution,
     )
 

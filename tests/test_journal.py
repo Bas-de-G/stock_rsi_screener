@@ -265,3 +265,150 @@ def test_the_ledger_outlives_the_database(config):
 
     rows = list(csv.DictReader(config.storage.recommendations.open(newline="")))
     assert len(rows) == 1
+
+
+# ------------------------------------------- widening the file as columns grow
+
+
+def test_a_row_written_under_an_older_header_still_lines_up(tmp_path):
+    """The bug this found, in the file least able to afford one.
+
+    Rows are appended one at a time, which is what makes a crash mid-run lose
+    nothing -- and it also means a DictWriter built from today's COLUMNS writes
+    37 values under a header listing 23, misaligning every column from there
+    on. It had already happened: 54 of the 488 rows on file were 33 wide under
+    a 23-wide header, so every Rule #1 value in the journal was unreadable.
+    Nothing warned, because a ragged CSV is perfectly valid text.
+    """
+    from screener.journal import COLUMNS
+
+    path = tmp_path / "r.csv"
+    old = COLUMNS[:21] + COLUMNS[-2:]          # the shape before Rule #1
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(old)
+        w.writerow(["2026-08-01T10:00", "AAA", "1d", "buy", "2026-08-01", "strong",
+                    "1", "10.0", "USD", "28.0", "15.0", "0.5", "1", "1", "8.0",
+                    "1", "1", "clear", "", "0.3", "2", "1", ""])
+
+    Journal(path)                               # migrates on open
+    rows = list(csv.DictReader(path.open(newline="")))
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "AAA" and rows[0]["verdict"] == "strong"
+    assert rows[0]["leverage"] == "2", "the last column before the new ones"
+    assert rows[0]["schema"] == "1", "and the two that have always been last"
+    assert rows[0]["r1_score"] == "", "a column it predates stays empty"
+
+
+def test_values_written_wide_are_recovered_not_dropped(tmp_path):
+    """The 54 rows were not lost, only unreadable — every column ever added
+    went in before `schema` and `extra`, so a row of width W is the first W-2
+    columns plus those two."""
+    from screener.journal import COLUMNS
+
+    path = tmp_path / "r.csv"
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(COLUMNS[:21] + COLUMNS[-2:])       # 23-wide header
+        w.writerow(                                    # 33-wide row
+            ["2026-08-19T12:00", "ANET", "1h", "buy", "2026-08-19", "strong",
+             "1", "100.0", "USD", "29.0", "120.0", "0.2", "1", "1", "9.0",
+             "1", "1", "clear", "", "0.1", "10"]
+            + ["7", "amber", "12.0", "8.0", "10.0", "2.0", "121.36", "60.68",
+               "0.21", "3"]
+            + ["1", ""]
+        )
+
+    Journal(path)
+    row = list(csv.DictReader(path.open(newline="")))[0]
+    assert row["r1_score"] == "7" and row["r1_band"] == "amber"
+    assert row["r1_sticker"] == "121.36", "recovered, not discarded"
+    assert row["schema"] == "1" and row["verdict"] == "strong"
+
+
+def test_widening_leaves_an_up_to_date_file_alone(tmp_path):
+    path = tmp_path / "r.csv"
+    Journal(path).record(_rec())
+    before = path.read_text()
+    Journal(path)
+    assert path.read_text() == before
+
+
+def test_appending_after_a_widening_stays_aligned(tmp_path):
+    from screener.journal import COLUMNS
+
+    path = tmp_path / "r.csv"
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(COLUMNS[:21] + COLUMNS[-2:])
+        w.writerow(["2026-08-01T10:00", "AAA", "1d", "buy", "2026-08-01", "strong",
+                    "1", "10.0", "USD", "28.0", "15.0", "0.5", "1", "1", "8.0",
+                    "1", "1", "clear", "", "0.3", "2", "1", ""])
+
+    journal = Journal(path)
+    assert journal.record(_rec(symbol="BBB")) is True
+    widths = {len(line.split(",")) for line in path.read_text().splitlines()}
+    assert widths == {len(COLUMNS)}, "one width for the whole file"
+
+
+def test_a_widened_file_still_deduplicates(tmp_path):
+    """The keys are read after the rewrite, so an old row must still block a
+    repeat of itself."""
+    from screener.journal import COLUMNS
+
+    path = tmp_path / "r.csv"
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(COLUMNS[:21] + COLUMNS[-2:])
+        w.writerow(["2026-08-19T12:55", "PTON", "1h", "buy", "2026-08-19T12:55",
+                    "strong", "1", "5.45", "USD", "33.3", "7.81", "0.434", "1",
+                    "1", "12.0", "1", "1", "clear", "", "0.1", "10", "1", ""])
+
+    assert Journal(path).record(_rec(up2="2026-08-19T12:55")) is False
+
+
+def test_an_unreadable_file_is_not_rewritten(tmp_path):
+    """A damaged ledger must never be made worse by the repair."""
+    path = tmp_path / "r.csv"
+    path.write_bytes(b"\xff\xfe\x00binary rubbish")
+    before = path.read_bytes()
+    Journal(path)
+    assert path.read_bytes() == before
+
+
+# --------------------------------------------- the conviction score travels
+
+
+def test_the_score_and_its_weights_are_both_recorded(tmp_path):
+    """The score is meaningless later without them: re-weighting is a config
+    edit, and a column of scores computed under three different weightings that
+    does not say which is which cannot be measured at all."""
+    import json
+
+    path = tmp_path / "r.csv"
+    Journal(path).record(_rec(
+        conviction=8, conviction_band="green", conviction_coverage=1.0,
+        conviction_weights='{"pattern":1.0,"valuation":3.0}',
+    ))
+    row = list(csv.DictReader(path.open(newline="")))[0]
+    assert row["conviction"] == "8" and row["conviction_band"] == "green"
+    assert json.loads(row["conviction_weights"])["valuation"] == 3.0
+
+
+def test_the_weights_are_written_in_a_stable_order(tmp_path):
+    """So a re-weighting shows up in the diff and key ordering does not."""
+    from screener.journal import _conviction_fields
+    from screener.scoring import composite, Factor
+
+    comp = composite(
+        [Factor("valuation", "V", 1.0), Factor("pattern", "P", 0.5)],
+        {"pattern": 1.0, "valuation": 3.0},
+    )
+    text = _conviction_fields(comp)["conviction_weights"]
+    assert text == '{"pattern":1.0,"valuation":3.0}'
+
+
+def test_a_row_without_a_score_leaves_the_columns_empty(tmp_path):
+    from screener.journal import _conviction_fields
+
+    assert _conviction_fields(None) == {}

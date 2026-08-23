@@ -19,6 +19,7 @@ from pathlib import Path
 from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config, Horizon
 from .earnings import BEFORE, CLEAR_WINDOW, EarningsWindow, earnings_window
 from .earnings import to_date as to_release_date
+from .scoring import MAX_SCORE as SCORE_MAX, MIN_SCORE as SCORE_MIN
 from .signals import (
     BUY,
     SELL,
@@ -56,6 +57,10 @@ class Row:
     earnings: EarningsWindow = CLEAR_WINDOW
     # Phil Town's Rule #1 reading, or None where it has never been computed.
     rule_one: object | None = None
+    # The weighted conviction score, or None on a page built before it existed.
+    # Shadow only: it ranks and explains, and decides nothing -- see
+    # `screener.scoring.SHADOW`.
+    conviction: object | None = None
 
     @property
     def suspended(self) -> bool:
@@ -294,6 +299,60 @@ def _window_for(symbol: str, releases: dict, sessions: dict) -> EarningsWindow:
     )
 
 
+def _conviction(row: Row, config: Config, horizon):
+    """Score one row against the configured weights.
+
+    Built from the row rather than from the store, so the score is made of
+    exactly what the card shows -- there is no way for the number to be
+    computed off a fact the reader cannot see.
+    """
+    from .scoring import (
+        composite, earnings_factor, growth_factor, pattern_factor,
+        rule_one_factor, valuation_factor,
+    )
+
+    val = row.valuation
+    growth = row.latest.earnings_growth if row.latest else None
+    dip = _dip_rsi(row)
+    return composite(
+        [
+            valuation_factor(
+                val.price if val else None,
+                val.fair_value if val else None,
+                horizon.margin,
+            ),
+            rule_one_factor(row.rule_one),
+            growth_factor(growth),
+            earnings_factor(row.earnings),
+            pattern_factor(
+                dip if dip is not None else row.rsi,
+                config.rsi.threshold,
+                at_dip=dip is not None,
+            ),
+        ],
+        config.scoring.weights,
+    )
+
+
+def _dip_rsi(row: Row) -> float | None:
+    """The trough between the two crosses of the newest buy pattern.
+
+    A double cross completes *above* the threshold by construction, so today's
+    RSI says nothing about how oversold the setup got -- the depth that matters
+    is the one between the crosses, and it is what separates a graze from a
+    sell-off.
+    """
+    buys = [s for s in row.signals if s.direction == BUY]
+    if not buys:
+        return None
+    newest = max(buys, key=lambda s: s.up2_date)
+    window = [
+        p.rsi for p in row.series
+        if newest.up1_date <= p.date <= newest.up2_date and p.rsi is not None
+    ]
+    return min(window) if window else None
+
+
 def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     horizon = horizon or config.horizon(DEFAULT_HORIZON)
     valuations = {v.symbol: v for v in store.latest_valuations()}
@@ -342,6 +401,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 rule_one=readings.get(ticker.symbol),
             )
         )
+        rows[-1] = replace(rows[-1], conviction=_conviction(rows[-1], config, horizon))
 
     # Most actionable first: confirmed signals, then patterns awaiting a
     # fair-value check, then how oversold things currently are.
@@ -667,7 +727,11 @@ def _card(row: Row, config: Config, horizon) -> str:
     else:
         growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
 
-    rule_one_block = _rule_one_block(row.rule_one, row.both_valuations_agree)
+    rule_one_block = _rule_one_block(
+        row.rule_one, row.both_valuations_agree, row.currency
+    )
+
+    conviction_block = _conviction_block(row.conviction)
 
     leverage_block = ""
     if row.fired or row.sell_fired:
@@ -702,6 +766,7 @@ def _card(row: Row, config: Config, horizon) -> str:
   {valuation_block}
   {rule_one_block}
   {growth_block}
+  {conviction_block}
   {leverage_block}
   <div class="actions">
     <a class="btn primary" href="{html.escape(row.morningstar_url)}"
@@ -712,7 +777,63 @@ def _card(row: Row, config: Config, horizon) -> str:
 </article>"""
 
 
-def _rule_one_block(reading, agrees: bool = False) -> str:
+def _rule_one_value(reading, ccy: str = "") -> str:
+    """Rule #1's answer in money, next to Morningstar's.
+
+    Asked for as "a Buffett value in dollars, similar to the fair value", and
+    it is deliberately *not* a single number.
+
+    A sticker price is one growth assumption compounded ten times, so it
+    inherits ten times the error: the conservative and base-case rates are both
+    honest readings of the same filings, and across the watchlist their stickers
+    straddle a median 1.4x, a 90th-percentile 5.6x, and a worst case of 19x.
+    Printing the base case alone would give a decimal place to a number that
+    cannot support one, sitting inches from an analyst fair value that can. So
+    it reads as a range, and where the range is wide, that *is* the finding.
+
+    Omitted entirely when `value_band` refuses -- see there for why a flat
+    earner prices out at a P/E of 2 whatever the company.
+    """
+    if reading is None or not reading.applicable:
+        return ""
+    band = reading.value_band
+    if band is None:
+        # Saying nothing here reads as a missing number rather than a refused
+        # one, on a fifth of the watchlist. The score above is still good.
+        return ('<p class="r1v-note r1v-off">No Buffett value: earnings are flat '
+                'or falling, and the formula prices every such company at the '
+                'same P/E of 2 regardless of what it is. The score still '
+                'stands — it is built on what the price demands, not on this.</p>')
+    buy_lo, buy_hi = reading.mos_band
+    # Matches the fair-value list above, which leaves the majority currency
+    # unsaid and names the exceptions.
+    unit = "" if ccy in ("", "USD") else f' <span class="ccy">{html.escape(ccy)}</span>'
+
+    def money(lo: float, hi: float) -> str:
+        # A band that has collapsed is one number, not "12.00–12.00".
+        return (f"{lo:,.2f}" if abs(hi - lo) < 0.005
+                else f"{lo:,.2f}–{hi:,.2f}")
+
+    lo_rate, hi_rate = reading.conservative_growth, reading.growth
+    rate_text = (f"{hi_rate:.0f}%" if abs(hi_rate - lo_rate) < 0.5
+                 else f"{lo_rate:.0f}–{hi_rate:.0f}%")
+    spread = band[1] / band[0] if band[0] else float("inf")
+    caveat = (
+        f' <span class="r1v-wide" title="The pessimistic and base-case growth '
+        f'rates disagree by {spread:.0f}x here. Treat the score, not the '
+        f'price.">wide</span>' if spread >= 3 else ""
+    )
+    return (
+        f'<dl class="r1val">'
+        f'<div><dt>Buffett value</dt><dd>{money(*band)}{unit}</dd></div>'
+        f'<div><dt>Buy under</dt><dd>{money(buy_lo, buy_hi)}{unit}</dd></div>'
+        f'</dl>'
+        f'<p class="r1v-note">Sticker at {rate_text} growth, halved for the '
+        f'margin of safety.{caveat}</p>'
+    )
+
+
+def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
     """The Buffett score: a small coloured box, and what it is.
 
     Three things were unreadable when this said `[10] RULE #1`:
@@ -758,7 +879,63 @@ def _rule_one_block(reading, agrees: bool = False) -> str:
     return (f'<p class="ruleone"><span class="r1-box r1-{reading.band}" '
             f'title="{html.escape(detail)}">{reading.score}'
             f'<span class="r1-of">/10</span></span>'
-            f'<span class="r1-label">Buffett score</span>{warn}{agree}</p>')
+            f'<span class="r1-label">Buffett score</span>{warn}{agree}</p>'
+            + _rule_one_value(reading, ccy))
+
+
+def _conviction_block(comp) -> str:
+    """The weighted score, and the bar that takes it apart.
+
+    Asked for as "a coefficient of 1-10 for how good this is, and also
+    visualize that". The bar is the visualisation and it is a segmented one on
+    purpose: a single filled bar would show only the total, and the total is
+    the least interesting part of a weighted model. Each segment is one
+    factor's actual contribution -- its weight times how well it scored -- so
+    the width of a segment answers "why is this an 8?" directly, and the empty
+    remainder answers "what would have made it a 10?".
+
+    Kept below the factors it summarises rather than beside the verdict pill,
+    because in shadow mode it is a second opinion on the card, not the card's
+    conclusion.
+    """
+    if comp is None:
+        return ""
+    span = SCORE_MAX - SCORE_MIN
+    segments = ""
+    for c in comp.contributions:
+        # A factor that was read and scored nothing and one that could not be
+        # read both contribute no width, which would make them look alike. The
+        # "% known" chip beside the score is what separates them: it appears
+        # only when something was unreadable and names it in its tooltip.
+        if not c.weight or c.strength is None or c.points <= 0:
+            continue
+        width = 100.0 * c.points / span
+        note = (f"{c.label}: {c.detail} · scored {c.strength:.0%} "
+                f"at weight {c.weight:g}, worth {c.points:.1f} of {span}")
+        segments += (f'<span class="seg seg-{c.key}" style="flex:{width:.2f}" '
+                     f'title="{html.escape(note)}"></span>')
+
+    missing = [c.label for c in comp.contributions
+               if c.weight and c.strength is None]
+    coverage = (
+        f'<span class="cv-thin" title="Only {comp.coverage:.0%} of the weighted '
+        f'evidence was available — {html.escape(", ".join(missing))} could not be '
+        f'read. The score is computed from the rest.">{comp.coverage:.0%} known</span>'
+        if comp.thin else
+        f'<span class="cv-cov" title="{html.escape(", ".join(missing))} could not be '
+        f'read">{comp.coverage:.0%} known</span>' if missing else ""
+    )
+    detail = " · ".join(
+        f"{c.label} {c.points:.1f}" for c in comp.known_factors if c.points > 0
+    ) or "nothing readable scored"
+    return (
+        f'<p class="conviction"><span class="cv-box cv-{comp.band}" '
+        f'title="{html.escape(detail)}">{comp.score}'
+        f'<span class="cv-of">/10</span></span>'
+        f'<span class="cv-label">Buy conviction</span>{coverage}</p>'
+        f'<div class="cv-bar" role="img" aria-label="Score {comp.score} of 10: '
+        f'{html.escape(detail)}">{segments}<span class="seg seg-rest"></span></div>'
+    )
 
 
 def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bool]:
@@ -1138,6 +1315,76 @@ h1 {
 .r1-agree {
   margin-left: auto; font-size: 11px; color: var(--green); cursor: help;
   white-space: nowrap;
+}
+
+/* Rule #1's answer in money. Shares the fair-value list's shape so the two
+   valuations read as the same kind of thing, and is deliberately quieter —
+   dotted rather than solid, no pass/fail edge — because this one ranks and
+   the one above it decides. */
+.r1val {
+  display: flex; gap: 0; margin: 6px 0 0;
+  border: 1px dotted var(--rule);
+}
+.r1val > div { flex: 1; padding: 6px 10px; border-right: 1px dotted var(--rule); }
+.r1val > div:last-child { border-right: 0; }
+.r1val dt {
+  font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.r1val dd {
+  margin: 1px 0 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-2);
+}
+.r1v-note { margin: 3px 0 0; font-size: 10.5px; color: var(--ink-3); }
+.r1v-off { font-style: italic; }
+
+/* The weighted conviction score. Same chip shape as the Buffett score — they
+   are both 1–10 second opinions, and making them look alike is the point. */
+.conviction { margin: 10px 0 0; display: flex; align-items: center; gap: 7px;
+              flex-wrap: wrap; }
+.cv-box {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 22px; padding: 0 6px; border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  cursor: help; border: 1px solid transparent;
+}
+.cv-green { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green);
+            border-color: color-mix(in srgb, var(--green) 38%, transparent); }
+.cv-amber { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn);
+            border-color: color-mix(in srgb, var(--warn) 38%, transparent); }
+.cv-red   { background: color-mix(in srgb, var(--crimson) 13%, transparent); color: var(--crimson);
+            border-color: color-mix(in srgb, var(--crimson) 32%, transparent); }
+.cv-label {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 700;
+}
+.cv-of { font-size: 9.5px; font-weight: 500; opacity: .72; letter-spacing: -.02em; }
+.cv-cov, .cv-thin {
+  margin-left: auto; font-size: 10px; cursor: help; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.cv-cov { color: var(--ink-3); }
+.cv-thin { color: var(--warn); }
+
+/* One segment per factor, width proportional to what it actually contributed.
+   A plain filled bar would show only the total, which is the least interesting
+   part of a weighted score. */
+.cv-bar {
+  display: flex; height: 6px; margin: 5px 0 0; gap: 1px;
+  background: var(--rule); overflow: hidden;
+}
+.cv-bar .seg { display: block; min-width: 0; }
+.seg-rest { flex: 1 1 auto; background: transparent; }
+.seg-valuation { background: var(--green); }
+.seg-ruleone   { background: color-mix(in srgb, var(--green) 55%, var(--accent)); }
+.seg-growth    { background: var(--accent); }
+.seg-earnings  { background: color-mix(in srgb, var(--accent) 45%, var(--ink-3)); }
+.seg-pattern   { background: var(--ink-3); }
+.r1v-wide {
+  color: var(--warn); cursor: help; text-transform: uppercase;
+  letter-spacing: .08em; font-size: 9.5px; font-weight: 700;
 }
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }

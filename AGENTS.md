@@ -41,6 +41,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/journal.py` | the append-only `recommendations.csv` |
 | `screener/outcomes.py` | forward returns, and the random-entry baseline |
 | `screener/ruleone.py` | Phil Town's Rule #1 sticker price, MOS and score |
+| `screener/scoring.py` | the weighted 1–10 conviction score (shadow mode) |
 | `screener/historical.py` | the `history.html` Historical Dashboard |
 | `screener/universe.py` | choosing which companies belong on the watchlist |
 | `screener/notify.py` | the phone (ntfy), webhook and GitHub-issue transports |
@@ -141,6 +142,24 @@ runs on the same day belongs in `notifications.json` at the repo root, which is
 committed on every run. This started as a table in the database and had to be
 moved: the same strong buy was emailed four or five times in an afternoon. See
 `screener/notified.py`.
+
+**Adding a column to `recommendations.csv` needs the header widened, not just
+the dataclass.** Rows are appended one at a time (so a crash mid-run loses
+nothing), which means a `DictWriter` built from today's `COLUMNS` will happily
+write 37 values under a header listing 23 — and every column from there on is
+misaligned. This already happened: the Rule #1 columns went in without it, and
+54 of 488 rows sat on disk 33 wide under a 23-wide header, so every Rule #1
+value in the journal was unreadable by any CSV reader. Nothing warned, because
+a ragged CSV is valid text. `Journal._widen` now rewrites the file under the
+current header on open and recovers the values positionally — which works only
+because every column ever added went in *before* `schema` and `extra`. Keep
+those two last.
+
+**The conviction score decides nothing (`scoring.SHADOW`).** `is_strong` still
+picks the rocket and rings the phone. The composite is computed, shown and
+journalled with the weights that produced it, so it can be measured against the
+existing rule before replacing it. Don't wire it into a verdict until the
+journal says it beats what's there.
 
 **`rsi_history` only ever grew, and had to be pruned.** Bars are upserted and
 never removed, so three years of hourly history accumulated behind a dashboard
