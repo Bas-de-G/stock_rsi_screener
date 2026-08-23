@@ -447,6 +447,23 @@ the same span. Pick a **cohort** (strong buy by default; buy and sell sit
 behind *Other signals*) and a **timeframe**, and the panel redraws — with no
 JavaScript, because the selectors are radio buttons and CSS sibling rules.
 
+**The lines are numbered, and the table underneath is the key.** The twelve
+most recent recommendations get a number at the end of their line and a row
+below with the symbol, the date and how it has done; the rest are drawn faintly
+behind them for the shape of the cohort. One company per number — an intraday
+pattern completes on almost every run, so the twelve newest 1h strong buys were
+eight companies from a single afternoon with four of them listed twice. Only
+the key is deduplicated; every figure on the page still runs over the whole
+sample.
+
+**Recommendations still inside their twenty days are listed too**, dotted
+rather than coloured, showing the return so far and how far through they are.
+They are excluded from the cohort statistics, which need the full window to
+compare like with like. This used to be a filter on "has a +20d return", which
+sounds like tidiness and meant the newest row on the page was always a month
+old — on the 1h panel, where every drawn line is days old, nothing recent
+appeared at all. The page looked stale while working perfectly.
+
 ```bash
 python -m screener.cli evaluate                       # measure every past pattern
 python -m screener.cli backtest --bars 20             # hit rate vs a random entry

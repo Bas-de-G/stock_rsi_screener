@@ -49,6 +49,13 @@ CHART_DAYS = 60
 # spread and the outliers without turning the panel into a solid block.
 MAX_PATHS = 24
 
+# Of those, how many are *named*: numbered on the chart and listed in the table
+# underneath with the same number. Twenty-four numbered lines would be a column
+# of digits down the right-hand edge, so the rest stay as faint context and the
+# recent ones -- the ones still worth acting on, and the ones you might
+# remember seeing -- are the identifiable ones.
+NAMED_PATHS = 12
+
 # Rows in the per-panel table.
 MAX_ROWS = 16
 
@@ -56,7 +63,9 @@ MAX_ROWS = 16
 HEADLINE_BARS = 20
 
 _W, _H = 760.0, 300.0
-_PAD_L, _PAD_R, _PAD_T, _PAD_B = 40.0, 14.0, 16.0, 26.0
+# The right pad carries the path numbers: a full-length path ends hard against
+# it, and a two-digit label needs room or it clips outside the viewBox.
+_PAD_L, _PAD_R, _PAD_T, _PAD_B = 40.0, 30.0, 16.0, 26.0
 
 
 @dataclass(frozen=True)
@@ -232,6 +241,75 @@ def _bounds(panel: Panel) -> tuple[float, float]:
     return lo - pad, hi + pad
 
 
+def _named(panel: Panel) -> list[Entry]:
+    """The entries that get a number on the chart and a row in the table.
+
+    Newest first, one per symbol. The dedupe is the same finding that produced
+    the alert cooldown: an intraday pattern completes on almost every run, so
+    the twelve newest 1h strong buys were eight companies from a single
+    afternoon, four of them listed twice. Twelve numbered lines should be
+    twelve different companies -- repeats of one name teach nothing about the
+    cohort and waste half the key.
+
+    Only the named subset is deduplicated. The context paths and every
+    statistic on the page still run over the full sample.
+    """
+    out, seen = [], set()
+    for e in panel.entries:
+        if e.symbol in seen:
+            continue
+        seen.add(e.symbol)
+        out.append(e)
+        if len(out) == NAMED_PATHS:
+            break
+    return out
+
+
+def _label_slots(ys: list[float], gap: float, top: float, bottom: float) -> list[float]:
+    """Nudge labels apart so a stack of them stays readable.
+
+    Paths that ran the full sixty days all end at the same x, so their numbers
+    would pile up in a column. One pass down, one back up: the down pass pushes
+    each label below the one before it, the up pass pulls the overflow back off
+    the bottom edge. Order is preserved, so a number never crosses its
+    neighbour and the key still reads top-to-bottom.
+    """
+    order = sorted(range(len(ys)), key=lambda i: ys[i])
+    placed = list(ys)
+    cursor = top
+    for i in order:
+        placed[i] = cursor = max(placed[i], cursor)
+        cursor += gap
+    cursor = bottom
+    for i in reversed(order):
+        placed[i] = cursor = min(placed[i], cursor)
+        cursor -= gap
+    return placed
+
+
+def _end_numbers(named, x, y) -> str:
+    """A number at the end of each named path, keyed to the table below.
+
+    The lines used to carry a hover `<title>` and nothing else, which answers
+    "which recommendation is this?" only for someone with a mouse. This is a
+    phone-first page.
+    """
+    if not named:
+        return ""
+    ends = [(x(len(e.path) - 1), y(e.path[-1])) for e in named]
+    slots = _label_slots([p[1] for p in ends], 11.0, _PAD_T + 6, _H - _PAD_B - 4)
+    out = ""
+    for n, (e, (ex, ey), sy) in enumerate(zip(named, ends, slots), start=1):
+        # A leader only where the label had to move far enough to look detached.
+        if abs(sy - ey) > 4:
+            out += (f'<line class="leader" x1="{ex:.1f}" y1="{ey:.1f}" '
+                    f'x2="{ex + 5:.1f}" y2="{sy - 3:.1f}"/>')
+        out += (f'<text class="pathnum" x="{ex + 7:.1f}" y="{sy:.1f}">{n}'
+                f'<title>{html.escape(e.symbol)} · {html.escape(e.up2_date[:10])}'
+                f'</title></text>')
+    return out
+
+
 def _plot(panel: Panel) -> str:
     if not panel.entries:
         return ('<p class="nodata">No signals in this cohort yet — '
@@ -249,14 +327,24 @@ def _plot(panel: Panel) -> str:
     def path_points(path) -> str:
         return " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(path))
 
-    lines = "".join(
-        f'<polyline class="trace {"win" if e.right else "loss" if e.right is False else ""}" '
-        f'points="{path_points(e.path)}"><title>{html.escape(e.symbol)} · '
-        f'{html.escape(e.up2_date[:10])}'
-        + (f' · {e.ret * 100:+.1f}% at {HEADLINE_BARS}d' if e.ret is not None else "")
-        + "</title></polyline>"
-        for e in panel.entries[:MAX_PATHS]
-    )
+    named = _named(panel)
+    seen = {id(e) for e in named}
+    context = [e for e in panel.entries[:MAX_PATHS] if id(e) not in seen]
+
+    def trace(e, klass: str) -> str:
+        return (
+            f'<polyline class="{klass} '
+            f'{"win" if e.right else "loss" if e.right is False else "open"}" '
+            f'points="{path_points(e.path)}"><title>{html.escape(e.symbol)} · '
+            f'{html.escape(e.up2_date[:10])}'
+            + (f' · {e.ret * 100:+.1f}% at {HEADLINE_BARS}d' if e.ret is not None
+               else f' · still running, day {len(e.path) - 1} of {HEADLINE_BARS}')
+            + "</title></polyline>"
+        )
+
+    lines = "".join(trace(e, "trace ctx") for e in context)
+    lines += "".join(trace(e, "trace") for e in named)
+    lines += _end_numbers(named, x, y)
 
     # Horizontal rules every 5 index points, labelled — the graph-paper squares
     # behind them carry the fine grid, so these only mark the readable steps.
@@ -297,6 +385,7 @@ def _plot(panel: Panel) -> str:
         )
 
     shown = min(len(panel.entries), MAX_PATHS)
+    numbered = len(named)
     mean_key = (
         '<span class="k mean-k">Cohort mean</span>' if panel.mean
         else f'<span class="k count">too few signals to average '
@@ -316,25 +405,51 @@ def _plot(panel: Panel) -> str:
   <span class="k base-k">Random entry</span>
   <span class="k win-k">Individual, call was right</span>
   <span class="k loss-k">…was wrong</span>
-  <span class="k count">{shown} of {len(panel.entries):,} paths drawn</span>
+  <span class="k open-k">…still running</span>
+  <span class="k count">{shown} of {len(panel.entries):,} drawn ·
+    <strong>1–{numbered}</strong> numbered, and named in the table below</span>
 </p>"""
 
 
 def _table(panel: Panel) -> str:
-    rows = [e for e in panel.entries if e.ret is not None][:MAX_ROWS]
+    """The key to the numbered lines above, newest first.
+
+    This used to drop every entry without a `+20d` return, which sounds like
+    tidiness and was a bug in effect: a return at twenty trading days cannot
+    exist until twenty trading days have passed, so the newest row on the page
+    was always a month old and the 1h panel -- where every drawn line is days
+    old -- listed nothing recent at all. The page looked stale while working
+    perfectly.
+
+    So a recommendation still inside its twenty days is listed too, with the
+    return it has *so far* and how far through it is. It is excluded from the
+    cohort statistics, which still need the full window to compare like with
+    like.
+    """
+    rows = _named(panel)
     if not rows:
         return ""
-    body = "".join(
-        f'<tr><th scope="row">{html.escape(e.symbol)}</th>'
-        f'<td class="num date">{html.escape(e.up2_date[:10])}</td>'
-        f'<td class="num">{e.path[-1] - 100:+.1f}%</td>'
-        f'<td class="num {"good" if e.right else "bad"}">{e.ret * 100:+.1f}%</td></tr>'
-        for e in rows
-    )
+    body = ""
+    for n, e in enumerate(rows, start=1):
+        if e.ret is not None:
+            outcome = (f'<td class="num {"good" if e.right else "bad"}">'
+                       f'{e.ret * 100:+.1f}%</td>')
+        else:
+            done = len(e.path) - 1
+            outcome = (f'<td class="num open" title="Measured at +{HEADLINE_BARS} '
+                       f'trading days; this one is {done} in">day {done}'
+                       f'<span class="of">/{HEADLINE_BARS}</span></td>')
+        body += (
+            f'<tr><td class="num idx">{n}</td>'
+            f'<th scope="row">{html.escape(e.symbol)}</th>'
+            f'<td class="num date">{html.escape(e.up2_date[:10])}</td>'
+            f'<td class="num">{e.path[-1] - 100:+.1f}%</td>{outcome}</tr>'
+        )
     return f"""<table class="names">
-  <caption>Most recent {len(rows)}</caption>
-  <thead><tr><th scope="col">Symbol</th><th scope="col">Signal</th>
-    <th scope="col">Path end</th><th scope="col">At +{HEADLINE_BARS}d</th></tr></thead>
+  <caption>The {len(rows)} numbered lines above, newest first</caption>
+  <thead><tr><th scope="col"><span class="vh">Line</span>#</th>
+    <th scope="col">Symbol</th><th scope="col">Signal</th>
+    <th scope="col">So far</th><th scope="col">At +{HEADLINE_BARS}d</th></tr></thead>
   <tbody>{body}</tbody>
 </table>"""
 
@@ -613,9 +728,20 @@ _EXTRA_CSS = """
     linear-gradient(90deg, var(--grid-fine) 1px, transparent 1px);
   background-size: 12px 12px;
 }
-.trace { fill: none; stroke-width: 1; stroke: var(--ink-3); opacity: .34; }
+.trace { fill: none; stroke-width: 1.3; stroke: var(--ink-3); opacity: .55; }
 .trace.win { stroke: var(--green-soft); }
 .trace.loss { stroke: var(--crimson); }
+/* Still inside its twenty days, so it has no verdict yet and must not borrow
+   the colour of one. */
+.trace.open { stroke: var(--ink-2); stroke-dasharray: 3 3; }
+/* The unnumbered remainder: there for the shape of the cohort, not to be read
+   individually. */
+.trace.ctx { stroke-width: 1; opacity: .2; stroke-dasharray: none; }
+.pathnum {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 9px; fill: var(--ink-2); text-anchor: start; cursor: help;
+}
+.leader { stroke: var(--rule); stroke-width: .8; }
 .mean { fill: none; stroke: var(--line); stroke-width: 2.6; stroke-linejoin: round; }
 .base-mean {
   fill: none; stroke: var(--ink-2); stroke-width: 1.6;
@@ -651,6 +777,8 @@ _EXTRA_CSS = """
 .base-k::before { border-top-style: dashed; }
 .win-k { color: var(--green-soft); }
 .loss-k { color: var(--crimson); }
+.open-k { color: var(--ink-2); }
+.open-k::before { border-top-style: dotted; }
 .count::before { content: none; margin: 0; }
 .count { margin-left: auto; }
 
@@ -680,6 +808,19 @@ _EXTRA_CSS = """
 .names .date { color: var(--ink-3); }
 .names .good { color: var(--green); font-weight: 600; }
 .names .bad { color: var(--crimson); font-weight: 600; }
+/* The line number, and the only column that is a cross-reference rather than
+   a measurement — so it reads as a label, not a figure. */
+.names .idx {
+  color: var(--ink-3); text-align: left; width: 1%; padding-right: 2px;
+  font-size: 11px;
+}
+.names .open { color: var(--ink-2); cursor: help; font-weight: 500; }
+.names .open .of { opacity: .6; font-size: 10px; }
+/* Visually hidden: "Line #" for a screen reader, "#" on the page. */
+.vh {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
 .nodata { padding: 40px 14px; text-align: center; color: var(--ink-3); font-size: 13px; }
 
 .caveats { margin: 26px 0 22px; border-top: 1px solid var(--rule); padding-top: 16px; }

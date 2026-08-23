@@ -289,3 +289,141 @@ def test_the_chart_window_matches_what_the_paths_carry(config):
         panels = collect_panels(store, config)
     [entry] = panels[("buy", "1d")].entries
     assert len(entry.path) == CHART_DAYS + 1, "the signal day plus the window"
+
+
+# ------------------------------------------- naming the lines, and recency
+
+
+def _panel_with(entries):
+    """A panel holding hand-made entries, for the parts that are pure layout."""
+    from screener.historical import Entry, Panel
+
+    p = Panel("strong", "1d")
+    p.entries = [
+        Entry(symbol=s, up2_date=d, path=path, ret=ret,
+              right=(ret > 0) if ret is not None else None)
+        for s, d, path, ret in entries
+    ]
+    return p
+
+
+def test_a_recommendation_still_inside_its_window_is_listed():
+    """The bug this fixes. A +20d return cannot exist until twenty trading days
+    have passed, so filtering on it meant the newest row on the page was always
+    a month old -- and on the 1h panel, where every drawn line is days old,
+    nothing recent was listed at all. The page looked stale while working."""
+    from screener.historical import _table
+
+    html = _table(_panel_with([
+        ("AAA", "2026-08-19", [100.0, 101.0], None),
+        ("BBB", "2026-07-01", [100.0, 105.0, 110.0], 0.10),
+    ]))
+    assert "AAA" in html, "yesterday's recommendation belongs on the page"
+    assert "day 1" in html and "/20" in html, "and says how far through it is"
+    assert "BBB" in html and "+10.0%" in html, "settled ones are unchanged"
+
+
+def test_an_open_entry_shows_the_return_it_has_so_far():
+    from screener.historical import _table
+
+    html = _table(_panel_with([("AAA", "2026-08-19", [100.0, 103.5], None)]))
+    assert "+3.5%" in html
+
+
+def test_every_named_line_is_numbered_and_in_the_table():
+    """The other half of "which recommendation is this line?" -- the chart
+    numbers and the table rows are one key, generated from one list."""
+    from screener.historical import _plot, _table
+
+    panel = _panel_with([
+        (s, f"2026-0{i + 1}-01", [100.0, 100.0 + i], None)
+        for i, s in enumerate("ABCDE")
+    ])
+    svg, table = _plot(panel), _table(panel)
+    assert svg.count('class="pathnum"') == 5
+    for n in range(1, 6):
+        assert f'>{n}<' in svg
+        assert f'<td class="num idx">{n}</td>' in table
+
+
+def test_the_named_lines_are_one_per_company():
+    """Twelve numbered lines should be twelve companies. The same finding as
+    the alert cooldown: an intraday pattern completes on almost every run, so
+    the twelve newest 1h strong buys were eight companies from one afternoon,
+    four of them listed twice."""
+    from screener.historical import _named
+
+    panel = _panel_with([
+        ("AAA", "2026-08-19T21:00", [100.0, 101.0], None),
+        ("AAA", "2026-08-19T20:00", [100.0, 101.0], None),
+        ("AAA", "2026-08-19T19:00", [100.0, 101.0], None),
+        ("BBB", "2026-08-19T18:00", [100.0, 102.0], None),
+    ])
+    named = _named(panel)
+    assert [e.symbol for e in named] == ["AAA", "BBB"]
+    assert named[0].up2_date.endswith("21:00"), "the newest of the repeats"
+
+
+def test_the_deduplication_does_not_touch_the_statistics(config):
+    """Only the key is deduplicated. Every figure on the page still runs over
+    the whole sample, or the hit rate would quietly change meaning."""
+    from screener.historical import _named, collect_panels
+
+    with Store(config.storage.database) as store:
+        seed(store, "AAA", fair_value=500.0)
+        seed(store, "BBB", fair_value=500.0)
+        panels = collect_panels(store, config)
+    panel = panels[("strong", "1d")]
+    assert panel.stats["n"] == len([e for e in panel.entries if e.ret is not None])
+    assert len(_named(panel)) <= len(panel.entries)
+
+
+def test_the_numbers_do_not_pile_up_on_each_other():
+    """Paths that ran the full window all end at the same x, so their labels
+    would stack into an unreadable column."""
+    from screener.historical import _label_slots
+
+    placed = _label_slots([100.0] * 6, gap=11.0, top=20.0, bottom=280.0)
+    gaps = sorted(b - a for a, b in zip(sorted(placed), sorted(placed)[1:]))
+    assert gaps[0] >= 10.99
+
+
+def test_the_numbers_stay_inside_the_chart():
+    from screener.historical import _label_slots
+
+    placed = _label_slots([295.0] * 8, gap=11.0, top=20.0, bottom=280.0)
+    assert max(placed) <= 280.0 and min(placed) >= 20.0
+
+
+def test_a_label_keeps_its_neighbours_order():
+    """The key reads top to bottom, so a nudge must never let one number cross
+    another."""
+    from screener.historical import _label_slots
+
+    ys = [140.0, 142.0, 144.0, 210.0]
+    placed = _label_slots(ys, gap=11.0, top=20.0, bottom=280.0)
+    assert placed == sorted(placed), "same order in, same order out"
+
+
+def test_an_unnumbered_path_is_drawn_but_quiet():
+    """Beyond the named twelve the paths are there for the shape of the cohort,
+    not to be read one by one."""
+    from screener.historical import MAX_PATHS, NAMED_PATHS, _plot
+
+    panel = _panel_with([
+        (f"S{i:02d}", f"2026-01-{i + 1:02d}", [100.0, 100.0 + i], None)
+        for i in range(MAX_PATHS + 4)
+    ])
+    svg = _plot(panel)
+    assert svg.count('class="pathnum"') == NAMED_PATHS
+    assert svg.count('class="trace ctx') == MAX_PATHS - NAMED_PATHS
+
+
+def test_an_open_path_is_not_coloured_as_a_win_or_a_loss():
+    """It has no verdict yet and must not borrow the look of one."""
+    from screener.historical import _plot
+
+    svg = _plot(_panel_with([("AAA", "2026-08-19", [100.0, 104.0], None)]))
+    trace = svg.split('<polyline class="')[1].split('"')[0]
+    assert "open" in trace
+    assert "win" not in trace and "loss" not in trace
