@@ -33,13 +33,15 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import json
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 # Bumped when a column's *meaning* changes, so an analysis can tell rows that
 # are not comparable apart. Adding a column does not need it; redefining one
 # does.
-SCHEMA_VERSION = 1
+# 2 added the conviction score, its band, its coverage and the weights in force.
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,14 @@ class Recommendation:
     r1_mos: float | None = None
     r1_to_sticker: float | None = None      # (sticker - price) / price
     r1_big_four: int | None = None
+    # The weighted conviction score, and the weights that produced it. Both,
+    # because the score is meaningless later without them: re-weighting is a
+    # config edit, and a column of scores computed under three different
+    # weightings that does not say which is which cannot be measured at all.
+    conviction: int | None = None
+    conviction_band: str = ""
+    conviction_coverage: float | None = None   # share of weight actually known
+    conviction_weights: str = ""               # JSON, as it stood at the time
     schema: int = SCHEMA_VERSION
     extra: str = ""                 # JSON, for factors added later
 
@@ -100,7 +110,50 @@ class Journal:
         self._seen: set[tuple[str, str, str, str]] = set()
         self._rows_written = 0
         if self.path.exists():
+            self._widen()
             self._seen = self._load_keys()
+
+    def _widen(self) -> None:
+        """Rewrite the file under the current header when columns have been added.
+
+        The rows are appended one at a time, which is what makes a crash
+        mid-run lose nothing -- but it also means a `DictWriter` built from
+        today's `COLUMNS` will happily write 37 values under a header that
+        lists 23, and every column from that point on is silently misaligned.
+
+        That is not hypothetical. It had already happened: when the Rule #1
+        columns were added, 54 of the 488 rows on file were written 33 wide
+        under a 23-wide header, so every Rule #1 value in the journal -- in the
+        one file that exists to answer "did any of this work?" -- was
+        unreadable by any CSV reader. Nothing warned, because a ragged CSV is
+        perfectly valid text.
+
+        The recovery works because every column ever added went in *before*
+        `schema` and `extra`, which have always been last. So a row of width W
+        is the first W-2 columns plus those two, whatever generation wrote it.
+        """
+        try:
+            with self.path.open(newline="") as handle:
+                rows = list(csv.reader(handle))
+        except (OSError, csv.Error, UnicodeDecodeError):
+            return          # _load_keys reports it; never block the run
+        if not rows or rows[0] == COLUMNS:
+            return
+
+        tail = COLUMNS[-2:]          # schema, extra
+        migrated = []
+        for row in rows[1:]:
+            if not row:
+                continue
+            head = COLUMNS[:max(0, len(row) - len(tail))]
+            names = head + tail
+            migrated.append(dict(zip(names, row)))
+
+        with self.path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=COLUMNS, restval="")
+            writer.writeheader()
+            for row in migrated:
+                writer.writerow({k: v for k, v in row.items() if k in COLUMNS})
 
     def _load_keys(self) -> set[tuple[str, str, str, str]]:
         keys = set()
@@ -205,7 +258,28 @@ def recommendation_from(row, signal, horizon, now: dt.datetime | None = None) ->
         margin=horizon.margin,
         leverage=horizon.leverage,
         **_rule_one_fields(getattr(row, "rule_one", None)),
+        **_conviction_fields(getattr(row, "conviction", None)),
     )
+
+
+def _conviction_fields(comp) -> dict:
+    """The composite score and the weights it was computed under.
+
+    The weights travel with the score for the same reason the growth rate
+    travels with the sticker price: without them the column is a number nobody
+    can reproduce, and re-weighting is meant to be a config edit rather than an
+    event. Sorted so the JSON is stable and a genuine change shows up in the
+    diff instead of key ordering.
+    """
+    if comp is None:
+        return {}
+    weights = {c.key: c.weight for c in comp.contributions if c.weight}
+    return {
+        "conviction": comp.score,
+        "conviction_band": comp.band,
+        "conviction_coverage": round(comp.coverage, 4),
+        "conviction_weights": json.dumps(weights, sort_keys=True, separators=(",", ":")),
+    }
 
 
 def _rule_one_fields(reading) -> dict:

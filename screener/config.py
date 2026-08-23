@@ -224,6 +224,36 @@ class MorningstarConfig:
 
 
 @dataclass(frozen=True)
+class ScoringConfig:
+    """How much each factor counts towards the conviction score.
+
+    Re-weighting is a config edit, and the weights used are stamped into every
+    journal row -- so a re-weighting shows up in the measured results rather
+    than quietly rewriting history.
+
+    The defaults are the existing rule expressed as numbers, not a new opinion:
+    fair value is the thesis and carries the most, the two quality checks are
+    worth about half of it each, and the pattern itself carries least because
+    every signal on the page has already completed one. Nothing here is
+    measured yet -- that is what shadow mode is for.
+    """
+
+    weights: dict = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+
+    def weight(self, key: str) -> float:
+        return float(self.weights.get(key, 0.0))
+
+
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "valuation": 3.0,
+    "ruleone": 2.0,
+    "growth": 1.5,
+    "earnings": 1.0,
+    "pattern": 1.0,
+}
+
+
+@dataclass(frozen=True)
 class Config:
     tickers: list[Ticker]
     rsi: RsiConfig
@@ -232,6 +262,7 @@ class Config:
     morningstar: MorningstarConfig
     dashboard: DashboardConfig
     horizons: tuple[Horizon, ...] = DEFAULT_HORIZONS
+    scoring: ScoringConfig = field(default_factory=lambda: ScoringConfig())
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -372,9 +403,11 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ValueError("dashboard.chart_days must be at least 2")
 
     horizons = _load_horizons(raw.get("horizons", {}) or {})
+    scoring = _load_scoring(raw.get("scoring", {}) or {})
 
     return Config(
         tickers=tickers,
+        scoring=scoring,
         rsi=rsi,
         signal=signal,
         storage=storage,
@@ -383,6 +416,32 @@ def load_config(path: str | Path | None = None) -> Config:
         horizons=horizons,
         source_path=config_path,
     )
+
+
+def _load_scoring(raw: dict) -> ScoringConfig:
+    """Read the `scoring:` block, keeping every default the file doesn't set.
+
+    An unknown key is an error rather than a shrug. A weight is invisible in the
+    output -- a typo like `valuations:` would silently drop the heaviest factor
+    to zero and the page would carry on looking plausible.
+    """
+    weights = dict(DEFAULT_WEIGHTS)
+    given = raw.get("weights", {}) or {}
+    unknown = set(given) - set(DEFAULT_WEIGHTS)
+    if unknown:
+        known = ", ".join(sorted(DEFAULT_WEIGHTS))
+        raise ValueError(
+            f"scoring.weights has no factor {', '.join(sorted(unknown))!r} — "
+            f"known factors are {known}"
+        )
+    for key, value in given.items():
+        weight = float(value)
+        if weight < 0:
+            raise ValueError(f"scoring.weights.{key} cannot be negative")
+        weights[key] = weight
+    if not any(weights.values()):
+        raise ValueError("scoring.weights cannot all be zero")
+    return ScoringConfig(weights=weights)
 
 
 def _load_horizons(raw: dict) -> tuple[Horizon, ...]:

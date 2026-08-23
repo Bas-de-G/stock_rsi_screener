@@ -193,3 +193,45 @@ def test_non_usd_tickers_declare_their_own_yahoo_symbol():
     for t in _repo_config().tickers:
         if t.currency != "USD":
             assert t.yahoo != t.symbol, f"{t.symbol} ({t.currency}) has no yahoo symbol"
+
+
+# --------------------------------------------------------- scoring weights
+
+
+def test_the_weights_have_defaults_when_the_block_is_absent(tmp_path):
+    from screener.config import DEFAULT_WEIGHTS
+
+    cfg = load_config(write(tmp_path, VALID))
+    assert cfg.scoring.weights == DEFAULT_WEIGHTS
+
+
+def test_a_weight_can_be_changed_without_touching_the_others(tmp_path):
+    cfg = load_config(write(tmp_path, VALID + "scoring:\n  weights:\n    valuation: 5.0\n"))
+    assert cfg.scoring.weight("valuation") == 5.0
+    assert cfg.scoring.weight("ruleone") == 2.0, "the rest keep their defaults"
+
+
+def test_a_weight_of_zero_removes_the_factor(tmp_path):
+    cfg = load_config(write(tmp_path, VALID + "scoring:\n  weights:\n    pattern: 0\n"))
+    assert cfg.scoring.weight("pattern") == 0.0
+
+
+def test_a_misspelled_factor_is_an_error_not_a_shrug(tmp_path):
+    """A weight is invisible in the output: `valuations:` would silently drop
+    the heaviest factor to zero and the page would carry on looking plausible."""
+    with pytest.raises(ValueError, match="valuations"):
+        load_config(write(tmp_path, VALID + "scoring:\n  weights:\n    valuations: 3.0\n"))
+
+
+def test_a_negative_weight_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="negative"):
+        load_config(write(tmp_path, VALID + "scoring:\n  weights:\n    growth: -1\n"))
+
+
+def test_weights_cannot_all_be_zero(tmp_path):
+    body = "scoring:\n  weights:\n" + "".join(
+        f"    {k}: 0\n" for k in
+        ("valuation", "ruleone", "growth", "earnings", "pattern")
+    )
+    with pytest.raises(ValueError, match="all be zero"):
+        load_config(write(tmp_path, VALID + body))

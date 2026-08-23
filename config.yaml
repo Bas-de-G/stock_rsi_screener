@@ -465,6 +465,26 @@ dashboard:
   # Trading days of RSI history to plot per stock.
   chart_days: 90
 
+scoring:
+  # How much each factor counts towards the 1–10 conviction score on each card.
+  #
+  # Edit these and every score moves; the weights in force are written into
+  # each row of recommendations.csv, so a re-weighting shows up in the measured
+  # results rather than quietly rewriting the past.
+  #
+  # The score DECIDES NOTHING today. The rocket and the phone alert still come
+  # from the older rule (fair value required, everything else a veto), because
+  # that rule has a track record on the Historical Dashboard and this has none
+  # until it has run forward for a few months. See screener/scoring.py.
+  #
+  # Setting a weight to 0 removes the factor from the score entirely.
+  weights:
+    valuation: 3.0   # discount to Morningstar's fair value — the thesis
+    ruleone:   2.0   # the Buffett score, itself already a 1–10
+    growth:    1.5   # year-on-year EPS growth
+    earnings:  1.0   # clear of results, or too close to them
+    pattern:   1.0   # how deep the RSI dip went below the line
+
 morningstar:
   # The automated scraper: `python -m screener.cli scrape`. Until you set it
   # up, use the "Check fair value" button on the dashboard and record what you
