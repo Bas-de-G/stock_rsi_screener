@@ -147,8 +147,10 @@ CREATE TABLE IF NOT EXISTS rule_one (
     conservative_growth REAL,   -- the pessimistic case
     implied_growth      REAL,   -- what today's price already demands
     future_pe   REAL,
-    sticker     REAL,   -- intrinsic value at a 15% required return
+    sticker     REAL,   -- intrinsic value at a 15% required return (base case)
+    sticker_low REAL,   -- the same at the conservative rate: the band's floor
     mos         REAL,   -- sticker halved: the margin-of-safety price
+    eps         REAL,   -- the earnings base the whole projection rests on
     big_four    INTEGER,
     score       INTEGER,  -- 1-10, 0 when not applicable
     band        TEXT NOT NULL,  -- 'green' | 'amber' | 'red' | 'n/a'
@@ -255,6 +257,14 @@ class Store:
                     "ALTER TABLE signals ADD COLUMN earnings_growth_pass "
                     "INTEGER NOT NULL DEFAULT 0"
                 )
+
+            # Quoting one sticker price implied a precision the method hasn't
+            # got, so the reading gained a second, more pessimistic one and the
+            # earnings base it all rests on.
+            rule_columns = {r["name"] for r in cur.execute("PRAGMA table_info(rule_one)")}
+            if rule_columns and "sticker_low" not in rule_columns:
+                cur.execute("ALTER TABLE rule_one ADD COLUMN sticker_low REAL")
+                cur.execute("ALTER TABLE rule_one ADD COLUMN eps REAL")
 
             # Multi-horizon support widened both primary keys, and SQLite can't
             # ALTER a primary key -- the table has to be rebuilt. Everything
@@ -654,21 +664,25 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
                 """INSERT INTO rule_one (symbol, price, growth, conservative_growth,
-                                         implied_growth, future_pe, sticker, mos,
+                                         implied_growth, future_pe, sticker,
+                                         sticker_low, mos, eps,
                                          big_four, score, band, caution, reason, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol) DO UPDATE SET
                        price=excluded.price, growth=excluded.growth,
                        conservative_growth=excluded.conservative_growth,
                        implied_growth=excluded.implied_growth,
                        future_pe=excluded.future_pe, sticker=excluded.sticker,
-                       mos=excluded.mos, big_four=excluded.big_four,
+                       sticker_low=excluded.sticker_low,
+                       mos=excluded.mos, eps=excluded.eps,
+                       big_four=excluded.big_four,
                        score=excluded.score, band=excluded.band,
                        caution=excluded.caution, reason=excluded.reason,
                        updated_at=excluded.updated_at""",
                 (symbol, reading.price, reading.growth, reading.conservative_growth,
                  reading.implied_growth, reading.future_pe,
-                 reading.sticker, reading.mos, reading.big_four, reading.score,
+                 reading.sticker, reading.sticker_low, reading.mos, reading.eps,
+                 reading.big_four, reading.score,
                  reading.band, reading.caution, reading.reason,
                  _dt.datetime.now().isoformat(timespec="seconds")),
             )
@@ -681,8 +695,8 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute(
                 "SELECT symbol, price, growth, conservative_growth, implied_growth,"
-                " future_pe, sticker, mos, big_four, score, band, caution,"
-                " reason FROM rule_one"
+                " future_pe, sticker, sticker_low, mos, eps, big_four, score,"
+                " band, caution, reason FROM rule_one"
             )
             return {
                 r["symbol"]: RuleOne(
@@ -691,6 +705,7 @@ class Store:
                     conservative_growth=r["conservative_growth"],
                     implied_growth=r["implied_growth"],
                     future_pe=r["future_pe"], sticker=r["sticker"],
+                    sticker_low=r["sticker_low"], eps=r["eps"],
                     mos=r["mos"], price=r["price"], big_four=r["big_four"] or 0,
                     score=r["score"] or 0, band=r["band"], caution=r["caution"] or "",
                 )

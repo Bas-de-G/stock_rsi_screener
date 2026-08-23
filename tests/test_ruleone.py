@@ -383,7 +383,7 @@ def _reading(score, band="amber", applicable=True):
 
     return RuleOne(applicable=applicable, score=score, band=band, growth=12.0,
                    conservative_growth=8.0, implied_growth=10.0, price=50.0,
-                   sticker=80.0, mos=40.0, big_four=3,
+                   sticker=80.0, sticker_low=60.0, mos=40.0, eps=4.0, big_four=3,
                    reason="" if applicable else "no positive earnings to project")
 
 
@@ -536,3 +536,184 @@ def test_an_unreadable_company_shows_a_muted_dash(page_config):
 
     assert 'class="r1-box r1-na"' in card
     assert "no positive earnings to project" in card
+
+
+# --------------------------------------------------- the value in money
+
+
+def test_the_value_is_a_band_not_a_point():
+    """Asked for as "a Buffett value in dollars", and deliberately given as a
+    range: one sticker is one growth assumption compounded ten times, so it
+    carries ten times that assumption's error."""
+    from screener.ruleone import evaluate
+
+    r = evaluate(price=100.0, eps_ttm=5.0, eps_growth_ttm=18.0,
+                 eps_growth_fy=14.0, sales_growth_ttm=12.0)
+    lo, hi = r.value_band
+    assert lo < hi
+    assert lo == r.sticker_low and hi == r.sticker
+
+
+def test_the_conservative_end_uses_the_conservative_rate():
+    from screener.ruleone import evaluate, future_pe, sticker_price
+
+    r = evaluate(price=100.0, eps_ttm=5.0, eps_growth_ttm=18.0,
+                 eps_growth_fy=14.0, sales_growth_ttm=12.0)
+    assert r.sticker_low == pytest.approx(
+        sticker_price(5.0, r.conservative_growth, future_pe(r.conservative_growth))
+    )
+
+
+def test_a_flat_earner_gets_a_score_but_no_price():
+    """The finding that made this a band with a hole in it.
+
+    Both growth rates floor at zero and `future_pe` floors at 8, so a company
+    whose earnings are flat prices out at EPS x 8 / 1.15^10 -- EPS x 1.98, a
+    P/E of 2, whatever the company is. 47 of the 226 readable names on the
+    watchlist land on that constant exactly, META and TSLA among them. It is
+    arithmetic, not a valuation.
+    """
+    from screener.ruleone import evaluate
+
+    r = evaluate(price=550.0, eps_ttm=26.55, eps_growth_ttm=-4.0,
+                 eps_growth_fy=-2.0, sales_growth_ttm=-1.0)
+    assert r.applicable, "a profitable company is still readable"
+    assert r.growth == 0.0
+    constant = FUTURE_PE_FLOOR / (1 + REQUIRED_RETURN) ** YEARS   # 1.977
+    assert r.sticker == pytest.approx(26.55 * constant), "EPS times a constant"
+    assert constant == pytest.approx(1.977, abs=1e-3), "a P/E of 2"
+    assert r.value_band is None, "and so it must not be quoted as a value"
+    assert r.score > 0, "the score is built on implied growth and still stands"
+
+
+def test_the_margin_of_safety_band_is_the_value_band_halved():
+    from screener.ruleone import evaluate
+
+    r = evaluate(price=100.0, eps_ttm=5.0, eps_growth_ttm=18.0,
+                 eps_growth_fy=14.0, sales_growth_ttm=12.0)
+    assert r.mos_band == (r.value_band[0] / 2, r.value_band[1] / 2)
+
+
+def test_an_unreadable_company_has_no_band_either():
+    from screener.ruleone import evaluate
+
+    r = evaluate(price=20.0, eps_ttm=-2.12)   # Intel, the live case
+    assert not r.applicable
+    assert r.value_band is None and r.mos_band is None
+
+
+def test_the_card_shows_the_value_beside_the_score(page_config):
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(7))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+    card = _card(row, page_config, page_config.horizon("1d"))
+
+    assert "Buffett value" in card
+    assert "60.00–80.00" in card, "the band, not one sticker"
+    assert "Buy under" in card
+    assert "30.00–40.00" in card, "the margin-of-safety band"
+    # It seconds the fair value, so it sits with it rather than above it.
+    assert card.index('class="valuation') < card.index('class="r1val"')
+
+
+def test_a_collapsed_band_is_printed_once(page_config):
+    """GOOGL's two rates both cap at 20%, and "761.63–761.63" is noise."""
+    from screener.dashboard import _rule_one_value
+    from screener.ruleone import RuleOne
+
+    r = RuleOne(applicable=True, score=10, band="green", growth=20.0,
+                conservative_growth=20.0, implied_growth=11.6, price=344.82,
+                sticker=761.63, sticker_low=761.63, mos=380.81, eps=19.9)
+    html = _rule_one_value(r, "USD")
+    assert "761.63–761.63" not in html
+    assert "761.63" in html
+    assert "at 20% growth" in html and "20–20%" not in html
+
+
+def test_a_flat_earner_says_why_there_is_no_price(page_config):
+    """Printing nothing would read as a missing number rather than a refused
+    one, on a fifth of the watchlist."""
+    from screener.dashboard import _rule_one_value
+    from screener.ruleone import RuleOne
+
+    r = RuleOne(applicable=True, score=3, band="red", growth=0.0,
+                conservative_growth=0.0, implied_growth=12.9, price=549.90,
+                sticker=52.50, sticker_low=52.50, mos=26.25, eps=26.55)
+    html = _rule_one_value(r, "USD")
+    assert "No Buffett value" in html
+    assert "P/E of 2" in html
+    assert "score still stands" in html
+
+
+def test_a_wildly_disagreeing_band_says_so(page_config):
+    """Rolls-Royce spans 0.95 to 16.26 against a 1,502 price. The number is
+    honest and the spread is the actual finding."""
+    from screener.dashboard import _rule_one_value
+    from screener.ruleone import RuleOne
+
+    r = RuleOne(applicable=True, score=2, band="red", growth=19.0,
+                conservative_growth=0.0, implied_growth=40.0, price=1502.20,
+                sticker=16.26, sticker_low=0.95, mos=8.13, eps=0.48)
+    assert "r1v-wide" in _rule_one_value(r, "GBP")
+
+
+def test_a_tight_band_is_not_flagged(page_config):
+    from screener.dashboard import _rule_one_value
+    from screener.ruleone import RuleOne
+
+    r = RuleOne(applicable=True, score=10, band="green", growth=20.0,
+                conservative_growth=15.8, implied_growth=12.9, price=258.63,
+                sticker=475.70, sticker_low=332.17, mos=237.85, eps=6.5)
+    assert "r1v-wide" not in _rule_one_value(r, "USD")
+
+
+def test_a_non_dollar_value_names_its_currency(page_config):
+    from screener.dashboard import _rule_one_value
+    from screener.ruleone import RuleOne
+
+    r = RuleOne(applicable=True, score=5, band="amber", growth=14.7,
+                conservative_growth=9.8, implied_growth=22.7, price=1506.0,
+                sticker=766.30, sticker_low=391.04, mos=383.15, eps=12.0)
+    assert "EUR" in _rule_one_value(r, "EUR")
+    assert "USD" not in _rule_one_value(r, "USD"), "the majority currency stays unsaid"
+
+
+def test_the_band_survives_a_round_trip(tmp_path):
+    from screener.ruleone import evaluate
+    from screener.storage import Store
+
+    r = evaluate(price=100.0, eps_ttm=5.0, eps_growth_ttm=18.0,
+                 eps_growth_fy=14.0, sales_growth_ttm=12.0)
+    with Store(tmp_path / "t.db") as store:
+        store.upsert_rule_one("AAA", r)
+        back = store.rule_one_readings()["AAA"]
+    assert back.value_band == pytest.approx(r.value_band)
+    assert back.eps == pytest.approx(5.0)
+
+
+def test_a_database_without_the_band_columns_gains_them(tmp_path):
+    """Rule #1 shipped before the value did, so an existing rule_one table has
+    neither column and must not need a rebuild."""
+    import sqlite3
+
+    from screener.storage import Store
+
+    path = tmp_path / "old.db"
+    with Store(path) as store:
+        store.upsert_rule_one("AAA", _reading(7))
+    con = sqlite3.connect(path)
+    con.execute("ALTER TABLE rule_one DROP COLUMN sticker_low")
+    con.execute("ALTER TABLE rule_one DROP COLUMN eps")
+    con.commit()
+    con.close()
+
+    with Store(path) as store:          # migrates on open
+        back = store.rule_one_readings()["AAA"]
+    assert back.sticker == 80.0, "the reading survives"
+    assert back.sticker_low is None, "the new column is simply empty"
+    assert back.value_band is None, "and no band is invented for it"

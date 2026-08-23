@@ -667,7 +667,9 @@ def _card(row: Row, config: Config, horizon) -> str:
     else:
         growth_block = '<p class="earnings none">No earnings growth data yet.</p>'
 
-    rule_one_block = _rule_one_block(row.rule_one, row.both_valuations_agree)
+    rule_one_block = _rule_one_block(
+        row.rule_one, row.both_valuations_agree, row.currency
+    )
 
     leverage_block = ""
     if row.fired or row.sell_fired:
@@ -712,7 +714,63 @@ def _card(row: Row, config: Config, horizon) -> str:
 </article>"""
 
 
-def _rule_one_block(reading, agrees: bool = False) -> str:
+def _rule_one_value(reading, ccy: str = "") -> str:
+    """Rule #1's answer in money, next to Morningstar's.
+
+    Asked for as "a Buffett value in dollars, similar to the fair value", and
+    it is deliberately *not* a single number.
+
+    A sticker price is one growth assumption compounded ten times, so it
+    inherits ten times the error: the conservative and base-case rates are both
+    honest readings of the same filings, and across the watchlist their stickers
+    straddle a median 1.4x, a 90th-percentile 5.6x, and a worst case of 19x.
+    Printing the base case alone would give a decimal place to a number that
+    cannot support one, sitting inches from an analyst fair value that can. So
+    it reads as a range, and where the range is wide, that *is* the finding.
+
+    Omitted entirely when `value_band` refuses -- see there for why a flat
+    earner prices out at a P/E of 2 whatever the company.
+    """
+    if reading is None or not reading.applicable:
+        return ""
+    band = reading.value_band
+    if band is None:
+        # Saying nothing here reads as a missing number rather than a refused
+        # one, on a fifth of the watchlist. The score above is still good.
+        return ('<p class="r1v-note r1v-off">No Buffett value: earnings are flat '
+                'or falling, and the formula prices every such company at the '
+                'same P/E of 2 regardless of what it is. The score still '
+                'stands — it is built on what the price demands, not on this.</p>')
+    buy_lo, buy_hi = reading.mos_band
+    # Matches the fair-value list above, which leaves the majority currency
+    # unsaid and names the exceptions.
+    unit = "" if ccy in ("", "USD") else f' <span class="ccy">{html.escape(ccy)}</span>'
+
+    def money(lo: float, hi: float) -> str:
+        # A band that has collapsed is one number, not "12.00–12.00".
+        return (f"{lo:,.2f}" if abs(hi - lo) < 0.005
+                else f"{lo:,.2f}–{hi:,.2f}")
+
+    lo_rate, hi_rate = reading.conservative_growth, reading.growth
+    rate_text = (f"{hi_rate:.0f}%" if abs(hi_rate - lo_rate) < 0.5
+                 else f"{lo_rate:.0f}–{hi_rate:.0f}%")
+    spread = band[1] / band[0] if band[0] else float("inf")
+    caveat = (
+        f' <span class="r1v-wide" title="The pessimistic and base-case growth '
+        f'rates disagree by {spread:.0f}x here. Treat the score, not the '
+        f'price.">wide</span>' if spread >= 3 else ""
+    )
+    return (
+        f'<dl class="r1val">'
+        f'<div><dt>Buffett value</dt><dd>{money(*band)}{unit}</dd></div>'
+        f'<div><dt>Buy under</dt><dd>{money(buy_lo, buy_hi)}{unit}</dd></div>'
+        f'</dl>'
+        f'<p class="r1v-note">Sticker at {rate_text} growth, halved for the '
+        f'margin of safety.{caveat}</p>'
+    )
+
+
+def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
     """The Buffett score: a small coloured box, and what it is.
 
     Three things were unreadable when this said `[10] RULE #1`:
@@ -758,7 +816,8 @@ def _rule_one_block(reading, agrees: bool = False) -> str:
     return (f'<p class="ruleone"><span class="r1-box r1-{reading.band}" '
             f'title="{html.escape(detail)}">{reading.score}'
             f'<span class="r1-of">/10</span></span>'
-            f'<span class="r1-label">Buffett score</span>{warn}{agree}</p>')
+            f'<span class="r1-label">Buffett score</span>{warn}{agree}</p>'
+            + _rule_one_value(reading, ccy))
 
 
 def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bool]:
@@ -1138,6 +1197,32 @@ h1 {
 .r1-agree {
   margin-left: auto; font-size: 11px; color: var(--green); cursor: help;
   white-space: nowrap;
+}
+
+/* Rule #1's answer in money. Shares the fair-value list's shape so the two
+   valuations read as the same kind of thing, and is deliberately quieter —
+   dotted rather than solid, no pass/fail edge — because this one ranks and
+   the one above it decides. */
+.r1val {
+  display: flex; gap: 0; margin: 6px 0 0;
+  border: 1px dotted var(--rule);
+}
+.r1val > div { flex: 1; padding: 6px 10px; border-right: 1px dotted var(--rule); }
+.r1val > div:last-child { border-right: 0; }
+.r1val dt {
+  font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.r1val dd {
+  margin: 1px 0 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-2);
+}
+.r1v-note { margin: 3px 0 0; font-size: 10.5px; color: var(--ink-3); }
+.r1v-off { font-style: italic; }
+.r1v-wide {
+  color: var(--warn); cursor: help; text-transform: uppercase;
+  letter-spacing: .08em; font-size: 9.5px; font-weight: 700;
 }
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
