@@ -205,7 +205,15 @@ class RuleOne:
     @property
     def mos_band(self) -> tuple[float, float] | None:
         """The same band after the margin of safety -- what you'd pay, not what
-        it's worth."""
+        it's worth.
+
+        Not on the card any more. It sat beside `value_band` as "Buy under" and
+        came off: it is exactly that band halved, so it told the reader nothing
+        they could not work out, and two Rule #1 prices next to a Morningstar
+        fair value is one price too many. The single `mos` still travels in the
+        journal and in the score's tooltip, and this stays for anything that
+        wants the banded form back.
+        """
         band = self.value_band
         return (mos_price(band[0]), mos_price(band[1])) if band else None
 
