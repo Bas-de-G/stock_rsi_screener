@@ -778,63 +778,39 @@ def _card(row: Row, config: Config, horizon) -> str:
 
 
 def _rule_one_value(reading, ccy: str = "") -> str:
-    """Rule #1's answer in money, next to Morningstar's.
+    """Rule #1's answer in money, as one number on the score's own line.
 
-    Asked for as "a Buffett value in dollars, similar to the fair value", and
-    it is deliberately *not* a single number.
+    Started as a two-cell list under the score -- a low-high band, plus the
+    margin-of-safety price, plus a line naming the growth rates and a "wide"
+    badge when the two rates disagreed. Every part of that was true and the
+    whole was unreadable: five numbers and two pieces of jargon to say "this
+    company looks worth about four pounds".
 
-    A sticker price is one growth assumption compounded ten times, so it
-    inherits ten times the error: the conservative and base-case rates are both
-    honest readings of the same filings, and across the watchlist their stickers
-    straddle a median 1.4x, a 90th-percentile 5.6x, and a worst case of 19x.
-    Printing the base case alone would give a decimal place to a number that
-    cannot support one, sitting inches from an analyst fair value that can. So
-    it reads as a range, and where the range is wide, that *is* the finding.
+    So the card carries one number and the reasoning moved into the tooltip
+    that was already there. The honest caveat has not gone away -- a sticker is
+    one growth assumption compounded ten times, and the pessimistic and
+    base-case readings can differ by a factor of nineteen -- it is just no
+    longer shouted at someone scanning twenty cards on a phone. The range, both
+    growth rates and the margin-of-safety price are all one hover away.
 
-    Omitted entirely when `value_band` refuses -- see there for why a flat
-    earner prices out at a P/E of 2 whatever the company.
+    The base case is the number shown, not the midpoint: it is the one Rule #1
+    actually computes, and averaging two assumptions produces a third that
+    nobody made.
     """
-    if reading is None or not reading.applicable:
+    if reading is None or not reading.applicable or reading.value_band is None:
+        # A flat or shrinking earner prices out at a P/E of 2 whatever the
+        # company -- see `RuleOne.value_band`. The score above still stands, so
+        # the line simply carries no price rather than an explanation nobody
+        # asked for.
         return ""
-    band = reading.value_band
-    if band is None:
-        # Saying nothing here reads as a missing number rather than a refused
-        # one, on a fifth of the watchlist. The score above is still good.
-        return ('<p class="r1v-note r1v-off">No Buffett value: earnings are flat '
-                'or falling, and the formula prices every such company at the '
-                'same P/E of 2 regardless of what it is. The score still '
-                'stands — it is built on what the price demands, not on this.</p>')
-    # Matches the fair-value list above, which leaves the majority currency
-    # unsaid and names the exceptions.
-    unit = "" if ccy in ("", "USD") else f' <span class="ccy">{html.escape(ccy)}</span>'
-
-    def money(lo: float, hi: float) -> str:
-        # A band that has collapsed is one number, not "12.00–12.00".
-        return (f"{lo:,.2f}" if abs(hi - lo) < 0.005
-                else f"{lo:,.2f}–{hi:,.2f}")
-
-    lo_rate, hi_rate = reading.conservative_growth, reading.growth
-    rate_text = (f"{hi_rate:.0f}%" if abs(hi_rate - lo_rate) < 0.5
-                 else f"{lo_rate:.0f}–{hi_rate:.0f}%")
-    spread = band[1] / band[0] if band[0] else float("inf")
-    caveat = (
-        f' <span class="r1v-wide" title="The pessimistic and base-case growth '
-        f'rates disagree by {spread:.0f}x here. Treat the score, not the '
-        f'price.">wide</span>' if spread >= 3 else ""
-    )
-    # One number, not two. The margin-of-safety price -- Phil Town's rule that
-    # you pay half what a company is worth, so the gap absorbs the error in the
-    # growth assumption -- used to sit beside this as "Buy under". It is
-    # exactly this band halved, so it told the reader nothing they could not
-    # work out, and two prices on a card that already carries a fair value is
-    # one price too many. It stays in the score's tooltip for anyone who wants
-    # it.
-    return (
-        f'<dl class="r1val">'
-        f'<div><dt>Buffett value</dt><dd>{money(*band)}{unit}</dd></div>'
-        f'</dl>'
-        f'<p class="r1v-note">Sticker at {rate_text} growth.{caveat}</p>'
-    )
+    unit = "" if ccy in ("", "USD") else f" {html.escape(ccy)}"
+    # A middot rather than the hyphen this was asked for, and only because a
+    # hyphen sitting between two financial figures reads as a minus sign:
+    # "Buffett score: 6 - Buffett value: 5.91" invites a subtraction that isn't
+    # there. Same separation, no arithmetic.
+    return (f'<span class="r1-worth"><span class="r1-sep">·</span> '
+            f'<span class="r1-vlabel">Buffett value:</span> '
+            f'<strong>{reading.sticker:,.2f}</strong>{unit}</span>')
 
 
 def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
@@ -860,10 +836,11 @@ def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
     if reading is None:
         return ""
     if not reading.applicable:
-        return ('<p class="ruleone"><span class="r1-box r1-na" '
+        return ('<p class="ruleone">'
+                '<span class="r1-label">Buffett score:</span>'
+                '<span class="r1-box r1-na" '
                 'title="Buffett score (Phil Town&#39;s Rule #1): '
-                f'{html.escape(reading.reason)}">–</span>'
-                '<span class="r1-label">Buffett score</span></p>')
+                f'{html.escape(reading.reason)}">–</span></p>')
 
     detail = (
         f"Buffett score (Phil Town's Rule #1): {reading.score} out of 10. "
@@ -872,6 +849,11 @@ def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
         f"{reading.conservative_growth:.1f}–{reading.growth:.1f}%. "
         f"Sticker {reading.sticker:,.2f}, margin of safety {reading.mos:,.2f}, "
         f"Big Four {reading.big_four}/4."
+        # Everything that used to be printed under the score lives here now.
+        # The spread between the two growth assumptions is the real caveat on
+        # the price, and it belongs where someone asking about the price will
+        # find it, not as a badge on a card being scanned.
+        + _spread_note(reading)
         + (f" ⚠ {reading.caution}." if reading.caution else "")
     )
     warn = '<span class="r1-warn" title="See the score for why">⚠</span>' if reading.caution else ""
@@ -880,11 +862,32 @@ def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
         'score are worked out in completely different ways, and here they reach the '
         'same conclusion">✓ agrees with fair value</span>' if agrees else ""
     )
-    return (f'<p class="ruleone"><span class="r1-box r1-{reading.band}" '
+    # Label first, then the number it names. It read "[6/10] Buffett score"
+    # -- the figure arriving before anything said what it measured.
+    return (f'<p class="ruleone">'
+            f'<span class="r1-label">Buffett score:</span>'
+            f'<span class="r1-box r1-{reading.band}" '
             f'title="{html.escape(detail)}">{reading.score}'
             f'<span class="r1-of">/10</span></span>'
-            f'<span class="r1-label">Buffett score</span>{warn}{agree}</p>'
-            + _rule_one_value(reading, ccy))
+            f'{_rule_one_value(reading, ccy)}{warn}{agree}</p>')
+
+
+def _spread_note(reading) -> str:
+    """How far apart the two growth assumptions put the price, in words.
+
+    This was a "wide" badge on the card, which asked the reader to know what
+    was wide and why it mattered. As a sentence in the tooltip it can just say
+    so.
+    """
+    band = reading.value_band
+    if band is None or not band[0]:
+        return ""
+    spread = band[1] / band[0]
+    if spread < 3:
+        return ""
+    return (f" On the more pessimistic growth rate it works out at "
+            f"{band[0]:,.2f} instead — a {spread:.0f}x spread, so trust the "
+            f"score here rather than the price.")
 
 
 def _conviction_block(comp) -> str:
@@ -921,24 +924,36 @@ def _conviction_block(comp) -> str:
 
     missing = [c.label for c in comp.contributions
                if c.weight and c.strength is None]
+    # Only when the score is genuinely thin. It used to appear whenever
+    # anything at all was unreadable, which is most cards, so it read as
+    # decoration rather than a warning -- and a warning that is always on is
+    # not a warning.
     coverage = (
-        f'<span class="cv-thin" title="Only {comp.coverage:.0%} of the weighted '
-        f'evidence was available — {html.escape(", ".join(missing))} could not be '
-        f'read. The score is computed from the rest.">{comp.coverage:.0%} known</span>'
-        if comp.thin else
-        f'<span class="cv-cov" title="{html.escape(", ".join(missing))} could not be '
-        f'read">{comp.coverage:.0%} known</span>' if missing else ""
+        f'<span class="cv-thin" title="Only {comp.coverage:.0%} of the evidence '
+        f'was available — {html.escape(", ".join(missing))} could not be read. '
+        f'The score is worked out from the rest.">thin</span>'
+        if comp.thin else ""
     )
-    detail = " · ".join(
-        f"{c.label} {c.points:.1f}" for c in comp.known_factors if c.points > 0
-    ) or "nothing readable scored"
+    # The whole model, in the order it contributed. This is the "why", and it
+    # belongs on hover: nobody scanning twenty cards wants five factor
+    # breakdowns competing with the price.
+    parts = [f"{c.label} {c.points:.1f}"
+             for c in sorted(comp.known_factors, key=lambda c: -c.points)
+             if c.points > 0]
+    detail = (f"{comp.score} of 10, from: " + ", ".join(parts)
+              if parts else "nothing readable scored")
+    if missing:
+        detail += f". Not counted: {', '.join(missing)}"
     return (
-        f'<p class="conviction"><span class="cv-box cv-{comp.band}" '
+        # Label first, then the figure -- matching the Buffett score above it.
+        # Two scores on one card reading in opposite orders is exactly the kind
+        # of small inconsistency that makes a page feel fiddly.
+        f'<p class="conviction"><span class="cv-label">Conviction:</span>'
+        f'<span class="cv-box cv-{comp.band}" '
         f'title="{html.escape(detail)}">{comp.score}'
-        f'<span class="cv-of">/10</span></span>'
-        f'<span class="cv-label">Buy conviction</span>{coverage}</p>'
-        f'<div class="cv-bar" role="img" aria-label="Score {comp.score} of 10: '
-        f'{html.escape(detail)}">{segments}<span class="seg seg-rest"></span></div>'
+        f'<span class="cv-of">/10</span></span>{coverage}'
+        f'<span class="cv-bar" role="img" aria-label="{html.escape(detail)}">'
+        f'{segments}<span class="seg seg-rest"></span></span></p>'
     )
 
 
@@ -1329,27 +1344,21 @@ h1 {
   white-space: nowrap;
 }
 
-/* Rule #1's answer in money. Shares the fair-value list's shape so the two
-   valuations read as the same kind of thing, and is deliberately quieter —
-   dotted rather than solid, no pass/fail edge — because this one ranks and
-   the one above it decides. */
-.r1val {
-  display: flex; gap: 0; margin: 6px 0 0;
-  border: 1px dotted var(--rule);
+/* Rule #1's answer in money, riding on the score's own line. It used to be a
+   bordered list underneath with a second price and a growth-rate footnote —
+   five numbers to say "worth about four pounds". */
+.r1-worth { font-size: 11.5px; color: var(--ink-2); }
+.r1-sep { color: var(--ink-3); opacity: .6; margin-right: 1px; }
+/* Matches the score's label so the line reads as two named figures rather
+   than a label, a number, and some trailing text. */
+.r1-vlabel {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 700;
 }
-.r1val > div { flex: 1; padding: 6px 10px; border-right: 1px dotted var(--rule); }
-.r1val > div:last-child { border-right: 0; }
-.r1val dt {
-  font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--ink-3);
-}
-.r1val dd {
-  margin: 1px 0 0;
+.r1-worth strong {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; font-weight: 700;
 }
-.r1v-note { margin: 3px 0 0; font-size: 10.5px; color: var(--ink-3); }
-.r1v-off { font-style: italic; }
 
 /* The weighted conviction score. Same chip shape as the Buffett score — they
    are both 1–10 second opinions, and making them look alike is the point. */
@@ -1373,19 +1382,20 @@ h1 {
   color: var(--ink-3); font-weight: 700;
 }
 .cv-of { font-size: 9.5px; font-weight: 500; opacity: .72; letter-spacing: -.02em; }
-.cv-cov, .cv-thin {
-  margin-left: auto; font-size: 10px; cursor: help; white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+/* Shown only when the score really is built on too little — see the comment
+   in `_conviction_block`. A warning that is always on is not a warning. */
+.cv-thin {
+  font-size: 9.5px; cursor: help; white-space: nowrap; color: var(--warn);
+  text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
 }
-.cv-cov { color: var(--ink-3); }
-.cv-thin { color: var(--warn); }
 
 /* One segment per factor, width proportional to what it actually contributed.
    A plain filled bar would show only the total, which is the least interesting
-   part of a weighted score. */
+   part of a weighted score. It sits on the score's own line now rather than
+   under it: the card had grown to five lines of scoring metadata. */
 .cv-bar {
-  display: flex; height: 6px; margin: 5px 0 0; gap: 1px;
-  background: var(--rule); overflow: hidden;
+  display: flex; flex: 1 1 auto; margin-left: auto; max-width: 132px;
+  height: 6px; gap: 1px; background: var(--rule); overflow: hidden;
 }
 .cv-bar .seg { display: block; min-width: 0; }
 .seg-rest { flex: 1 1 auto; background: transparent; }
@@ -1394,10 +1404,6 @@ h1 {
 .seg-growth    { background: var(--accent); }
 .seg-earnings  { background: color-mix(in srgb, var(--accent) 45%, var(--ink-3)); }
 .seg-pattern   { background: var(--ink-3); }
-.r1v-wide {
-  color: var(--warn); cursor: help; text-transform: uppercase;
-  letter-spacing: .08em; font-size: 9.5px; font-weight: 700;
-}
 
 .state-rejected { border-top: 3px dashed var(--ink-3); }
 .card.state-oversold { border-top: 3px solid var(--crimson); }

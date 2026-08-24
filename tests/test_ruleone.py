@@ -613,10 +613,16 @@ def test_the_card_shows_the_value_beside_the_score(page_config):
                if r.symbol == "AAA"][0]
     card = _card(row, page_config, page_config.horizon("1d"))
 
-    assert "Buffett value" in card
-    assert "60.00–80.00" in card, "the band, not one sticker"
-    # It seconds the fair value, so it sits with it rather than above it.
-    assert card.index('class="valuation') < card.index('class="r1val"')
+    # Two named figures on one line, each label ahead of the number it names.
+    assert "Buffett score:" in card and "Buffett value:" in card
+    assert "80.00" in card
+    line = card.split('<p class="ruleone">')[1].split("</p>")[0]
+    assert line.index("Buffett score:") < line.index('class="r1-box')
+    assert line.index('class="r1-box') < line.index('class="r1-worth"')
+    # The visible half only -- the score's tooltip quotes the sticker too, so
+    # searching the whole line for the figure finds the wrong one.
+    shown = line.split('class="r1-worth"')[1]
+    assert shown.index("Buffett value:") < shown.index("80.00")
 
 
 def test_only_one_price_is_quoted(page_config):
@@ -639,7 +645,7 @@ def test_only_one_price_is_quoted(page_config):
 
     assert "Buy under" not in card
     assert "30.00–40.00" not in card, "the halved band is gone from the card"
-    assert card.count('class="r1val"') == 1
+    assert "60.00" not in card, "and so is the band's low end"
     tip = card.split('title="')[1].split('"')[0]
     assert "margin of safety" in tip, "still one hover away"
 
@@ -653,9 +659,8 @@ def test_a_collapsed_band_is_printed_once(page_config):
                 conservative_growth=20.0, implied_growth=11.6, price=344.82,
                 sticker=761.63, sticker_low=761.63, mos=380.81, eps=19.9)
     html = _rule_one_value(r, "USD")
-    assert "761.63–761.63" not in html
     assert "761.63" in html
-    assert "at 20% growth" in html and "20–20%" not in html
+    assert "–" not in html, "one number, never a range, on the card"
 
 
 def test_a_flat_earner_says_why_there_is_no_price(page_config):
@@ -667,10 +672,9 @@ def test_a_flat_earner_says_why_there_is_no_price(page_config):
     r = RuleOne(applicable=True, score=3, band="red", growth=0.0,
                 conservative_growth=0.0, implied_growth=12.9, price=549.90,
                 sticker=52.50, sticker_low=52.50, mos=26.25, eps=26.55)
-    html = _rule_one_value(r, "USD")
-    assert "No Buffett value" in html
-    assert "P/E of 2" in html
-    assert "score still stands" in html
+    # Nothing at all: the score beside it still stands, and an explanation
+    # nobody asked for is exactly the clutter this card was losing.
+    assert _rule_one_value(r, "USD") == ""
 
 
 def test_a_wildly_disagreeing_band_says_so(page_config):
@@ -682,7 +686,14 @@ def test_a_wildly_disagreeing_band_says_so(page_config):
     r = RuleOne(applicable=True, score=2, band="red", growth=19.0,
                 conservative_growth=0.0, implied_growth=40.0, price=1502.20,
                 sticker=16.26, sticker_low=0.95, mos=8.13, eps=0.48)
-    assert "r1v-wide" in _rule_one_value(r, "GBP")
+    from screener.dashboard import _spread_note
+
+    # Not a badge on the card any more -- a sentence where someone asking about
+    # the price will find it.
+    assert "r1v-wide" not in _rule_one_value(r, "GBP")
+    note = _spread_note(r)
+    assert "0.95" in note and "17x spread" in note
+    assert "trust the score" in note
 
 
 def test_a_tight_band_is_not_flagged(page_config):
@@ -692,7 +703,9 @@ def test_a_tight_band_is_not_flagged(page_config):
     r = RuleOne(applicable=True, score=10, band="green", growth=20.0,
                 conservative_growth=15.8, implied_growth=12.9, price=258.63,
                 sticker=475.70, sticker_low=332.17, mos=237.85, eps=6.5)
-    assert "r1v-wide" not in _rule_one_value(r, "USD")
+    from screener.dashboard import _spread_note
+
+    assert _spread_note(r) == "", "a 1.4x band needs no caveat"
 
 
 def test_a_non_dollar_value_names_its_currency(page_config):

@@ -212,7 +212,7 @@ is a real answer; refusing *everything* was the bug.
 On the card it is **one small coloured box**, between the fair value it seconds
 and the earnings growth it partly rests on:
 
-> **`10/10`  Buffett score   ✓ agrees with fair value**
+> **Buffett score: `10/10` · Buffett value: 761.63   ✓ agrees with fair value**
 
 Called the *Buffett score* rather than *Rule #1* because that is what it is —
 Phil Town's method is an explicit mechanisation of Buffett's — and because
@@ -220,9 +220,24 @@ Phil Town's method is an explicit mechanisation of Buffett's — and because
 the tooltip. Written `10/10` rather than `10` because a bare score says neither
 its scale nor whether high is good; in finance it is as often a risk rating.
 
-Hover for the reasoning: the rate the price demands, the range delivered, the
-sticker and margin-of-safety prices, the Big Four count. A second opinion that
+The price rides on the same line, and it is one number. The sticker started as
+a low–high band with the margin-of-safety price beside it and a footnote naming
+both growth rates — five numbers and two pieces of jargon to say *this company
+looks worth about seven hundred*. The caveat behind the band is real (a sticker
+is one growth assumption compounded ten times, and the pessimistic and base-case
+readings can differ by a factor of nineteen) but it is not what someone scanning
+twenty cards on a phone needs shouted at them.
+
+So hover for the reasoning: the rate the price demands, both growth rates, the
+margin-of-safety price, the Big Four count — and, where the two assumptions
+disagree by more than 3x, a sentence saying what the pessimistic case gives
+instead and to trust the score rather than the price. A second opinion that
 ranks the page and decides nothing should not out-shout the verdict beside it.
+
+No price is shown at all for a flat or shrinking earner — 71 of the cards. Both
+growth rates floor at zero and the future P/E floors at 8, so such a company
+prices out at `EPS × 8 / 1.15¹⁰` — a P/E of 2, whatever the company is. The
+score still stands, because it is built on implied growth rather than on that.
 
 **What it does with that verdict: ranks, never gates.** Rule #1 cannot add or
 remove a 🚀. It sorts cards *within* their category — the rocket category holds
@@ -822,9 +837,9 @@ the only question being asked, same as the valuation gate's plain boolean.
 
 ## The conviction score
 
-Every card carries a **Buy conviction** out of 10, and a segmented bar beneath
-it showing what produced it. Five factors, each reduced to a strength between 0
-and 1, weighted by `scoring.weights` in `config.yaml`:
+Every card carries a **Conviction** out of 10 with a small segmented bar on the
+same line. Five factors, each reduced to a strength between 0 and 1, weighted by
+`scoring.weights` in `config.yaml`:
 
 | Factor | Full marks at | Default weight |
 |---|---|---|
@@ -836,9 +851,11 @@ and 1, weighted by `scoring.weights` in `config.yaml`:
 
 Each segment of the bar is one factor's actual contribution — its weight times
 how well it scored — so its width answers *why is this an 8?* and the empty
-remainder answers *what would have made it a 10?*
+remainder answers *what would have made it a 10?* Hovering the score names
+every factor and what it was worth, which is where the detail belongs: the card
+is for scanning, the tooltip is for asking.
 
-It appears in three places on the site: the chip and bar on every card, a
+It appears in three places on the site: the score and bar on every card, a
 **Conviction ≥7** count in each page's summary strip, and a **Conv.** column in
 the Historical Dashboard's key, showing what each recommendation actually went
 out with. That last one is read from `recommendations.csv`, never recomputed —
@@ -859,9 +876,11 @@ silently rewriting the past.
 **An unread factor is dropped and the rest reweighted, not scored zero.**
 Otherwise "nobody has recorded a fair value" and "this stock is dear" would give
 the same number, and 88 of the 253 names have no fair value on file. The cost is
-that a name with one factor known still gets a confident-looking score, so each
-card reports what share of the weighted evidence was actually available — a 9 on
-40% coverage is a different claim from a 9 on 100%.
+that a name with one factor known still gets a confident-looking score, so a
+card built on less than half the weighted evidence is marked **thin** and the
+tooltip names what was missing. Only when it is genuinely thin — an earlier
+version showed a coverage figure whenever *anything* was unreadable, which is
+most cards, and a warning that is always on is not a warning.
 
 The saturation points above were calibrated against the live watchlist, not
 picked. Two first guesses were wrong by a lot: scoring the dip at 10 points put
