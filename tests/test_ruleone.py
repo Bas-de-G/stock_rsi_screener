@@ -613,10 +613,16 @@ def test_the_card_shows_the_value_beside_the_score(page_config):
                if r.symbol == "AAA"][0]
     card = _card(row, page_config, page_config.horizon("1d"))
 
-    assert "worth" in card and "80.00" in card, "the value, on the score's line"
-    # One line, not a list underneath: the score and its price read together.
-    assert card.index('class="r1-box') < card.index('class="r1-worth"')
-    assert card.index('class="r1-worth"') < card.index("</p>", card.index("r1-worth"))
+    # Two named figures on one line, each label ahead of the number it names.
+    assert "Buffett score:" in card and "Buffett value:" in card
+    assert "80.00" in card
+    line = card.split('<p class="ruleone">')[1].split("</p>")[0]
+    assert line.index("Buffett score:") < line.index('class="r1-box')
+    assert line.index('class="r1-box') < line.index('class="r1-worth"')
+    # The visible half only -- the score's tooltip quotes the sticker too, so
+    # searching the whole line for the figure finds the wrong one.
+    shown = line.split('class="r1-worth"')[1]
+    assert shown.index("Buffett value:") < shown.index("80.00")
 
 
 def test_only_one_price_is_quoted(page_config):

@@ -804,7 +804,12 @@ def _rule_one_value(reading, ccy: str = "") -> str:
         # asked for.
         return ""
     unit = "" if ccy in ("", "USD") else f" {html.escape(ccy)}"
-    return (f'<span class="r1-worth"><span class="r1-sep">·</span> worth '
+    # A middot rather than the hyphen this was asked for, and only because a
+    # hyphen sitting between two financial figures reads as a minus sign:
+    # "Buffett score: 6 - Buffett value: 5.91" invites a subtraction that isn't
+    # there. Same separation, no arithmetic.
+    return (f'<span class="r1-worth"><span class="r1-sep">·</span> '
+            f'<span class="r1-vlabel">Buffett value:</span> '
             f'<strong>{reading.sticker:,.2f}</strong>{unit}</span>')
 
 
@@ -831,10 +836,11 @@ def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
     if reading is None:
         return ""
     if not reading.applicable:
-        return ('<p class="ruleone"><span class="r1-box r1-na" '
+        return ('<p class="ruleone">'
+                '<span class="r1-label">Buffett score:</span>'
+                '<span class="r1-box r1-na" '
                 'title="Buffett score (Phil Town&#39;s Rule #1): '
-                f'{html.escape(reading.reason)}">–</span>'
-                '<span class="r1-label">Buffett score</span></p>')
+                f'{html.escape(reading.reason)}">–</span></p>')
 
     detail = (
         f"Buffett score (Phil Town's Rule #1): {reading.score} out of 10. "
@@ -856,10 +862,13 @@ def _rule_one_block(reading, agrees: bool = False, ccy: str = "") -> str:
         'score are worked out in completely different ways, and here they reach the '
         'same conclusion">✓ agrees with fair value</span>' if agrees else ""
     )
-    return (f'<p class="ruleone"><span class="r1-box r1-{reading.band}" '
+    # Label first, then the number it names. It read "[6/10] Buffett score"
+    # -- the figure arriving before anything said what it measured.
+    return (f'<p class="ruleone">'
+            f'<span class="r1-label">Buffett score:</span>'
+            f'<span class="r1-box r1-{reading.band}" '
             f'title="{html.escape(detail)}">{reading.score}'
             f'<span class="r1-of">/10</span></span>'
-            f'<span class="r1-label">Buffett score</span>'
             f'{_rule_one_value(reading, ccy)}{warn}{agree}</p>')
 
 
@@ -936,10 +945,13 @@ def _conviction_block(comp) -> str:
     if missing:
         detail += f". Not counted: {', '.join(missing)}"
     return (
-        f'<p class="conviction"><span class="cv-box cv-{comp.band}" '
+        # Label first, then the figure -- matching the Buffett score above it.
+        # Two scores on one card reading in opposite orders is exactly the kind
+        # of small inconsistency that makes a page feel fiddly.
+        f'<p class="conviction"><span class="cv-label">Conviction:</span>'
+        f'<span class="cv-box cv-{comp.band}" '
         f'title="{html.escape(detail)}">{comp.score}'
-        f'<span class="cv-of">/10</span></span>'
-        f'<span class="cv-label">Conviction</span>{coverage}'
+        f'<span class="cv-of">/10</span></span>{coverage}'
         f'<span class="cv-bar" role="img" aria-label="{html.escape(detail)}">'
         f'{segments}<span class="seg seg-rest"></span></span></p>'
     )
@@ -1337,6 +1349,12 @@ h1 {
    five numbers to say "worth about four pounds". */
 .r1-worth { font-size: 11.5px; color: var(--ink-2); }
 .r1-sep { color: var(--ink-3); opacity: .6; margin-right: 1px; }
+/* Matches the score's label so the line reads as two named figures rather
+   than a label, a number, and some trailing text. */
+.r1-vlabel {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 700;
+}
 .r1-worth strong {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums; font-weight: 700;

@@ -212,7 +212,7 @@ is a real answer; refusing *everything* was the bug.
 On the card it is **one small coloured box**, between the fair value it seconds
 and the earnings growth it partly rests on:
 
-> **`10/10`  Buffett score · worth 761.63   ✓ agrees with fair value**
+> **Buffett score: `10/10` · Buffett value: 761.63   ✓ agrees with fair value**
 
 Called the *Buffett score* rather than *Rule #1* because that is what it is —
 Phil Town's method is an explicit mechanisation of Buffett's — and because
