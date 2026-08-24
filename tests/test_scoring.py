@@ -282,7 +282,10 @@ def test_the_card_shows_the_score_out_of_ten():
     html = _block()
     assert 'class="cv-box cv-green"' in html
     assert '>10<span class="cv-of">/10</span>' in html
-    assert "Buy conviction" in html, "the polarity has to be on the label"
+    assert "Conviction" in html
+    # Score, label and bar on one line: the card had grown to five lines of
+    # scoring metadata before this.
+    assert html.count("<p") == 1 and html.count("</p>") == 1
 
 
 def test_the_bar_has_one_segment_per_contributing_factor():
@@ -311,8 +314,11 @@ def test_a_missing_factor_is_declared_rather_than_just_absent():
     """An unread factor and one that scored zero both draw nothing, so the
     chip is what tells them apart."""
     html = _block(ruleone=None)
-    assert "known" in html
-    assert "Buffett score" in html, "and it names what was missing"
+    # Named in the tooltip rather than badged on the card: one factor of five
+    # missing is not a warning, it is Tuesday.
+    tip = html.split('title="')[1].split('"')[0]
+    assert "Not counted: Buffett score" in tip
+    assert "cv-thin" not in html
 
 
 def test_a_full_house_says_nothing_about_coverage():
