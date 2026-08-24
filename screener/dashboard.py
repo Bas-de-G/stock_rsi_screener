@@ -804,7 +804,6 @@ def _rule_one_value(reading, ccy: str = "") -> str:
                 'or falling, and the formula prices every such company at the '
                 'same P/E of 2 regardless of what it is. The score still '
                 'stands — it is built on what the price demands, not on this.</p>')
-    buy_lo, buy_hi = reading.mos_band
     # Matches the fair-value list above, which leaves the majority currency
     # unsaid and names the exceptions.
     unit = "" if ccy in ("", "USD") else f' <span class="ccy">{html.escape(ccy)}</span>'
@@ -823,13 +822,18 @@ def _rule_one_value(reading, ccy: str = "") -> str:
         f'rates disagree by {spread:.0f}x here. Treat the score, not the '
         f'price.">wide</span>' if spread >= 3 else ""
     )
+    # One number, not two. The margin-of-safety price -- Phil Town's rule that
+    # you pay half what a company is worth, so the gap absorbs the error in the
+    # growth assumption -- used to sit beside this as "Buy under". It is
+    # exactly this band halved, so it told the reader nothing they could not
+    # work out, and two prices on a card that already carries a fair value is
+    # one price too many. It stays in the score's tooltip for anyone who wants
+    # it.
     return (
         f'<dl class="r1val">'
         f'<div><dt>Buffett value</dt><dd>{money(*band)}{unit}</dd></div>'
-        f'<div><dt>Buy under</dt><dd>{money(buy_lo, buy_hi)}{unit}</dd></div>'
         f'</dl>'
-        f'<p class="r1v-note">Sticker at {rate_text} growth, halved for the '
-        f'margin of safety.{caveat}</p>'
+        f'<p class="r1v-note">Sticker at {rate_text} growth.{caveat}</p>'
     )
 
 

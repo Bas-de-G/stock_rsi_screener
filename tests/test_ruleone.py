@@ -615,10 +615,33 @@ def test_the_card_shows_the_value_beside_the_score(page_config):
 
     assert "Buffett value" in card
     assert "60.00–80.00" in card, "the band, not one sticker"
-    assert "Buy under" in card
-    assert "30.00–40.00" in card, "the margin-of-safety band"
     # It seconds the fair value, so it sits with it rather than above it.
     assert card.index('class="valuation') < card.index('class="r1val"')
+
+
+def test_only_one_price_is_quoted(page_config):
+    """The margin-of-safety price sat beside this as "Buy under" and came out.
+
+    It is exactly the band halved, so it told the reader nothing they could not
+    work out, and two Rule #1 prices on a card that already carries a
+    Morningstar fair value is one price too many. It survives in the score's
+    tooltip.
+    """
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    with Store(page_config.storage.database) as store:
+        _seed_signal(store, "AAA")
+        store.upsert_rule_one("AAA", _reading(7))
+        row = [r for r in _collect(store, page_config, page_config.horizon("1d"))
+               if r.symbol == "AAA"][0]
+    card = _card(row, page_config, page_config.horizon("1d"))
+
+    assert "Buy under" not in card
+    assert "30.00–40.00" not in card, "the halved band is gone from the card"
+    assert card.count('class="r1val"') == 1
+    tip = card.split('title="')[1].split('"')[0]
+    assert "margin of safety" in tip, "still one hover away"
 
 
 def test_a_collapsed_band_is_printed_once(page_config):
