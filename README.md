@@ -930,6 +930,27 @@ SCREENER_WEBHOOK_URL=https://hooks.slack.com/services/...
 The three are independent; set any, all, or none. Without any of them
 everything still lands in SQLite, the CSVs, and stdout.
 
+### Which timeframes ring a phone
+
+The push is the only channel that interrupts, so it is the only one with a
+timeframe filter:
+
+```yaml
+notify:
+  push_horizons: [4h, 1d]     # [] stops phone alerts entirely
+```
+
+Every timeframe still appears on the dashboard, still gets journalled, and still
+opens a GitHub issue — nothing is lost, it just waits to be read. The hourly
+chart is where the volume is (**55 of the 75 alerts ever sent** came from it),
+and an hourly signal stays fresh for only about six hours, so by the time a
+phone is picked up it is often already stale.
+
+A timeframe that isn't listed still counts as announced in `notifications.json`.
+The ledger tracks the announcement, not the transport — otherwise an hourly
+signal would be re-announced on every run for as long as it stayed fresh,
+moving the noise to the issue tracker instead of removing it.
+
 ### One signal, one email
 
 A strong buy sits on the dashboard for hours and runs land every 30 minutes, so

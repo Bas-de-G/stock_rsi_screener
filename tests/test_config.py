@@ -235,3 +235,37 @@ def test_weights_cannot_all_be_zero(tmp_path):
     )
     with pytest.raises(ValueError, match="all be zero"):
         load_config(write(tmp_path, VALID + body))
+
+
+# ------------------------------------------------------ which timeframes push
+
+
+def test_push_timeframes_default_to_the_two_slower_charts(tmp_path):
+    cfg = load_config(write(tmp_path, VALID))
+    assert cfg.notify.push_horizons == ("4h", "1d")
+
+
+def test_push_timeframes_can_be_changed(tmp_path):
+    cfg = load_config(write(tmp_path, VALID + "notify:\n  push_horizons: [1d, 1w]\n"))
+    assert cfg.notify.push_horizons == ("1d", "1w")
+    assert not cfg.notify.pushes("4h")
+
+
+def test_a_single_push_timeframe_need_not_be_a_list(tmp_path):
+    cfg = load_config(write(tmp_path, VALID + "notify:\n  push_horizons: 1d\n"))
+    assert cfg.notify.push_horizons == ("1d",)
+
+
+def test_no_push_timeframes_silences_the_phone(tmp_path):
+    """An empty list is a real choice -- keep the dashboard and the emails,
+    stop the interruptions."""
+    cfg = load_config(write(tmp_path, VALID + "notify:\n  push_horizons: []\n"))
+    assert cfg.notify.push_horizons == ()
+    assert not cfg.notify.pushes("1d")
+
+
+def test_a_misspelled_timeframe_is_an_error(tmp_path):
+    """`[4hr]` would silently stop every phone alert, and nothing would look
+    broken until someone noticed the quiet."""
+    with pytest.raises(ValueError, match="4hr"):
+        load_config(write(tmp_path, VALID + "notify:\n  push_horizons: [4hr, 1d]\n"))

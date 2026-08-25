@@ -155,6 +155,12 @@ current header on open and recovers the values positionally — which works only
 because every column ever added went in *before* `schema` and `extra`. Keep
 those two last.
 
+**The phone filter is not the dedupe.** `notify.push_horizons` gates the ntfy
+push only; the webhook and the GitHub issue still carry every timeframe, and a
+held signal is still written to `notifications.json`. The ledger tracks the
+announcement, not the transport — recording only what was pushed would
+re-announce an hourly signal on every run for as long as it stayed fresh.
+
 **The conviction score decides nothing (`scoring.SHADOW`).** `is_strong` still
 picks the rocket and rings the phone. The composite is computed, shown and
 journalled with the weights that produced it, so it can be measured against the
