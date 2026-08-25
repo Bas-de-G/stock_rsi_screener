@@ -444,6 +444,10 @@ HOOD:
   fair_value: 57.0
   checked: '2026-08-20'
   source: scraped
+HWM:
+  fair_value: 229.74
+  checked: '2026-08-25'
+  source: scraped
 IBKR:
   fair_value: 70.0
   checked: '2026-08-20'
@@ -847,6 +851,10 @@ SNDK:
 SNPS:
   fair_value: 520.0
   checked: '2026-08-19'
+  source: scraped
+SO:
+  fair_value: 83.0
+  checked: '2026-08-25'
   source: scraped
 SOUN:
   fair_value: 7.94
