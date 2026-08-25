@@ -465,6 +465,21 @@ dashboard:
   # Trading days of RSI history to plot per stock.
   chart_days: 90
 
+notify:
+  # Which timeframes are allowed to ring a phone.
+  #
+  # This governs the ntfy push ONLY. Every timeframe still appears on the
+  # dashboard, still gets journalled, and still opens a GitHub issue — so
+  # nothing is lost, it just waits to be read instead of interrupting.
+  #
+  # The hourly chart is where the volume is: 55 of the 75 alerts ever sent came
+  # from it. An hourly signal also stays fresh for only about six hours, so by
+  # the time a phone is picked up it is often already stale. The slower charts
+  # are the ones worth being interrupted for.
+  #
+  # Set to [] to stop phone alerts entirely and keep the emails.
+  push_horizons: [4h, 1d]
+
 scoring:
   # How much each factor counts towards the 1–10 conviction score on each card.
   #

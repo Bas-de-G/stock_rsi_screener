@@ -213,6 +213,8 @@ storage:
   csv_dir: "{tmp_path}"
   fair_values: "{tmp_path / 'fv.yaml'}"
   notifications: "{tmp_path / 'n.json'}"
+notify:
+  push_horizons: [1h, 4h, 1d, 1w]
 dashboard:
   output: "{tmp_path / 't.html'}"
   chart_days: 90

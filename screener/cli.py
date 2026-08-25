@@ -1317,8 +1317,15 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # neither and simply prints, CI has the token and may have the
             # webhook too.
             title = issue_title(row.symbol, discount, horizon)
-            if send_push(title, message, url):
-                print("  (pushed to phones)")
+            # The phone is the only channel with a timeframe filter, because it
+            # is the only one that interrupts. The issue and the webhook still
+            # carry every horizon, so nothing is lost -- it just waits to be
+            # read. See `NotifyConfig`.
+            if config.notify.pushes(horizon.key):
+                if send_push(title, message, url):
+                    print("  (pushed to phones)")
+            else:
+                print(f"  (no push — {horizon.label} is not a push timeframe)")
             if send_webhook(message):
                 print("  (sent to webhook)")
             if send_github_issue(title, message, key):

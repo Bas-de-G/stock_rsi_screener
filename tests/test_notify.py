@@ -45,6 +45,8 @@ storage:
   csv_dir: "{tmp_path}"
   fair_values: "{tmp_path / 'fv.yaml'}"
   notifications: "{tmp_path / 'notified.json'}"
+notify:
+  push_horizons: [1h, 4h, 1d, 1w]
 dashboard:
   output: "{tmp_path / 't.html'}"
   chart_days: 90
@@ -691,3 +693,70 @@ def test_the_phone_inherits_the_no_duplicate_policy(config, store, monkeypatch):
     assert _notify_new_strong_buys(store, config) == 1
     assert _notify_new_strong_buys(store, config) == 0
     assert len(pushes) == 1
+
+
+# --------------------------------------------- which timeframes reach a phone
+
+
+def _muted(config, *push_on):
+    """The same config with only these timeframes allowed to push."""
+    from dataclasses import replace
+
+    from screener.config import NotifyConfig
+
+    return replace(config, notify=NotifyConfig(push_horizons=tuple(push_on)))
+
+
+def test_an_hourly_signal_does_not_ring_a_phone(config, store, monkeypatch):
+    """55 of the 75 alerts ever sent came from the 1h chart, and an hourly
+    signal stays fresh for hours -- by the time a phone is picked up it is
+    often already stale."""
+    pushes = []
+    monkeypatch.setattr("screener.cli.send_push", lambda t, m, u: pushes.append(t) or True)
+    assert _notify_new_strong_buys(store, _muted(config, "4h", "1d")) == 1
+    assert pushes == []
+
+
+def test_the_other_channels_still_carry_it(config, store, monkeypatch):
+    """The phone is the only channel that interrupts, so it is the only one
+    filtered. Nothing is lost -- it just waits to be read."""
+    posted, issues, pushes = [], [], []
+    monkeypatch.setattr("screener.cli.send_webhook", lambda m: posted.append(m) or True)
+    monkeypatch.setattr("screener.cli.send_github_issue",
+                        lambda t, b, k: issues.append(t) or True)
+    monkeypatch.setattr("screener.cli.send_push", lambda t, m, u: pushes.append(t) or True)
+    assert _notify_new_strong_buys(store, _muted(config, "4h", "1d")) == 1
+    assert len(posted) == 1 and len(issues) == 1
+    assert pushes == []
+
+
+def test_a_permitted_timeframe_still_pushes(config, store, monkeypatch):
+    pushes = []
+    monkeypatch.setattr("screener.cli.send_push", lambda t, m, u: pushes.append(t) or True)
+    assert _notify_new_strong_buys(store, _muted(config, "1h")) == 1
+    assert len(pushes) == 1
+
+
+def test_a_held_signal_is_still_recorded_as_announced(config, store, monkeypatch):
+    """The ledger tracks the announcement, not the transport. Otherwise an
+    hourly signal would be re-announced on every run for as long as it stayed
+    fresh, spamming the issue tracker instead of the phone."""
+    monkeypatch.setattr("screener.cli.send_push", lambda t, m, u: True)
+    quiet = _muted(config, "4h", "1d")
+    assert _notify_new_strong_buys(store, quiet) == 1
+    assert _notify_new_strong_buys(store, quiet) == 0
+
+
+def test_the_run_says_why_a_phone_stayed_quiet(config, store, monkeypatch, capsys):
+    monkeypatch.setattr("screener.cli.send_push", lambda t, m, u: True)
+    _notify_new_strong_buys(store, _muted(config, "4h", "1d"))
+    out = capsys.readouterr().out
+    assert "no push" in out and "1 hour" in out
+
+
+def test_the_default_is_the_two_slower_charts(tmp_path):
+    from screener.config import NotifyConfig
+
+    assert NotifyConfig().push_horizons == ("4h", "1d")
+    assert not NotifyConfig().pushes("1h")
+    assert not NotifyConfig().pushes("1w")

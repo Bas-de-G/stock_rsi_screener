@@ -223,6 +223,29 @@ class MorningstarConfig:
     headless: bool = False
 
 
+DEFAULT_PUSH_HORIZONS: tuple[str, ...] = ("4h", "1d")
+
+
+@dataclass(frozen=True)
+class NotifyConfig:
+    """Which timeframes are allowed to interrupt someone.
+
+    Separate from which timeframes are *screened*: all four still appear on the
+    dashboard, still get journalled, and still open a GitHub issue. This only
+    governs the phone.
+
+    The hourly chart is where the volume is -- 55 of the 75 alerts ever sent
+    came from it -- and an hourly signal has a freshness window measured in
+    hours, so by the time a phone is picked up it is often already stale. The
+    slower charts are the ones worth being interrupted for.
+    """
+
+    push_horizons: tuple[str, ...] = DEFAULT_PUSH_HORIZONS
+
+    def pushes(self, horizon_key: str) -> bool:
+        return horizon_key in self.push_horizons
+
+
 @dataclass(frozen=True)
 class ScoringConfig:
     """How much each factor counts towards the conviction score.
@@ -263,6 +286,7 @@ class Config:
     dashboard: DashboardConfig
     horizons: tuple[Horizon, ...] = DEFAULT_HORIZONS
     scoring: ScoringConfig = field(default_factory=lambda: ScoringConfig())
+    notify: NotifyConfig = field(default_factory=lambda: NotifyConfig())
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -404,10 +428,12 @@ def load_config(path: str | Path | None = None) -> Config:
 
     horizons = _load_horizons(raw.get("horizons", {}) or {})
     scoring = _load_scoring(raw.get("scoring", {}) or {})
+    notify = _load_notify(raw.get("notify", {}) or {}, horizons)
 
     return Config(
         tickers=tickers,
         scoring=scoring,
+        notify=notify,
         rsi=rsi,
         signal=signal,
         storage=storage,
@@ -416,6 +442,29 @@ def load_config(path: str | Path | None = None) -> Config:
         horizons=horizons,
         source_path=config_path,
     )
+
+
+def _load_notify(raw: dict, horizons) -> NotifyConfig:
+    """Read the `notify:` block, checking the timeframes actually exist.
+
+    A typo here is silent in the worst way -- `notify.push_horizons: [4hr]`
+    would simply stop every phone alert, and nothing would look broken until
+    someone noticed the quiet.
+    """
+    given = raw.get("push_horizons", None)
+    if given is None:
+        return NotifyConfig()
+    if isinstance(given, str):
+        given = [given]
+    keys = [str(k) for k in given]
+    known = {h.key for h in horizons}
+    unknown = [k for k in keys if k not in known]
+    if unknown:
+        raise ValueError(
+            f"notify.push_horizons names no timeframe {', '.join(unknown)!r} — "
+            f"known timeframes are {', '.join(sorted(known))}"
+        )
+    return NotifyConfig(push_horizons=tuple(dict.fromkeys(keys)))
 
 
 def _load_scoring(raw: dict) -> ScoringConfig:
