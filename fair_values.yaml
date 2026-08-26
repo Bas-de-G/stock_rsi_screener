@@ -914,7 +914,7 @@ PLX:
   source: scraped
 PM:
   fair_value: 185.0
-  checked: '2026-08-05'
+  checked: '2026-08-26'
   source: scraped
 PNE3:
   fair_value: 8.46
