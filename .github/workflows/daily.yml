@@ -41,12 +41,12 @@ on:
     # are keyed by date and simply get overwritten in place, so the extra runs
     # only sharpen the intraday view.
     #
-    # Hour 21 deliberately has exactly ONE slot. The commit guard below defers
-    # the database snapshot on any scheduled run outside hour 21, so a second
-    # slot in that hour would commit the binary database twice a day instead
-    # of once. The guard matches on the hour rather than the exact minute
-    # because GitHub delays scheduled runs under load — a run that slips to
-    # 21:07 must still commit, or the day's history is lost.
+    # Hour 21 deliberately has exactly ONE slot. The commit guard below takes
+    # the database snapshot on the last run of FRIDAY, so a second slot in that
+    # hour would commit the binary database twice in the one week it fires.
+    # The guard matches on the hour rather than the exact minute because GitHub
+    # delays scheduled runs under load — a run that slips to 21:07 must still
+    # commit, or the week's snapshot is skipped entirely.
     #
     # GitHub's scheduler is best-effort on public repos: expect some of these
     # to arrive late or be skipped entirely under load. Minutes themselves are
@@ -224,15 +224,44 @@ jobs:
           # Both are small and text, so they cost nothing to write every time.
           git add notifications.json recommendations.csv 2>/dev/null || true
 
-          # Late-day runs snapshot the database; earlier ones defer.
-          # Deliberately ">= 21" rather than "== 21": GitHub delivers this
-          # repo's scheduled runs around 22:30, so matching the hour exactly
-          # meant the one run that actually lands each day fell through and
-          # never committed. 10# forces base 10, or `date +%H` returning "09"
-          # is read as invalid octal.
+          # The database snapshots ONCE A WEEK, on the last run of Friday.
+          #
+          # It used to be nightly. Measured on a freshly packed clone -- which
+          # is what GitHub actually stores -- 82 revisions of this file cost
+          # 95 MB, about 1.16 MB apiece. Git deltas them far better than the
+          # old note here claimed (it said ~57% of raw size per revision; the
+          # real figure is 2.6%), so nightly was never the emergency it looked
+          # like: ~35 MB a month against a 1 GB warning is roughly two years.
+          #
+          # Weekly is kept anyway because it is the same data at a seventh of
+          # the cost and gives up nothing. Measure on a packed clone before
+          # revisiting this -- loose objects in a working clone overstate the
+          # per-revision cost by an order of magnitude, which is exactly the
+          # mistake that produced the numbers this comment replaces.
+          #
+          # Nothing irreplaceable rides on this. notifications.json and
+          # recommendations.csv commit on EVERY run above, and they are the two
+          # files that cannot be rebuilt; fair_values.yaml is authored by hand
+          # and committed by the scrape. Everything in the database is
+          # refetched or re-derived by the next run -- the snapshot exists so a
+          # rebuild does not have to go back to Yahoo for years of history, not
+          # because the run depends on it.
+          #
+          # FRIDAY, not Saturday. Every cron in this file is weekday-only
+          # (`* * 1-5`), so a Saturday guard would never fire from the schedule
+          # and the database would simply never be committed again. Friday's
+          # 21:00 run lands after the US close, so the week's bars are complete
+          # and it is a clean weekly boundary.
+          #
+          # ">= 21" rather than "== 21": GitHub delivers this repo's scheduled
+          # runs around 22:30, so matching the hour exactly meant the one run
+          # that actually lands each day fell through and never committed. 10#
+          # forces base 10, or `date +%H` returning "09" is read as invalid
+          # octal.
           if [ "${{ github.event_name }}" = "schedule" ] \
-             && [ "$((10#$(date -u +%H)))" -lt 21 ]; then
-            echo "Intraday run — dashboard published; database snapshot deferred to the last run of the day."
+             && { [ "$(date -u +%u)" != "5" ] \
+                  || [ "$((10#$(date -u +%H)))" -lt 21 ]; }; then
+            echo "Database snapshot deferred — it is taken on the last run of Friday."
           else
             # data/ is gitignored so local runs stay clean; CI force-adds it
             # because this is where the shared history lives.
