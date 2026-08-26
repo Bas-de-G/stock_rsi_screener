@@ -612,6 +612,10 @@ MRK:
   fair_value: 111.0
   checked: '2026-08-19'
   source: scraped
+MRSH:
+  fair_value: 191.0
+  checked: '2026-08-26'
+  source: scraped
 MRVL:
   fair_value: 235.0
   checked: '2026-08-19'
@@ -903,6 +907,10 @@ TRV:
 TSLA:
   fair_value: 450.0
   checked: '2026-08-18'
+  source: scraped
+TT:
+  fair_value: 422.0
+  checked: '2026-08-26'
   source: scraped
 TXN:
   fair_value: 325.0
