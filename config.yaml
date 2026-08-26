@@ -257,6 +257,62 @@ tickers:
   # resolves perfectly happily.
   - {symbol: KRX,   tradingview: "EURONEXT:KRX", morningstar: xdub/krx, yahoo: KRX.IR, currency: EUR, markets: [europe]}
 
+  # --- Filling the thin sectors -----------------------------------------
+  # The watchlist had drifted: Finance, Electronic Technology and Technology
+  # Services were 42% of 284 names between them, while seven sectors sat under
+  # 3% each. These are the largest, most liquid US names in those seven,
+  # sourced from the us-stocks-dataset and then verified the usual way.
+  #
+  # Classified by TRADINGVIEW's sector, not the dataset's. The two taxonomies
+  # disagree -- the dataset calls Cencora "Healthcare", TradingView calls it
+  # Distribution Services -- and TradingView's is the one the screener reads.
+  #
+  # Tagged sp500 as the large-cap US group. Several are ADRs of non-US
+  # companies (BHP, RIO, NGG, AMX, VOD, TM, RACE) kept on their US line for
+  # the reason the Novo Nordisk entry gives: dollars, and Morningstar's US
+  # coverage.
+  # Utilities
+  - {symbol: AEP,   tradingview: "NASDAQ:AEP",      morningstar: xnas/aep,     markets: [sp500]}   # American Electric Power Co
+  - {symbol: D,     tradingview: "NYSE:D",          morningstar: xnys/d,       markets: [sp500]}   # Dominion Energy Inc
+  - {symbol: ETR,   tradingview: "NYSE:ETR",        morningstar: xnys/etr,     markets: [sp500]}   # Entergy Corporation
+  - {symbol: NGG,   tradingview: "NYSE:NGG",        morningstar: xnys/ngg,     markets: [sp500]}   # National Grid plc Sponsore
+  - {symbol: SRE,   tradingview: "NYSE:SRE",        morningstar: xnys/sre,     markets: [sp500]}   # Sempra
+
+  # Non-Energy Minerals
+  - {symbol: AEM,   tradingview: "NYSE:AEM",        morningstar: xnys/aem,     markets: [sp500]}   # Agnico Eagle Mines Limited
+  - {symbol: BHP,   tradingview: "NYSE:BHP",        morningstar: xnys/bhp,     markets: [sp500]}   # BHP Group Ltd Sponsored Am
+  - {symbol: RIO,   tradingview: "NYSE:RIO",        morningstar: xnys/rio,     markets: [sp500]}   # Rio Tinto plc Sponsored AD
+  - {symbol: SCCO,  tradingview: "NYSE:SCCO",       morningstar: xnys/scco,    markets: [sp500]}   # Southern Copper Corporatio
+
+  # Process Industries
+  - {symbol: APD,   tradingview: "NYSE:APD",        morningstar: xnys/apd,     markets: [sp500]}   # Air Products and Chemicals
+  - {symbol: CTVA,  tradingview: "NYSE:CTVA",       morningstar: xnys/ctva,    markets: [sp500]}   # Corteva Inc
+  - {symbol: NTR,   tradingview: "NYSE:NTR",        morningstar: xnys/ntr,     markets: [sp500]}   # Nutrien Ltd.
+  - {symbol: SW,    tradingview: "NYSE:SW",         morningstar: xnys/sw,      markets: [sp500]}   # Smurfit Westrock PLC
+
+  # Distribution Services
+  - {symbol: CAH,   tradingview: "NYSE:CAH",        morningstar: xnys/cah,     markets: [sp500]}   # Cardinal Health, Inc.
+  - {symbol: COR,   tradingview: "NYSE:COR",        morningstar: xnys/cor,     markets: [sp500]}   # Cencora, Inc.
+  - {symbol: FAST,  tradingview: "NASDAQ:FAST",     morningstar: xnas/fast,    markets: [sp500]}   # Fastenal Company
+  - {symbol: GWW,   tradingview: "NYSE:GWW",        morningstar: xnys/gww,     markets: [sp500]}   # W.W. Grainger, Inc.
+
+  # Health Services
+  - {symbol: CI,    tradingview: "NYSE:CI",         morningstar: xnys/ci,      markets: [sp500]}   # Cigna Group
+  - {symbol: CNC,   tradingview: "NYSE:CNC",        morningstar: xnys/cnc,     markets: [sp500]}   # Centene Corporation
+  - {symbol: HUM,   tradingview: "NYSE:HUM",        morningstar: xnys/hum,     markets: [sp500]}   # Humana Inc.
+  - {symbol: LH,    tradingview: "NYSE:LH",         morningstar: xnys/lh,      markets: [sp500]}   # Labcorp Holdings Inc.
+
+  # Communications
+  - {symbol: AMX,   tradingview: "NYSE:AMX",        morningstar: xnys/amx,     markets: [sp500]}   # America Movil SAB de CV Sp
+  - {symbol: BCE,   tradingview: "NYSE:BCE",        morningstar: xnys/bce,     markets: [sp500]}   # BCE Inc.
+  - {symbol: RCI,   tradingview: "NYSE:RCI",        morningstar: xnys/rci,     markets: [sp500]}   # Rogers Communications Inc.
+  - {symbol: VOD,   tradingview: "NASDAQ:VOD",      morningstar: xnas/vod,     markets: [sp500]}   # Vodafone Group Public Limi
+
+  # Consumer Durables
+  - {symbol: GM,    tradingview: "NYSE:GM",         morningstar: xnys/gm,      markets: [sp500]}   # General Motors Company
+  - {symbol: RACE,  tradingview: "NYSE:RACE",       morningstar: xnys/race,    markets: [sp500]}   # Ferrari NV
+  - {symbol: TM,    tradingview: "NYSE:TM",         morningstar: xnys/tm,      markets: [sp500]}   # Toyota Motor Corp. Sponsor
+
   # --- Oversold across Europe, found by scanning ------------------------
   # Discovered rather than picked: 1,872 listings across fourteen European
   # markets, filtered to primary exchanges, deduplicated, held to EUR 1m of
@@ -315,7 +371,6 @@ tickers:
   - {symbol: MOZN,   tradingview: "SIX:MOZN",              morningstar: xswx/mozn,      yahoo: MOZN.SW,     currency: CHF, markets: [europe]}   # RSI 33
 
   # Stockholm
-  - {symbol: NEWAB,  tradingview: "OMXSTO:NEWA_B",         morningstar: xsto/newab,     yahoo: NEWA-B.ST,   currency: SEK, markets: [europe]}   # RSI 32
   - {symbol: SEYE,   tradingview: "OMXSTO:SEYE",           morningstar: xsto/seye,      yahoo: SEYE.ST,     currency: SEK, markets: [europe]}   # RSI 26
 
   # Oslo
@@ -323,14 +378,9 @@ tickers:
   - {symbol: XPLRA,  tradingview: "OSL:XPLRA",             morningstar: xosl/xplra,     yahoo: XPLRA.OL,    currency: NOK, markets: [europe]}   # RSI 29
 
   # Copenhagen
-  - {symbol: AMBUB,  tradingview: "OMXCOP:AMBU_B",         morningstar: xcse/ambub,     yahoo: AMBU-B.CO,   currency: DKK, markets: [europe]}   # RSI 32
 
   # London — quoted in PENCE (GBX)
-  - {symbol: CHG,    tradingview: "LSE:CHG",               morningstar: xlon/chg,       yahoo: CHG.L,       currency: GBX, markets: [europe]}   # RSI 34
-  - {symbol: CURY,   tradingview: "LSE:CURY",              morningstar: xlon/cury,      yahoo: CURY.L,      currency: GBX, markets: [europe]}   # RSI 32
-  - {symbol: RPI,    tradingview: "LSE:RPI",               morningstar: xlon/rpi,       yahoo: RPI.L,       currency: GBX, markets: [europe]}   # RSI 33
   - {symbol: RTO,    tradingview: "LSE:RTO",               morningstar: xlon/rto,       yahoo: RTO.L,       currency: GBX, markets: [europe]}   # RSI 33
-  - {symbol: TRN,    tradingview: "LSE:TRN",               morningstar: xlon/trn,       yahoo: TRN.L,       currency: GBX, markets: [europe]}   # RSI 33
 
   # --- Other European listings, traded in New York ----------------------
   # Novo Nordisk is Danish, but this is the NYSE ADR: quoted in dollars and
