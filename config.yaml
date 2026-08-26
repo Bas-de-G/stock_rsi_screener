@@ -279,6 +279,12 @@ tickers:
   # Currencies vary and the dashboard labels them: Zurich in CHF, Stockholm
   # SEK, Oslo NOK, Copenhagen DKK, and London in PENCE -- see the Rolls-Royce
   # note above for why GBX has to be explicit.
+  #
+  # Morningstar slugs: a scrape run on 2026-08-26 proved xpar, xetr, xswx and
+  # xams (ten values recorded), and xlon was already proven by Rolls-Royce.
+  # xmce/acs returned a 404 -- XMCE is Madrid's *segment* MIC and Morningstar
+  # keys on the operating one, so Madrid is xmad. Still unproven, because the
+  # run crashed before reaching them: xbru, xcse, xdub, xmil, xosl, xsto.
   # Paris
   - {symbol: CARM,   tradingview: "EURONEXT:CARM",         morningstar: xpar/carm,      yahoo: CARM.PA,     currency: EUR, markets: [europe]}   # RSI 31
   - {symbol: GLE,    tradingview: "EURONEXT:GLE",          morningstar: xpar/gle,       yahoo: GLE.PA,      currency: EUR, markets: [europe]}   # RSI 33
@@ -299,8 +305,8 @@ tickers:
   - {symbol: TGYM,   tradingview: "MIL:TGYM",              morningstar: xmil/tgym,      yahoo: TGYM.MI,     currency: EUR, markets: [europe]}   # RSI 30
 
   # Madrid
-  - {symbol: ACS,    tradingview: "BME:ACS",               morningstar: xmce/acs,       yahoo: ACS.MC,      currency: EUR, markets: [europe]}   # RSI 33
-  - {symbol: FER,    tradingview: "BME:FER",               morningstar: xmce/fer,       yahoo: FER.MC,      currency: EUR, markets: [europe]}   # RSI 31
+  - {symbol: ACS,    tradingview: "BME:ACS",               morningstar: xmad/acs,       yahoo: ACS.MC,      currency: EUR, markets: [europe]}   # RSI 33
+  - {symbol: FER,    tradingview: "BME:FER",               morningstar: xmad/fer,       yahoo: FER.MC,      currency: EUR, markets: [europe]}   # RSI 31
 
   # Zurich (SIX)
   - {symbol: ARYN,   tradingview: "SIX:ARYN",              morningstar: xswx/aryn,      yahoo: ARYN.SW,     currency: CHF, markets: [europe]}   # RSI 24
