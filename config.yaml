@@ -232,6 +232,31 @@ tickers:
   # unambiguous.
   - {symbol: FUR,   tradingview: "EURONEXT:FUR",   morningstar: xams/fur,   yahoo: FUR.AS,   currency: EUR, markets: [europe]}
 
+  # --- Frankfurt (Xetra) -------------------------------------------------
+  # TradingView's prefix is XETR:, and every one of these also resolves under
+  # FWB: (the Frankfurt floor) and GETTEX: at slightly different prices. Xetra
+  # is the reference market and carries the volume, so it is the one to use.
+  # Closes 17:30 CET, so these are settled daily bars like Amsterdam's.
+  - {symbol: SAP,   tradingview: "XETR:SAP",   morningstar: xetr/sap,   yahoo: SAP.DE,   currency: EUR, markets: [europe]}
+  - {symbol: DEZ,   tradingview: "XETR:DEZ",   morningstar: xetr/dez,   yahoo: DEZ.DE,   currency: EUR, markets: [europe]}
+  - {symbol: MLP,   tradingview: "XETR:MLP",   morningstar: xetr/mlp,   yahoo: MLP.DE,   currency: EUR, markets: [europe]}
+  - {symbol: HFG,   tradingview: "XETR:HFG",   morningstar: xetr/hfg,   yahoo: HFG.DE,   currency: EUR, markets: [europe]}
+  - {symbol: PNE3,  tradingview: "XETR:PNE3",  morningstar: xetr/pne3,  yahoo: PNE3.DE,  currency: EUR, markets: [europe]}
+
+  # --- Paris --------------------------------------------------------------
+  - {symbol: SESG,  tradingview: "EURONEXT:SESG", morningstar: xpar/sesg, yahoo: SESG.PA, currency: EUR, markets: [europe]}
+  - {symbol: ITP,   tradingview: "EURONEXT:ITP",  morningstar: xpar/itp,  yahoo: ITP.PA,  currency: EUR, markets: [europe]}
+  - {symbol: PLX,   tradingview: "EURONEXT:PLX",  morningstar: xpar/plx,  yahoo: PLX.PA,  currency: EUR, markets: [europe]}
+
+  # --- Milan --------------------------------------------------------------
+  - {symbol: MAIRE, tradingview: "MIL:MAIRE", morningstar: xmil/maire, yahoo: MAIRE.MI, currency: EUR, markets: [europe]}
+
+  # --- Dublin -------------------------------------------------------------
+  # Kingspan is EURONEXT:KRX. Worth stating because EURONEXT:KRZ, one letter
+  # away, is Kerry Group -- a different company at a different price, and it
+  # resolves perfectly happily.
+  - {symbol: KRX,   tradingview: "EURONEXT:KRX", morningstar: xdub/krx, yahoo: KRX.IR, currency: EUR, markets: [europe]}
+
   # --- Other European listings, traded in New York ----------------------
   # Novo Nordisk is Danish, but this is the NYSE ADR: quoted in dollars and
   # covered by Morningstar's US site, which avoids the pence/pounds class of
@@ -239,6 +264,17 @@ tickers:
   - {symbol: NVO,   tradingview: "NYSE:NVO",     morningstar: xnys/nvo, markets: [europe]}
   # Bending Spoons (Evernote, WeTransfer, Meetup) listed on Nasdaq as BSP.
   - {symbol: BSP,   tradingview: "NASDAQ:BSP",   morningstar: xnas/bsp, markets: [europe, nasdaq]}
+  # BioNTech is German (Mainz) but its primary listing is the Nasdaq ADR.
+  # XETR:22UA is the same ADR cross-listed in Frankfurt on a twentieth of the
+  # volume -- 101k shares a day against 2.2m -- so the Nasdaq line is the price.
+  - {symbol: BNTX,  tradingview: "NASDAQ:BNTX",  morningstar: xnas/bntx, markets: [europe, nasdaq]}
+
+  # --- US, added alongside the European batch ----------------------------
+  # Beyond Meat is a US company; MIL:1BYND is a Milan cross-listing averaging
+  # 1,799 shares a day against Nasdaq's 2.5m, so it is priced but not traded.
+  # Filed under nasdaq rather than europe for the same reason the listing was
+  # swapped: the exchange a share is quoted on is not where the company is.
+  - {symbol: BYND,  tradingview: "NASDAQ:BYND",  morningstar: xnas/bynd, markets: [nasdaq]}
 
   # --- Asia -------------------------------------------------------------
   # BYD's Hong Kong primary listing, quoted in Hong Kong dollars. The US
