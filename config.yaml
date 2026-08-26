@@ -232,6 +232,100 @@ tickers:
   # unambiguous.
   - {symbol: FUR,   tradingview: "EURONEXT:FUR",   morningstar: xams/fur,   yahoo: FUR.AS,   currency: EUR, markets: [europe]}
 
+  # --- Frankfurt (Xetra) -------------------------------------------------
+  # TradingView's prefix is XETR:, and every one of these also resolves under
+  # FWB: (the Frankfurt floor) and GETTEX: at slightly different prices. Xetra
+  # is the reference market and carries the volume, so it is the one to use.
+  # Closes 17:30 CET, so these are settled daily bars like Amsterdam's.
+  - {symbol: SAP,   tradingview: "XETR:SAP",   morningstar: xetr/sap,   yahoo: SAP.DE,   currency: EUR, markets: [europe]}
+  - {symbol: DEZ,   tradingview: "XETR:DEZ",   morningstar: xetr/dez,   yahoo: DEZ.DE,   currency: EUR, markets: [europe]}
+  - {symbol: MLP,   tradingview: "XETR:MLP",   morningstar: xetr/mlp,   yahoo: MLP.DE,   currency: EUR, markets: [europe]}
+  - {symbol: HFG,   tradingview: "XETR:HFG",   morningstar: xetr/hfg,   yahoo: HFG.DE,   currency: EUR, markets: [europe]}
+  - {symbol: PNE3,  tradingview: "XETR:PNE3",  morningstar: xetr/pne3,  yahoo: PNE3.DE,  currency: EUR, markets: [europe]}
+
+  # --- Paris --------------------------------------------------------------
+  - {symbol: SESG,  tradingview: "EURONEXT:SESG", morningstar: xpar/sesg, yahoo: SESG.PA, currency: EUR, markets: [europe]}
+  - {symbol: ITP,   tradingview: "EURONEXT:ITP",  morningstar: xpar/itp,  yahoo: ITP.PA,  currency: EUR, markets: [europe]}
+  - {symbol: PLX,   tradingview: "EURONEXT:PLX",  morningstar: xpar/plx,  yahoo: PLX.PA,  currency: EUR, markets: [europe]}
+
+  # --- Milan --------------------------------------------------------------
+  - {symbol: MAIRE, tradingview: "MIL:MAIRE", morningstar: xmil/maire, yahoo: MAIRE.MI, currency: EUR, markets: [europe]}
+
+  # --- Dublin -------------------------------------------------------------
+  # Kingspan is EURONEXT:KRX. Worth stating because EURONEXT:KRZ, one letter
+  # away, is Kerry Group -- a different company at a different price, and it
+  # resolves perfectly happily.
+  - {symbol: KRX,   tradingview: "EURONEXT:KRX", morningstar: xdub/krx, yahoo: KRX.IR, currency: EUR, markets: [europe]}
+
+  # --- Oversold across Europe, found by scanning ------------------------
+  # Discovered rather than picked: 1,872 listings across fourteen European
+  # markets, filtered to primary exchanges, deduplicated, held to EUR 1m of
+  # stock traded a day, and ranked by daily RSI. These were the 25 most
+  # oversold that survived.
+  #
+  # Three filters earned their place, and each removed something the eye
+  # would have accepted:
+  #
+  #   * LSE's 0Lxx/0Yxx codes are its international depositary board -- Trade
+  #     Desk and Broadcom both showed up as "oversold UK stocks".
+  #   * A company appearing in two markets is a cross-listing, and the thin
+  #     line carries a stale price. SANOFI reads RSI 21 in Zurich and 59.8 in
+  #     Paris, where thirteen times the volume trades. It is not oversold.
+  #     Ferrovial passes the same test the other way -- Madrid has 112x the
+  #     volume of its Amsterdam line -- so BME:FER is the one kept.
+  #   * Turnover converted to euros before the liquidity floor. A Stockholm
+  #     name at "62,807 a day" is EUR 5.6k, not EUR 62k.
+  #
+  # Currencies vary and the dashboard labels them: Zurich in CHF, Stockholm
+  # SEK, Oslo NOK, Copenhagen DKK, and London in PENCE -- see the Rolls-Royce
+  # note above for why GBX has to be explicit.
+  # Paris
+  - {symbol: CARM,   tradingview: "EURONEXT:CARM",         morningstar: xpar/carm,      yahoo: CARM.PA,     currency: EUR, markets: [europe]}   # RSI 31
+  - {symbol: GLE,    tradingview: "EURONEXT:GLE",          morningstar: xpar/gle,       yahoo: GLE.PA,      currency: EUR, markets: [europe]}   # RSI 33
+  - {symbol: SPIE,   tradingview: "EURONEXT:SPIE",         morningstar: xpar/spie,      yahoo: SPIE.PA,     currency: EUR, markets: [europe]}   # RSI 33
+
+  # Amsterdam
+  - {symbol: CTPNV,  tradingview: "EURONEXT:CTPNV",        morningstar: xams/ctpnv,     yahoo: CTPNV.AS,    currency: EUR, markets: [europe]}   # RSI 33
+
+  # Brussels
+  - {symbol: GBLB,   tradingview: "EURONEXT:GBLB",         morningstar: xbru/gblb,      yahoo: GBLB.BR,     currency: EUR, markets: [europe]}   # RSI 34
+
+  # Frankfurt (Xetra)
+  - {symbol: EKT,    tradingview: "XETR:EKT",              morningstar: xetr/ekt,       yahoo: EKT.DE,      currency: EUR, markets: [europe]}   # RSI 29
+  - {symbol: EUZ,    tradingview: "XETR:EUZ",              morningstar: xetr/euz,       yahoo: EUZ.DE,      currency: EUR, markets: [europe]}   # RSI 32
+  - {symbol: PUM,    tradingview: "XETR:PUM",              morningstar: xetr/pum,       yahoo: PUM.DE,      currency: EUR, markets: [europe]}   # RSI 33
+
+  # Milan
+  - {symbol: TGYM,   tradingview: "MIL:TGYM",              morningstar: xmil/tgym,      yahoo: TGYM.MI,     currency: EUR, markets: [europe]}   # RSI 30
+
+  # Madrid
+  - {symbol: ACS,    tradingview: "BME:ACS",               morningstar: xmce/acs,       yahoo: ACS.MC,      currency: EUR, markets: [europe]}   # RSI 33
+  - {symbol: FER,    tradingview: "BME:FER",               morningstar: xmce/fer,       yahoo: FER.MC,      currency: EUR, markets: [europe]}   # RSI 31
+
+  # Zurich (SIX)
+  - {symbol: ARYN,   tradingview: "SIX:ARYN",              morningstar: xswx/aryn,      yahoo: ARYN.SW,     currency: CHF, markets: [europe]}   # RSI 24
+  - {symbol: BKW,    tradingview: "SIX:BKW",               morningstar: xswx/bkw,       yahoo: BKW.SW,      currency: CHF, markets: [europe]}   # RSI 28
+  - {symbol: HUBN,   tradingview: "SIX:HUBN",              morningstar: xswx/hubn,      yahoo: HUBN.SW,     currency: CHF, markets: [europe]}   # RSI 33
+  - {symbol: MOZN,   tradingview: "SIX:MOZN",              morningstar: xswx/mozn,      yahoo: MOZN.SW,     currency: CHF, markets: [europe]}   # RSI 33
+
+  # Stockholm
+  - {symbol: NEWAB,  tradingview: "OMXSTO:NEWA_B",         morningstar: xsto/newab,     yahoo: NEWA-B.ST,   currency: SEK, markets: [europe]}   # RSI 32
+  - {symbol: SEYE,   tradingview: "OMXSTO:SEYE",           morningstar: xsto/seye,      yahoo: SEYE.ST,     currency: SEK, markets: [europe]}   # RSI 26
+
+  # Oslo
+  - {symbol: ORK,    tradingview: "OSL:ORK",               morningstar: xosl/ork,       yahoo: ORK.OL,      currency: NOK, markets: [europe]}   # RSI 27
+  - {symbol: XPLRA,  tradingview: "OSL:XPLRA",             morningstar: xosl/xplra,     yahoo: XPLRA.OL,    currency: NOK, markets: [europe]}   # RSI 29
+
+  # Copenhagen
+  - {symbol: AMBUB,  tradingview: "OMXCOP:AMBU_B",         morningstar: xcse/ambub,     yahoo: AMBU-B.CO,   currency: DKK, markets: [europe]}   # RSI 32
+
+  # London — quoted in PENCE (GBX)
+  - {symbol: CHG,    tradingview: "LSE:CHG",               morningstar: xlon/chg,       yahoo: CHG.L,       currency: GBX, markets: [europe]}   # RSI 34
+  - {symbol: CURY,   tradingview: "LSE:CURY",              morningstar: xlon/cury,      yahoo: CURY.L,      currency: GBX, markets: [europe]}   # RSI 32
+  - {symbol: RPI,    tradingview: "LSE:RPI",               morningstar: xlon/rpi,       yahoo: RPI.L,       currency: GBX, markets: [europe]}   # RSI 33
+  - {symbol: RTO,    tradingview: "LSE:RTO",               morningstar: xlon/rto,       yahoo: RTO.L,       currency: GBX, markets: [europe]}   # RSI 33
+  - {symbol: TRN,    tradingview: "LSE:TRN",               morningstar: xlon/trn,       yahoo: TRN.L,       currency: GBX, markets: [europe]}   # RSI 33
+
   # --- Other European listings, traded in New York ----------------------
   # Novo Nordisk is Danish, but this is the NYSE ADR: quoted in dollars and
   # covered by Morningstar's US site, which avoids the pence/pounds class of
@@ -239,6 +333,17 @@ tickers:
   - {symbol: NVO,   tradingview: "NYSE:NVO",     morningstar: xnys/nvo, markets: [europe]}
   # Bending Spoons (Evernote, WeTransfer, Meetup) listed on Nasdaq as BSP.
   - {symbol: BSP,   tradingview: "NASDAQ:BSP",   morningstar: xnas/bsp, markets: [europe, nasdaq]}
+  # BioNTech is German (Mainz) but its primary listing is the Nasdaq ADR.
+  # XETR:22UA is the same ADR cross-listed in Frankfurt on a twentieth of the
+  # volume -- 101k shares a day against 2.2m -- so the Nasdaq line is the price.
+  - {symbol: BNTX,  tradingview: "NASDAQ:BNTX",  morningstar: xnas/bntx, markets: [europe, nasdaq]}
+
+  # --- US, added alongside the European batch ----------------------------
+  # Beyond Meat is a US company; MIL:1BYND is a Milan cross-listing averaging
+  # 1,799 shares a day against Nasdaq's 2.5m, so it is priced but not traded.
+  # Filed under nasdaq rather than europe for the same reason the listing was
+  # swapped: the exchange a share is quoted on is not where the company is.
+  - {symbol: BYND,  tradingview: "NASDAQ:BYND",  morningstar: xnas/bynd, markets: [nasdaq]}
 
   # --- Asia -------------------------------------------------------------
   # BYD's Hong Kong primary listing, quoted in Hong Kong dollars. The US
