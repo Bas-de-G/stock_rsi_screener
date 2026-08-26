@@ -512,6 +512,10 @@ GLW:
   fair_value: 155.0
   checked: '2026-08-19'
   source: scraped
+GM:
+  fair_value: 86.0
+  checked: '2026-08-26'
+  source: scraped
 GOOGL:
   fair_value: 433.0
   checked: '2026-08-18'
@@ -952,6 +956,10 @@ QCOM:
   fair_value: 170.0
   checked: '2026-08-18'
   source: scraped
+RACE:
+  fair_value: 416.0
+  checked: '2026-08-26'
+  source: scraped
 RAND:
   fair_value: 31.5
   checked: '2026-08-18'
@@ -1095,6 +1103,10 @@ TGYM:
 TJX:
   fair_value: 125.0
   checked: '2026-08-19'
+  source: scraped
+TM:
+  fair_value: 237.0
+  checked: '2026-08-26'
   source: scraped
 TMO:
   fair_value: 560.0
