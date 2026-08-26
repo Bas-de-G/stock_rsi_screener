@@ -59,7 +59,9 @@ MORNINGSTAR_MIC = {
     "XETR": "xetr",
     "LSE": "xlon",
     "OMXSTO": "xsto",
-    "BME": "xmce",
+    # XMCE is Madrid's *segment* MIC (the Mercado Continuo); Morningstar keys
+    # its URLs on the operating MIC, and xmce/acs returns a 404 page.
+    "BME": "xmad",
     "SIX": "xswx",
     "HKEX": "xhkg",
 }
