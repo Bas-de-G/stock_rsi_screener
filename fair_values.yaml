@@ -196,6 +196,10 @@ BMY:
   fair_value: 70.0
   checked: '2026-08-20'
   source: scraped
+BNTX:
+  fair_value: 76.0
+  checked: '2026-08-26'
+  source: scraped
 BNY:
   fair_value: 135.0
   checked: '2026-08-19'
@@ -215,6 +219,10 @@ BX:
 BYD:
   fair_value: 107.0
   checked: '2026-08-19'
+  source: scraped
+BYND:
+  fair_value: 20.32
+  checked: '2026-08-26'
   source: scraped
 C:
   fair_value: 129.0
@@ -780,6 +788,10 @@ ORCL:
   fair_value: 207.0
   checked: '2026-08-18'
   source: scraped
+ORK:
+  fair_value: 111.37
+  checked: '2026-08-26'
+  source: scraped
 PANW:
   fair_value: 285.0
   checked: '2026-08-19'
@@ -904,6 +916,10 @@ RR:
   fair_value: 1520.0
   checked: '2026-08-19'
   source: scraped
+RTO:
+  fair_value: 510.0
+  checked: '2026-08-26'
+  source: scraped
 RTX:
   fair_value: 214.0
   checked: '2026-08-19'
@@ -922,6 +938,10 @@ SCHW:
   source: scraped
 SESG:
   fair_value: 5.38
+  checked: '2026-08-26'
+  source: scraped
+SEYE:
+  fair_value: 91.86
   checked: '2026-08-26'
   source: scraped
 SHOP:
@@ -1103,6 +1123,10 @@ XIAOMI:
 XOM:
   fair_value: 156.0
   checked: '2026-08-19'
+  source: scraped
+XPLRA:
+  fair_value: 25.81
+  checked: '2026-08-26'
   source: scraped
 XYL:
   fair_value: 129.0
