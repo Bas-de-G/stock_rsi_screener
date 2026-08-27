@@ -343,8 +343,10 @@ def test_max_age_narrows_the_window(config):
     assert _drop_recently_checked(config, tickers, scrape_args(max_age=10))[0] == []
 
 
-def test_the_default_window_is_two_weeks():
-    assert DEFAULT_MAX_FAIR_VALUE_AGE_DAYS == 14
+def test_the_default_window_is_forty_days():
+    # Long enough to skip most of a quarter's re-reads, short enough that every
+    # name is still checked at least twice between earnings.
+    assert DEFAULT_MAX_FAIR_VALUE_AGE_DAYS == 40
 
 
 def test_the_freshness_filter_is_separate_from_symbol_resolution(store, config):

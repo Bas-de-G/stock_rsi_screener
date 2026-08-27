@@ -241,7 +241,7 @@ overrides whatever the page said. The same reference disambiguates the fair
 value: a candidate more than 10x off the real price is a parse error, not a
 valuation — that's what fixed UNH reading $16 against a $409 price.
 
-**`scrape` skips fair values checked within 14 days** (`--force` overrides,
+**`scrape` skips fair values checked within 40 days** (`--force` overrides,
 `--max-age` retunes). Kept in `_drop_recently_checked`, deliberately separate
 from `_resolve_scrape_targets`, so "you named a symbol that doesn't exist"
 stays distinguishable from "that one is still fresh" — the first is a non-zero
