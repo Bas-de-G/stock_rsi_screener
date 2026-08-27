@@ -556,6 +556,23 @@ tickers:
   - {symbol: NSC, tradingview: "NYSE:NSC", morningstar: xnys/nsc, markets: [sp500]}
   - {symbol: ROST, tradingview: "NASDAQ:ROST", morningstar: xnas/rost, markets: [sp500, nasdaq]}
 
+  # Ten names filling the seven thinnest sectors, by TradingView's taxonomy --
+  # the one the screener actually reads. Counts before -> after:
+  #   Distribution Services 5 -> 7    Industrial Services  9 -> 10
+  #   Health Services       8 -> 10   Non-Energy Minerals  8 ->  9
+  #   Consumer Durables     8 -> 10   Energy Minerals      9 -> 10
+  #   Transportation        9 -> 10
+  - {symbol: FERG, tradingview: "NYSE:FERG", morningstar: xnys/ferg, markets: [sp500]}
+  - {symbol: SYY,  tradingview: "NYSE:SYY",  morningstar: xnys/syy,  markets: [sp500]}
+  - {symbol: DGX,  tradingview: "NYSE:DGX",  morningstar: xnys/dgx,  markets: [sp500]}
+  - {symbol: EHC,  tradingview: "NYSE:EHC",  morningstar: xnys/ehc,  markets: [sp500]}
+  - {symbol: F,    tradingview: "NYSE:F",    morningstar: xnys/f,    markets: [sp500]}
+  - {symbol: DHI,  tradingview: "NYSE:DHI",  morningstar: xnys/dhi,  markets: [sp500]}
+  - {symbol: ODFL, tradingview: "NASDAQ:ODFL", morningstar: xnas/odfl, markets: [sp500, nasdaq]}
+  - {symbol: RSG,  tradingview: "NYSE:RSG",  morningstar: xnys/rsg,  markets: [sp500]}
+  - {symbol: CRH,  tradingview: "NYSE:CRH",  morningstar: xnys/crh,  markets: [sp500]}
+  - {symbol: OXY,  tradingview: "NYSE:OXY",  morningstar: xnys/oxy,  markets: [sp500]}
+
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView
 # and Yahoo actually accept -- but these three are:

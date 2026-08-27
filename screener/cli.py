@@ -842,7 +842,12 @@ def _ranked_targets(store: Store, config: Config) -> list[tuple[str, int, str]]:
 # roughly quarterly. Re-reading the same page days later almost always returns
 # the number already on file, so it is wasted requests against a logged-in
 # session on a paid product.
-DEFAULT_MAX_FAIR_VALUE_AGE_DAYS = 14
+#
+# 40 days, not the 14 this started at: 40 still re-reads every name at least
+# twice between earnings, which is as often as the number can actually move,
+# while cutting the pages a full sweep costs by roughly two thirds. Raising it
+# past ~45 would risk a whole quarter passing unchecked.
+DEFAULT_MAX_FAIR_VALUE_AGE_DAYS = 40
 
 
 def _fresh_fair_values(config: Config, max_age_days: int) -> dict[str, int]:

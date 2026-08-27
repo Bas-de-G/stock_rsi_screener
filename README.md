@@ -617,10 +617,10 @@ look at the diff first:
 git diff fair_values.yaml
 ```
 
-**It skips anything checked in the last 14 days.** Morningstar revises a fair
-value on earnings or a thesis change, so re-reading the same page days later
-almost always returns the number already on file. `--force` re-reads anyway,
-`--max-age N` changes the window.
+**It skips anything checked in the last 40 days.** Morningstar revises a fair
+value on earnings or a thesis change — roughly quarterly — so re-reading the
+same page days later almost always returns the number already on file.
+`--force` re-reads anyway, `--max-age N` changes the window for one run.
 
 Add `--push` to commit and push automatically when you trust it. Either way,
 once the file lands on `main` the next scheduled run rebuilds the dashboard —
