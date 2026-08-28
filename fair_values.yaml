@@ -316,6 +316,10 @@ COST:
   fair_value: 740.0
   checked: '2026-08-19'
   source: scraped
+CRH:
+  fair_value: 105.0
+  checked: '2026-08-27'
+  source: scraped
 CRM:
   fair_value: 280.0
   checked: '2026-08-20'
@@ -380,6 +384,10 @@ DG:
   fair_value: 126.0
   checked: '2026-08-27'
   source: scraped
+DGX:
+  fair_value: 204.0
+  checked: '2026-08-27'
+  source: scraped
 DHR:
   fair_value: 247.0
   checked: '2026-08-19'
@@ -403,6 +411,10 @@ DXCM:
 ECL:
   fair_value: 305.0
   checked: '2026-08-24'
+  source: scraped
+EHC:
+  fair_value: 131.94
+  checked: '2026-08-27'
   source: scraped
 EKT:
   fair_value: 30.63
@@ -463,6 +475,10 @@ FDX:
 FER:
   fair_value: 80.0
   checked: '2026-08-26'
+  source: scraped
+FERG:
+  fair_value: 235.0
+  checked: '2026-08-27'
   source: scraped
 FISV:
   fair_value: 106.0
@@ -844,6 +860,10 @@ O:
   fair_value: 72.0
   checked: '2026-08-19'
   source: scraped
+ODFL:
+  fair_value: 156.0
+  checked: '2026-08-27'
+  source: scraped
 OGN:
   fair_value: 12.73
   checked: '2026-08-19'
@@ -859,6 +879,10 @@ ORCL:
 ORK:
   fair_value: 111.37
   checked: '2026-08-26'
+  source: scraped
+OXY:
+  fair_value: 62.0
+  checked: '2026-08-27'
   source: scraped
 PANW:
   fair_value: 285.0
@@ -996,6 +1020,10 @@ RR:
   fair_value: 1520.0
   checked: '2026-08-19'
   source: scraped
+RSG:
+  fair_value: 208.0
+  checked: '2026-08-27'
+  source: scraped
 RTO:
   fair_value: 510.0
   checked: '2026-08-26'
@@ -1083,6 +1111,10 @@ STX:
 SW:
   fair_value: 62.87
   checked: '2026-08-26'
+  source: scraped
+SYY:
+  fair_value: 86.0
+  checked: '2026-08-27'
   source: scraped
 T:
   fair_value: 27.0
