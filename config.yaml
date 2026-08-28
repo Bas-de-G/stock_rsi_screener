@@ -573,6 +573,38 @@ tickers:
   - {symbol: CRH,  tradingview: "NYSE:CRH",  morningstar: xnys/crh,  markets: [sp500]}
   - {symbol: OXY,  tradingview: "NYSE:OXY",  morningstar: xnys/oxy,  markets: [sp500]}
 
+  # Twenty more for the nine thinnest sectors. The tail had flattened to a
+  # block of sevens at 10, so this lifts almost all of them to 12:
+  #   Distribution Services 7 -> 10   Process Industries  10 -> 12
+  #   Non-Energy Minerals   9 -> 12   Energy Minerals     10 -> 12
+  #   Consumer Durables    10 -> 12   Industrial Services 10 -> 12
+  #   Transportation       10 -> 12   Communications      10 -> 12
+  #   Health Services      10 -> 12
+  - {symbol: USFD, tradingview: "NYSE:USFD", morningstar: xnys/usfd, markets: [sp500]}
+  - {symbol: GPC,  tradingview: "NYSE:GPC",  morningstar: xnys/gpc,  markets: [sp500]}
+  - {symbol: HSIC, tradingview: "NASDAQ:HSIC", morningstar: xnas/hsic, markets: [sp500, nasdaq]}
+  - {symbol: VMC,  tradingview: "NYSE:VMC",  morningstar: xnys/vmc,  markets: [sp500]}
+  - {symbol: STLD, tradingview: "NASDAQ:STLD", morningstar: xnas/stld, markets: [sp500, nasdaq]}
+  - {symbol: MLM,  tradingview: "NYSE:MLM",  morningstar: xnys/mlm,  markets: [sp500]}
+  - {symbol: LEN,  tradingview: "NYSE:LEN",  morningstar: xnys/len,  markets: [sp500]}
+  - {symbol: SWK,  tradingview: "NYSE:SWK",  morningstar: xnys/swk,  markets: [sp500]}
+  - {symbol: DAL,  tradingview: "NYSE:DAL",  morningstar: xnys/dal,  markets: [sp500]}
+  - {symbol: JBHT, tradingview: "NASDAQ:JBHT", morningstar: xnas/jbht, markets: [sp500, nasdaq]}
+  - {symbol: THC,  tradingview: "NYSE:THC",  morningstar: xnys/thc,  markets: [sp500]}
+  - {symbol: SOLV, tradingview: "NYSE:SOLV", morningstar: xnys/solv, markets: [sp500]}
+  - {symbol: PPG,  tradingview: "NYSE:PPG",  morningstar: xnys/ppg,  markets: [sp500]}
+  - {symbol: DOW,  tradingview: "NYSE:DOW",  morningstar: xnys/dow,  markets: [sp500]}
+  - {symbol: FANG, tradingview: "NASDAQ:FANG", morningstar: xnas/fang, markets: [sp500, nasdaq]}
+  - {symbol: DVN,  tradingview: "NYSE:DVN",  morningstar: xnys/dvn,  markets: [sp500]}
+  - {symbol: BKR,  tradingview: "NASDAQ:BKR", morningstar: xnas/bkr, markets: [sp500, nasdaq]}
+  - {symbol: OKE,  tradingview: "NYSE:OKE",  morningstar: xnys/oke,  markets: [sp500]}
+  # Communications had no large US candidate that wasn't a pre-revenue satellite
+  # play, so the two here are European incumbents on proven slugs. Both NEED the
+  # explicit yahoo field: bare DTE is DTE Energy ($136) and bare ORA is Ormat
+  # ($105) -- different companies that would have loaded silently.
+  - {symbol: DTE,  tradingview: "XETR:DTE",     morningstar: xetr/dte, yahoo: DTE.DE, currency: EUR, markets: [europe]}
+  - {symbol: ORA,  tradingview: "EURONEXT:ORA", morningstar: xpar/ora, yahoo: ORA.PA, currency: EUR, markets: [europe]}   # RSI 29
+
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView
 # and Yahoo actually accept -- but these three are:
