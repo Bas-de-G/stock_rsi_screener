@@ -223,8 +223,24 @@ dashboard:
     return load_config(path)
 
 
+def _sessions_ahead(sessions: int) -> dt.date:
+    """The date `sessions` trading days from today, skipping weekends.
+
+    Not `today + timedelta(days=n)`: that is only the same thing from Monday to
+    Thursday. Seeded from a Friday it lands on the weekend, which `sessions_until`
+    correctly counts as zero sessions away -- so a test seeding "one day out" and
+    asserting the card reads "Earnings tomorrow" failed every Friday and Saturday.
+    """
+    day = dt.date.today()
+    for _ in range(sessions):
+        day += dt.timedelta(days=1)
+        while day.weekday() >= 5:
+            day += dt.timedelta(days=1)
+    return day
+
+
 def _seed(store, reports_in_days: int | None):
-    """A fresh, strong, deeply discounted buy — and results `reports_in_days` away."""
+    """A fresh, strong, deeply discounted buy — and results that many sessions away."""
     from screener.storage import RsiPoint, Signal, Valuation
 
     now = dt.datetime.now()
@@ -239,7 +255,7 @@ def _seed(store, reports_in_days: int | None):
     ))
     store.upsert_valuation(Valuation("PTON", "2026-08-10", 5.45, 7.81, "2026-08-10", "manual"))
     if reports_in_days is not None:
-        release = dt.date.today() + dt.timedelta(days=reports_in_days)
+        release = _sessions_ahead(reports_in_days)
         store.upsert_earnings("PTON", release.isoformat(), None, None)
 
 
