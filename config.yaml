@@ -605,6 +605,35 @@ tickers:
   - {symbol: DTE,  tradingview: "XETR:DTE",     morningstar: xetr/dte, yahoo: DTE.DE, currency: EUR, markets: [europe]}
   - {symbol: ORA,  tradingview: "EURONEXT:ORA", morningstar: xpar/ora, yahoo: ORA.PA, currency: EUR, markets: [europe]}   # RSI 29
 
+  # Twenty more, flattening what is left of the tail. Nine sectors were level
+  # at 12; this takes the bottom of the watchlist to a 12-15 band:
+  #   Distribution Services 10 -> 12   Energy Minerals     12 -> 13
+  #   Consumer Services     11 -> 14   Industrial Services 12 -> 13
+  #   Consumer Durables     12 -> 14   Utilities           12 -> 14
+  #   Transportation        12 -> 14   Communications      12 -> 13
+  #   Health Services       12 -> 13   Non-Energy Minerals 12 -> 13
+  #   Process Industries    12 -> 14   Commercial Services 13 -> 15
+  - {symbol: CNM,  tradingview: "NYSE:CNM",  morningstar: xnys/cnm,  markets: [sp500]}   # RSI 37
+  - {symbol: AVT,  tradingview: "NASDAQ:AVT", morningstar: xnas/avt, markets: [sp500, nasdaq]}
+  - {symbol: HLT,  tradingview: "NYSE:HLT",  morningstar: xnys/hlt,  markets: [sp500]}
+  - {symbol: YUM,  tradingview: "NYSE:YUM",  morningstar: xnys/yum,  markets: [sp500]}
+  - {symbol: LYV,  tradingview: "NYSE:LYV",  morningstar: xnys/lyv,  markets: [sp500]}
+  - {symbol: PHM,  tradingview: "NYSE:PHM",  morningstar: xnys/phm,  markets: [sp500]}
+  - {symbol: STLA, tradingview: "NYSE:STLA", morningstar: xnys/stla, markets: [sp500]}
+  - {symbol: UAL,  tradingview: "NASDAQ:UAL", morningstar: xnas/ual, markets: [sp500, nasdaq]}   # RSI 37
+  - {symbol: CP,   tradingview: "NYSE:CP",   morningstar: xnys/cp,   markets: [sp500]}
+  - {symbol: UHS,  tradingview: "NYSE:UHS",  morningstar: xnys/uhs,  markets: [sp500]}
+  - {symbol: IP,   tradingview: "NYSE:IP",   morningstar: xnys/ip,   markets: [sp500]}
+  - {symbol: LYB,  tradingview: "NYSE:LYB",  morningstar: xnys/lyb,  markets: [sp500]}
+  - {symbol: SHEL, tradingview: "NYSE:SHEL", morningstar: xnys/shel, markets: [sp500]}
+  - {symbol: KMI,  tradingview: "NYSE:KMI",  morningstar: xnys/kmi,  markets: [sp500]}
+  - {symbol: XEL,  tradingview: "NASDAQ:XEL", morningstar: xnas/xel, markets: [sp500, nasdaq]}   # RSI 40
+  - {symbol: EXC,  tradingview: "NASDAQ:EXC", morningstar: xnas/exc, markets: [sp500, nasdaq]}   # RSI 37
+  - {symbol: TU,   tradingview: "NYSE:TU",   morningstar: xnys/tu,   markets: [sp500]}   # RSI 41
+  - {symbol: MT,   tradingview: "NYSE:MT",   morningstar: xnys/mt,   markets: [sp500]}
+  - {symbol: EFX,  tradingview: "NYSE:EFX",  morningstar: xnys/efx,  markets: [sp500]}
+  - {symbol: ROL,  tradingview: "NYSE:ROL",  morningstar: xnys/rol,  markets: [sp500]}   # RSI 38
+
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView
 # and Yahoo actually accept -- but these three are:

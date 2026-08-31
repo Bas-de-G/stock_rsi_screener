@@ -27,6 +27,7 @@ from screener.ruleone import (
     big_four,
     evaluate,
     from_scanner,
+    eps_in_quote_currency,
     future_pe,
     growth_rate,
     implied_growth,
@@ -318,6 +319,62 @@ def test_a_scanner_row_evaluates_directly():
 
 def test_a_scanner_row_missing_everything_is_refused():
     assert not from_scanner({}).applicable
+
+
+# ------------------------------------------------- EPS in the price's currency
+#
+# TradingView reports fundamentals in the company's reporting currency (USD for
+# almost everything) while `close` is in the listing currency. Dividing one into
+# the other made Rentokil's sticker 0.71 against a price of 345.70 -- dollars of
+# earnings over pence of price.
+
+
+def _row(**over):
+    row = {
+        "close": 345.70,
+        "earnings_per_share_diluted_ttm": 0.18626,   # USD
+        "price_earnings_ttm": 24.605,                # GBX price over GBX EPS
+        "currency": "GBX",
+        "fundamental_currency_code": "USD",
+        "earnings_per_share_diluted_yoy_growth_ttm": 6.0,
+        "earnings_per_share_diluted_yoy_growth_fy": 5.0,
+        "total_revenue_yoy_growth_ttm": 4.0,
+    }
+    row.update(over)
+    return row
+
+
+def test_eps_is_converted_into_the_currency_the_price_is_quoted_in():
+    # close / pe is the local EPS: 345.70 / 24.605 = 14.05 pence, not $0.186.
+    assert eps_in_quote_currency(_row()) == pytest.approx(14.050, rel=1e-3)
+
+
+def test_the_sticker_lands_in_the_same_units_as_the_price():
+    """The bug this guards: a sticker three orders of magnitude below the price."""
+    reading = from_scanner(_row(), price=345.70)
+    assert reading.applicable
+    assert reading.sticker > 1.0, "a 345.70 stock cannot have a sticker under a penny"
+    assert 10 < reading.sticker < 345.70, "still far below the price, but in pence"
+
+
+def test_a_row_already_in_its_own_currency_is_left_alone():
+    row = _row(currency="USD", fundamental_currency_code="USD",
+               close=46.51, earnings_per_share_diluted_ttm=3.9, price_earnings_ttm=11.9)
+    assert eps_in_quote_currency(row) == 3.9, "no P/E round-trip when none is needed"
+
+
+def test_a_loss_maker_passes_through_so_the_reason_stays_accurate():
+    """Vodafone: negative EPS, no P/E to convert with. The refusal must still
+    say the earnings are the problem, not that the figure is missing."""
+    row = _row(earnings_per_share_diluted_ttm=-0.023, price_earnings_ttm=None)
+    assert eps_in_quote_currency(row) == -0.023
+    assert from_scanner(row).reason == "no positive earnings to project"
+
+
+def test_a_foreign_row_with_no_pe_is_refused_rather_than_guessed():
+    row = _row(price_earnings_ttm=None)
+    assert eps_in_quote_currency(row) is None
+    assert not from_scanner(row).applicable
 
 
 # ------------------------------------------- how the page uses the reading
