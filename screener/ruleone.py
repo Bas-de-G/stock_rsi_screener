@@ -419,14 +419,53 @@ FIELDS = (
     "total_revenue_yoy_growth_ttm",
     "free_cash_flow_yoy_growth_ttm",
     "return_on_invested_capital",
+    # The three below exist only to put EPS in the same currency as the price.
+    "price_earnings_ttm",
+    "currency",
+    "fundamental_currency_code",
 )
+
+
+def eps_in_quote_currency(row: dict) -> float | None:
+    """The TTM EPS expressed in the currency the stock is quoted in.
+
+    TradingView reports fundamentals in the company's reporting currency --
+    USD for almost everything -- while `close` is in the listing currency.
+    Dividing one by the other silently produced nonsense for every non-USD
+    listing: Rentokil showed a sticker of 0.71 against a price of 345.70,
+    because 0.186 is dollars of earnings and 345.70 is pence of price.
+
+    No FX feed is needed. `price_earnings_ttm` is price over EPS with both
+    already in the listing currency, so `close / pe` *is* the local EPS. The
+    rates that falls out of are exactly right and agree across names: 75.43
+    for GBX, 0.876 for EUR (identical for SAP, Orange and Deutsche Telekom),
+    9.912 for NOK, 1.0 for USD.
+
+    Returns None when the conversion cannot be made, so `evaluate` refuses
+    rather than quoting a sticker that is wrong by a factor of a hundred.
+    """
+    eps = row.get("earnings_per_share_diluted_ttm")
+    if eps is None or eps <= 0:
+        # A loss is a loss in any currency, and converting it needs a P/E that
+        # does not exist for a loss-maker. Passed through unchanged so the
+        # caller still reports "no positive earnings" rather than "no figure".
+        return eps
+
+    quote, reporting = row.get("currency"), row.get("fundamental_currency_code")
+    if not quote or not reporting or quote == reporting:
+        return eps  # same currency: the reported figure already lines up
+
+    close, pe = row.get("close"), row.get("price_earnings_ttm")
+    if not close or not pe:
+        return None  # no P/E to derive the rate from (loss-makers land here)
+    return close / pe
 
 
 def from_scanner(row: dict, price: float | None = None) -> RuleOne:
     """Evaluate straight from a TradingView scan row."""
     return evaluate(
         price=price if price is not None else row.get("close"),
-        eps_ttm=row.get("earnings_per_share_diluted_ttm"),
+        eps_ttm=eps_in_quote_currency(row),
         eps_growth_ttm=row.get("earnings_per_share_diluted_yoy_growth_ttm"),
         eps_growth_fy=row.get("earnings_per_share_diluted_yoy_growth_fy"),
         sales_growth_ttm=row.get("total_revenue_yoy_growth_ttm"),
