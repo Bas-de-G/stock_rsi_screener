@@ -634,6 +634,34 @@ tickers:
   - {symbol: EFX,  tradingview: "NYSE:EFX",  morningstar: xnys/efx,  markets: [sp500]}
   - {symbol: ROL,  tradingview: "NYSE:ROL",  morningstar: xnys/rol,  markets: [sp500]}   # RSI 38
 
+  # Twenty picked for proximity to the line rather than for sector balance:
+  # every one sits near daily RSI 30, so the two upward crosses the screener
+  # looks for are plausible from here rather than hypothetical. Sourced from
+  # TradingView's scanner -- the same feed the screener computes RSI from, so
+  # these readings are the screener's own definition, not a vendor's.
+  # Weighted to the thin sectors anyway, and deliberately no Finance: it is
+  # already the heaviest sector at 48, and half the oversold names were banks.
+  - {symbol: LUV,  tradingview: "NYSE:LUV",  morningstar: xnys/luv,  markets: [sp500]}   # RSI 25
+  - {symbol: PFGC, tradingview: "NYSE:PFGC", morningstar: xnys/pfgc, markets: [sp500]}   # RSI 30
+  - {symbol: CX,   tradingview: "NYSE:CX",   morningstar: xnys/cx,   markets: [sp500]}   # RSI 29
+  - {symbol: CRS,  tradingview: "NYSE:CRS",  morningstar: xnys/crs,  markets: [sp500]}   # RSI 34
+  - {symbol: PKG,  tradingview: "NYSE:PKG",  morningstar: xnys/pkg,  markets: [sp500]}   # RSI 31
+  - {symbol: OC,   tradingview: "NYSE:OC",   morningstar: xnys/oc,   markets: [sp500]}   # RSI 32
+  - {symbol: DVA,  tradingview: "NYSE:DVA",  morningstar: xnys/dva,  markets: [sp500]}   # RSI 32
+  - {symbol: MTZ,  tradingview: "NYSE:MTZ",  morningstar: xnys/mtz,  markets: [sp500]}   # RSI 32
+  - {symbol: EIX,  tradingview: "NYSE:EIX",  morningstar: xnys/eix,  markets: [sp500]}   # RSI 32
+  - {symbol: CMS,  tradingview: "NYSE:CMS",  morningstar: xnys/cms,  markets: [sp500]}   # RSI 32
+  - {symbol: CARR, tradingview: "NYSE:CARR", morningstar: xnys/carr, markets: [sp500]}   # RSI 27
+  - {symbol: CCL,  tradingview: "NYSE:CCL",  morningstar: xnys/ccl,  markets: [sp500]}   # RSI 27
+  - {symbol: MGM,  tradingview: "NYSE:MGM",  morningstar: xnys/mgm,  markets: [sp500]}   # RSI 25
+  - {symbol: LEVI, tradingview: "NYSE:LEVI", morningstar: xnys/levi, markets: [sp500]}   # RSI 30
+  - {symbol: FND,  tradingview: "NYSE:FND",  morningstar: xnys/fnd,  markets: [sp500]}   # RSI 30
+  - {symbol: VIE,  tradingview: "EURONEXT:VIE", morningstar: xpar/vie, yahoo: VIE.PA, currency: EUR, markets: [europe]}   # RSI 29
+  - {symbol: EN,   tradingview: "EURONEXT:EN",  morningstar: xpar/en,  yahoo: EN.PA,  currency: EUR, markets: [europe]}   # RSI 31
+  - {symbol: FME,  tradingview: "XETR:FME",     morningstar: xetr/fme, yahoo: FME.DE, currency: EUR, markets: [europe]}   # RSI 34
+  - {symbol: LHA,  tradingview: "XETR:LHA",     morningstar: xetr/lha, yahoo: LHA.DE, currency: EUR, markets: [europe]}   # RSI 33
+  - {symbol: BAB,  tradingview: "LSE:BAB",      morningstar: xlon/bab, yahoo: BAB.L,  currency: GBX, markets: [europe]}   # RSI 30
+
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView
 # and Yahoo actually accept -- but these three are:
