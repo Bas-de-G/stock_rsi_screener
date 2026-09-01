@@ -6,12 +6,12 @@ rules.
 
 ## What this is
 
-A screener that watches ~65 tickers for a double-crossing pattern in both
+A screener that watches ~400 tickers for a double-crossing pattern in both
 directions: **buy** on two upward crosses of RSI 30, **sell** on two downward
 crosses of 70. Screened on four horizons (1h / 4h / 1d / 1w), each with its own
-cross window, valuation margin and suggested leverage, and grouped into four
-market filters (sp500 / nasdaq / europe / asia / penny) a ticker can belong to
-more than one of.
+cross window, valuation margin and suggested leverage, and grouped into six
+market filters (sp500 / nasdaq / europe / asia / penny / crypto) a ticker can
+belong to more than one of.
 
 A pattern only counts as a *live* signal while its **second** cross sits inside
 the horizon's lookback from now and RSI is still on the signalling side. Age is
@@ -39,6 +39,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/dashboard.py` | the self-contained HTML page |
 | `screener/earnings.py` | the event-risk window around a results release |
 | `screener/journal.py` | the append-only `recommendations.csv` |
+| `screener/coingecko.py` | the crypto universe: ranking, and what to exclude |
 | `screener/outcomes.py` | forward returns, and the random-entry baseline |
 | `screener/strategies.py` | take-profit / stop-loss exit rules, walked bar by bar |
 | `screener/ruleone.py` | Phil Town's Rule #1 sticker price, MOS and score |
@@ -107,6 +108,32 @@ first daily bar, and "the next twenty bars" silently becomes twenty bars from
 two years later. That one bug reported the 20-day buy cohort as +11.4% when it
 is +1.6%. `forward_outcomes` refuses to measure an uncovered signal; if you
 change how history is fetched, check that guard still holds.
+
+**A crypto ticker has no fundamentals, and nothing may invent them.** Crypto
+entries carry no `morningstar:` field, so `Ticker.valued` is False and
+`is_strong` — which requires a valuation — can never award the rocket. That is
+the design, not a gap to route around. The tempting substitute was distance
+below the all-time high, and it is not a valuation: it is another way of saying
+the price has fallen, which is exactly what the RSI signal already said. A gate
+that agrees with the signal by construction confirms nearly everything while
+looking like a second opinion, which is worse than no gate at all.
+
+The same rule killed the conviction score for these tickers. The first version
+scored Bitcoin **6/10 on 24% coverage**, and every point came from "Earnings
+timing: no release near" — an asset credited for staying clear of results it
+can never have. `_conviction` now returns None when a row is unvalued, and the
+card drops the Rule #1 and EPS-growth placeholders too: "no data *yet*"
+promises something that will never arrive. If you add a factor, ask whether an
+asset with no filings can score on it.
+
+**Exclude crypto by CoinGecko id, never by ticker symbol.** Symbols are not
+unique. A token called "Mezo Wrapped BTC" carries the symbol `BTC`, so
+filtering the wrapped-tokens category by symbol removed *real Bitcoin* — rank 1
+— and left a crypto watchlist that read perfectly sensibly without it. Ids
+(`bitcoin` vs `mezo-wrapped-btc`) cannot collide. Yahoo symbols have the same
+trap in reverse: `{SYMBOL}-USD` is right for most and wrong for Uniswap
+(`UNI7083-USD`) and Sui (`SUI20947-USD`), where the bare form returns a
+malformed chart rather than an error.
 
 **A take-profit/stop-loss strategy must walk the path, never the extremes.**
 `outcomes` stores `max_gain` and `max_drawdown`, so a +5/−5 rule looks like a

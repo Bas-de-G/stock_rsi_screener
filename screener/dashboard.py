@@ -57,6 +57,11 @@ class Row:
     earnings: EarningsWindow = CLEAR_WINDOW
     # Phil Town's Rule #1 reading, or None where it has never been computed.
     rule_one: object | None = None
+    # False for anything with no fair value to look up (crypto). Kept on the
+    # row rather than re-derived, so the card, the gate and the journal all
+    # read the same answer. Defaults to True: an equity always has one, and
+    # only the crypto path sets it otherwise.
+    valued: bool = True
     # The weighted conviction score, or None on a page built before it existed.
     # Shadow only: it ranks and explains, and decides nothing -- see
     # `screener.scoring.SHADOW`.
@@ -311,6 +316,20 @@ def _conviction(row: Row, config: Config, horizon):
         rule_one_factor, valuation_factor,
     )
 
+    # An unvalued ticker has no fundamentals at all, not merely a missing fair
+    # value: no analyst target, no Rule #1, no EPS growth, and no results
+    # calendar. Four of the five factors are unreadable, and the fifth -- the
+    # depth of the dip -- is the signal itself, so a composite here would be
+    # the signal restated as a second opinion on the signal.
+    #
+    # The first version let it through and the result made the case: Bitcoin
+    # scored 6/10 on 24% coverage, and every point came from "Earnings timing:
+    # no release near" -- an asset being credited for staying clear of results
+    # it can never have. A number that confident, built from nothing, next to
+    # equities scored on five real factors, is worse than no number.
+    if not row.valued:
+        return None
+
     val = row.valuation
     growth = row.latest.earnings_growth if row.latest else None
     dip = _dip_rsi(row)
@@ -392,6 +411,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 ),
                 series=series,
                 crosses=_visible_crosses(full, window, config.rsi.threshold),
+                valued=ticker.valued,
                 valuation=valuations.get(ticker.symbol),
                 signals=sigs,
                 currency=ticker.currency,
@@ -681,7 +701,17 @@ def _card(row: Row, config: Config, horizon) -> str:
         f"{threshold:g} in {len(row.series)} sessions"
     )
 
-    if row.valuation:
+    if not row.valued:
+        # Crypto. There is no analyst fair value for Bitcoin, and the honest
+        # thing is to say so rather than substitute a proxy -- distance to the
+        # all-time high was the tempting one, and it is just another way of
+        # saying the price has fallen, which the RSI signal already said. A
+        # gate that agrees with the signal by construction is not a second
+        # opinion, so this card carries no gate at all and never shows a rocket.
+        valuation_block = """
+        <p class="valuation none">No valuation — pattern only. Crypto has no
+        fair value to check, so this can signal but never reach strong.</p>"""
+    elif row.valuation:
         val = row.valuation
         _, passed = _gate(val, config, horizon.margin)
         upside = (val.fair_value / val.price - 1) * 100 if val.price else 0.0
@@ -731,7 +761,29 @@ def _card(row: Row, config: Config, horizon) -> str:
         row.rule_one, row.both_valuations_agree, row.currency
     )
 
+    # Neither line can ever be filled in for a ticker with no fundamentals, and
+    # both promise that it will be: "no earnings growth data *yet*" and a
+    # Buffett dash waiting on an EPS figure that does not exist for Bitcoin.
+    # The "pattern only" line above has already said why, so these come out
+    # rather than sitting there as permanent placeholders.
+    if not row.valued:
+        growth_block = ""
+        rule_one_block = ""
+
     conviction_block = _conviction_block(row.conviction)
+
+    # An unvalued ticker has no Morningstar page to send anyone to, so the
+    # chart becomes the primary action rather than a dead second button.
+    tv = (f'<a class="btn" href="{html.escape(row.tradingview_url)}"'
+          f' target="_blank" rel="noopener noreferrer">TradingView</a>')
+    if row.valued:
+        actions = (
+            f'<a class="btn primary" href="{html.escape(row.morningstar_url)}"'
+            f' target="_blank" rel="noopener noreferrer">Check fair value on '
+            f'Morningstar</a>\n    {tv}'
+        )
+    else:
+        actions = tv.replace('class="btn"', 'class="btn primary"')
 
     leverage_block = ""
     if row.fired or row.sell_fired:
@@ -769,10 +821,7 @@ def _card(row: Row, config: Config, horizon) -> str:
   {conviction_block}
   {leverage_block}
   <div class="actions">
-    <a class="btn primary" href="{html.escape(row.morningstar_url)}"
-       target="_blank" rel="noopener noreferrer">Check fair value on Morningstar</a>
-    <a class="btn" href="{html.escape(row.tradingview_url)}"
-       target="_blank" rel="noopener noreferrer">TradingView</a>
+    {actions}
   </div>
 </article>"""
 

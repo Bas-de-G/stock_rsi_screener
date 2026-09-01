@@ -662,6 +662,43 @@ tickers:
   - {symbol: LHA,  tradingview: "XETR:LHA",     morningstar: xetr/lha, yahoo: LHA.DE, currency: EUR, markets: [europe]}   # RSI 33
   - {symbol: BAB,  tradingview: "LSE:BAB",      morningstar: xlon/bab, yahoo: BAB.L,  currency: GBX, markets: [europe]}   # RSI 30
 
+  # ---- Crypto ---------------------------------------------------------
+  # Top assets by market cap, from CoinGecko; RSI still comes from the same
+  # TradingView batch request as everything else, so this cost no new data
+  # path for the signal itself.
+  #
+  # NO `morningstar:` FIELD, and that is the whole design. There is no analyst
+  # fair value for Bitcoin. The tempting substitute -- distance below the
+  # all-time high -- is not a valuation: it is another way of saying the price
+  # has fallen, which is what the RSI signal already said, so it would confirm
+  # almost every signal it saw and add nothing while looking like a second
+  # opinion. These tickers carry no valuation, `is_strong` requires one, and so
+  # a crypto pattern is reported as a plain buy signal and can never earn the
+  # rocket. The card says so in as many words.
+  #
+  # Stablecoins, wrapped tokens and staking derivatives are excluded: a price
+  # designed not to move has no RSI worth reading. The exclusion is by
+  # CoinGecko id rather than ticker symbol, because "Mezo Wrapped BTC" also
+  # calls itself BTC and excluding by symbol silently dropped real Bitcoin.
+  - {symbol: BTC,  tradingview: "BINANCE:BTCUSDT",    yahoo: BTC-USD,       markets: [crypto]}   # Bitcoin
+  - {symbol: ETH,  tradingview: "BINANCE:ETHUSDT",    yahoo: ETH-USD,       markets: [crypto]}   # Ethereum
+  - {symbol: BNB,  tradingview: "BINANCE:BNBUSDT",    yahoo: BNB-USD,       markets: [crypto]}   # BNB
+  - {symbol: XRP,  tradingview: "BINANCE:XRPUSDT",    yahoo: XRP-USD,       markets: [crypto]}   # XRP
+  - {symbol: SOL,  tradingview: "BINANCE:SOLUSDT",    yahoo: SOL-USD,       markets: [crypto]}   # Solana
+  - {symbol: TRX,  tradingview: "BINANCE:TRXUSDT",    yahoo: TRX-USD,       markets: [crypto]}   # TRON
+  - {symbol: ZEC,  tradingview: "BINANCE:ZECUSDT",    yahoo: ZEC-USD,       markets: [crypto]}   # Zcash
+  - {symbol: DOGE, tradingview: "BINANCE:DOGEUSDT",   yahoo: DOGE-USD,      markets: [crypto]}   # Dogecoin
+  - {symbol: LINK, tradingview: "BINANCE:LINKUSDT",   yahoo: LINK-USD,      markets: [crypto]}   # Chainlink
+  - {symbol: ADA,  tradingview: "BINANCE:ADAUSDT",    yahoo: ADA-USD,       markets: [crypto]}   # Cardano
+  - {symbol: XLM,  tradingview: "BINANCE:XLMUSDT",    yahoo: XLM-USD,       markets: [crypto]}   # Stellar
+  - {symbol: BCH,  tradingview: "BINANCE:BCHUSDT",    yahoo: BCH-USD,       markets: [crypto]}   # Bitcoin Cash
+  - {symbol: LTC,  tradingview: "BINANCE:LTCUSDT",    yahoo: LTC-USD,       markets: [crypto]}   # Litecoin
+  - {symbol: HBAR, tradingview: "BINANCE:HBARUSDT",   yahoo: HBAR-USD,      markets: [crypto]}   # Hedera
+  - {symbol: AVAX, tradingview: "BINANCE:AVAXUSDT",   yahoo: AVAX-USD,      markets: [crypto]}   # Avalanche
+  - {symbol: SHIB, tradingview: "BINANCE:SHIBUSDT",   yahoo: SHIB-USD,      markets: [crypto]}   # Shiba Inu
+  - {symbol: UNI,  tradingview: "BINANCE:UNIUSDT",    yahoo: UNI7083-USD,   markets: [crypto]}   # Uniswap   # bare UNI-USD/SUI-USD return a malformed chart
+  - {symbol: SUI,  tradingview: "BINANCE:SUIUSDT",    yahoo: SUI20947-USD,  markets: [crypto]}   # Sui   # bare UNI-USD/SUI-USD return a malformed chart
+
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView
 # and Yahoo actually accept -- but these three are:
