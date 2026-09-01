@@ -277,6 +277,40 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 
 
 @dataclass(frozen=True)
+class StrategiesConfig:
+    """Exit rules to measure the recorded signals under.
+
+    Adding a variant is a config edit, not a code change -- which is the point:
+    the comparison is only useful if trying a fifth rule costs nothing.
+
+    Keep the list short. Every extra variant tested against the same patterns
+    raises the chance that the winner won by luck, and there is no correction
+    for that here beyond restraint.
+    """
+
+    variants: tuple = ()
+
+    def variant(self, key: str):
+        for v in self.variants:
+            if v.key == key:
+                return v
+        raise KeyError(f"no strategy {key!r}")
+
+
+DEFAULT_STRATEGIES = (
+    # The two the comparison was asked for. Both cut at -5%; they differ only
+    # in what they ask for on the upside, which is the cleanest possible A/B --
+    # any difference in the result is the take-profit and nothing else.
+    dict(key="swing", label="Swing +3/-5", take_profit=3.0, stop_loss=5.0,
+         max_bars=20,
+         note="a shorter rebound trade: takes what it can get, three weeks"),
+    dict(key="hold", label="Hold +5/-5", take_profit=5.0, stop_loss=5.0,
+         max_bars=60,
+         note="a larger move over a longer horizon: a quarter to be right"),
+)
+
+
+@dataclass(frozen=True)
 class Config:
     tickers: list[Ticker]
     rsi: RsiConfig
@@ -287,6 +321,7 @@ class Config:
     horizons: tuple[Horizon, ...] = DEFAULT_HORIZONS
     scoring: ScoringConfig = field(default_factory=lambda: ScoringConfig())
     notify: NotifyConfig = field(default_factory=lambda: NotifyConfig())
+    strategies: StrategiesConfig = field(default_factory=lambda: StrategiesConfig())
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -429,11 +464,13 @@ def load_config(path: str | Path | None = None) -> Config:
     horizons = _load_horizons(raw.get("horizons", {}) or {})
     scoring = _load_scoring(raw.get("scoring", {}) or {})
     notify = _load_notify(raw.get("notify", {}) or {}, horizons)
+    strategies = _load_strategies(raw.get("strategies", None))
 
     return Config(
         tickers=tickers,
         scoring=scoring,
         notify=notify,
+        strategies=strategies,
         rsi=rsi,
         signal=signal,
         storage=storage,
@@ -442,6 +479,52 @@ def load_config(path: str | Path | None = None) -> Config:
         horizons=horizons,
         source_path=config_path,
     )
+
+
+def _load_strategies(raw) -> StrategiesConfig:
+    """Read the `strategies:` block, falling back to the two built-in variants.
+
+    An omitted block gives the defaults; an explicitly empty one gives none,
+    which is how the comparison is turned off without deleting the code.
+    """
+    from .strategies import Strategy
+
+    entries = DEFAULT_STRATEGIES if raw is None else (raw or ())
+    variants = []
+    seen = set()
+    for item in entries:
+        if not isinstance(item, dict):
+            raise ValueError(f"strategies entries must be mappings, got {item!r}")
+        missing = {"key", "take_profit", "stop_loss"} - set(item)
+        if missing:
+            raise ValueError(
+                f"strategy {item.get('key', '?')!r} is missing "
+                f"{', '.join(sorted(missing))}"
+            )
+        key = str(item["key"])
+        if key in seen:
+            raise ValueError(f"duplicate strategy key {key!r}")
+        seen.add(key)
+
+        take, stop = float(item["take_profit"]), float(item["stop_loss"])
+        # Both must be positive: a "stop_loss: -5" reads naturally but would
+        # invert the comparison silently, stopping out every winner.
+        if take <= 0 or stop <= 0:
+            raise ValueError(
+                f"strategy {key!r}: take_profit and stop_loss are positive "
+                f"percentages in both directions (got {take}, {stop})"
+            )
+        bars = int(item.get("max_bars", 60))
+        if bars < 1:
+            raise ValueError(f"strategy {key!r}: max_bars must be at least 1")
+
+        variants.append(Strategy(
+            key=key,
+            label=str(item.get("label", key)),
+            take_profit=take, stop_loss=stop, max_bars=bars,
+            note=str(item.get("note", "")),
+        ))
+    return StrategiesConfig(variants=tuple(variants))
 
 
 def _load_notify(raw: dict, horizons) -> NotifyConfig:

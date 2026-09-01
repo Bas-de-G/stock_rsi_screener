@@ -1424,6 +1424,9 @@ def cmd_evaluate(config: Config, args) -> int:
     special, because the prices were always there.
     """
     from .outcomes import FORWARD_BARS, forward_outcomes
+    from .strategies import walk
+
+    variants = list(config.strategies.variants)
 
     with Store(config.storage.database) as store:
         # The daily series is the common ruler for every horizon, so it is
@@ -1431,6 +1434,7 @@ def cmd_evaluate(config: Config, args) -> int:
         daily: dict[str, list[tuple[str, float]]] = {}
         entries: dict[tuple[str, str], dict[str, float]] = {}
         measured, skipped = [], 0
+        trades = []
 
         for ticker in config.tickers:
             daily[ticker.symbol] = [
@@ -1459,14 +1463,88 @@ def cmd_evaluate(config: Config, args) -> int:
                         skipped += 1
                     measured.extend(results)
 
+                    # The same signal under each exit rule. Walked here rather
+                    # than derived later from max_gain/max_drawdown, which
+                    # cannot say which barrier was touched first.
+                    for strategy in variants:
+                        trade = walk(
+                            ticker.symbol, horizon.key, signal.direction,
+                            signal.up2_date, entry, daily[ticker.symbol], strategy,
+                        )
+                        if trade is not None:
+                            trades.append(trade)
+
         written = store.replace_outcomes(measured)
+        traded = store.record_trades(trades)
 
     print(f"Measured {written} outcome(s) across {len(FORWARD_BARS)} windows "
           f"({', '.join(f'+{b}' for b in FORWARD_BARS)} trading days).")
+    if variants:
+        print(f"Took {traded} trade(s) under {len(variants)} exit rule(s): "
+              f"{', '.join(v.label for v in variants)}.")
     if skipped:
         print(f"  {skipped} pattern(s) not yet measurable — too recent, or no "
               f"close recorded on the bar they completed on.")
     return 0
+
+
+def _print_strategy_comparison(config: Config) -> None:
+    """The exit rules, side by side over the same signals.
+
+    Ordered by mean return rather than hit rate, because the two disagree: a
+    rule taking 3% profits against 5% stops has to be right 62.5% of the time
+    merely to break even, so it can lead on hit rate and still lose money. The
+    breakeven column is printed next to the hit rate so the comparison is
+    readable without doing that arithmetic in your head.
+    """
+    from .strategies import compare, summarise
+
+    variants = list(config.strategies.variants)
+    if not variants:
+        return
+
+    with Store(config.storage.database) as store:
+        by_key = {v.key: store.all_trades(strategy=v.key) for v in variants}
+    if not any(by_key.values()):
+        print("Exit rules: no trades recorded yet — run `evaluate`.\n")
+        return
+
+    print("Exit rules, same signals\n")
+    header = (f"{'rule':<22}{'n':>7}{'hit':>8}{'needs':>8}{'mean':>8}"
+              f"{'median':>8}{'target':>8}{'stop':>7}{'timeout':>9}{'days':>7}")
+    print(header)
+    print("-" * len(header))
+
+    def line(label: str, rows) -> None:
+        s = summarise(rows)
+        if not s["n"]:
+            print(f"{label:<22}{'—':>7}")
+            return
+        print(f"{label:<22}{s['n']:>7}{s['hit_rate'] * 100:>7.1f}%"
+              f"{breakeven:>7.1f}%{s['mean'] * 100:>7.2f}%"
+              f"{s['median'] * 100:>7.2f}%{s['target']:>8}{s['stopped']:>7}"
+              f"{s['timeout']:>9}{s['mean_bars']:>7.1f}")
+
+    # Split by direction, because the blended row is not a strategy anyone
+    # would run: buys and sells score in opposite directions on this sample,
+    # so mixing them measures the ratio of buys to sells as much as the rule.
+    for key, _ in compare(by_key):
+        v = config.strategies.variant(key)
+        breakeven = v.breakeven_hit_rate * 100
+        rows = by_key[key]
+        line(v.label, rows)
+        for direction in (BUY, SELL):
+            line(f"  {direction}", [t for t in rows if t.direction == direction])
+    print()
+    print("  · `needs` is the hit rate the rule would break even at IF every exit")
+    print("    landed exactly on its barrier. Real ones overshoot — a gap opens")
+    print("    through the stop, a timeout closes anywhere — so a row can sit")
+    print("    below `needs` and still show a positive mean. Use it to compare")
+    print("    what two rules are asking of the signal, not as a pass mark.")
+    print("  · Exits are the close that breached the barrier, not the barrier —")
+    print("    with daily closes an intraday touch is invisible, so tight rules")
+    print("    under-trigger and their fills are worse than the level implies.")
+    print()
 
 
 def cmd_backtest(config: Config, args) -> int:
@@ -1515,6 +1593,8 @@ def cmd_backtest(config: Config, args) -> int:
             line(f"{direction:<5} {horizon.label}", rows)
         line(f"{direction} — all", [o for o in measured if o.direction == direction])
         print()
+
+    _print_strategy_comparison(config)
 
     print("Read with care:")
     print("  · Survivorship — the watchlist is today's companies, which all still")

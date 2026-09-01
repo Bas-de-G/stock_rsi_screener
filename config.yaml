@@ -747,6 +747,33 @@ notify:
   # Set to [] to stop phone alerts entirely and keep the emails.
   push_horizons: [4h, 1d]
 
+# Exit rules the Historical Dashboard compares. Every recorded pattern is taken
+# to a take-profit or a stop under each of these, walked bar by bar, so the only
+# difference between two rows is the rule itself.
+#
+# take_profit and stop_loss are POSITIVE percentages in both directions --
+# `stop_loss: -5` reads naturally and would stop out every winner, so it is
+# rejected rather than accepted. max_bars closes anything that has reached
+# neither barrier, and that is reported as a timeout rather than a loss.
+#
+# Adding a variant is a config edit. Keep the list short anyway: each extra rule
+# tested against the same 7,291 signals raises the chance the winner won by
+# luck, and nothing here corrects for that. Delete the block entirely (or set it
+# to []) to turn the comparison off.
+strategies:
+  - key: swing
+    label: "Swing +3/-5"
+    take_profit: 3.0
+    stop_loss: 5.0
+    max_bars: 20      # about three weeks
+    note: "a shorter rebound trade: takes what it can get"
+  - key: hold
+    label: "Hold +5/-5"
+    take_profit: 5.0
+    stop_loss: 5.0
+    max_bars: 60      # about a quarter
+    note: "a larger move over a longer horizon"
+
 scoring:
   # How much each factor counts towards the 1–10 conviction score on each card.
   #

@@ -132,6 +132,33 @@ CREATE TABLE IF NOT EXISTS outcomes (
 );
 """
 
+# One row per signal per exit rule: the same patterns as `outcomes`, taken to
+# a take-profit or a stop instead of to a fixed number of bars.
+#
+# Kept separate from `outcomes` rather than added as columns, because the two
+# answer different questions and have different keys: an outcome is measured at
+# five fixed windows, a trade ends once and the bar it ended on is a result
+# rather than a parameter.
+_STRATEGY_TRADES_DDL = """
+CREATE TABLE IF NOT EXISTS strategy_trades (
+    symbol       TEXT NOT NULL,
+    horizon      TEXT NOT NULL,
+    direction    TEXT NOT NULL,
+    up2_date     TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    entry        REAL NOT NULL,
+    exit         REAL NOT NULL,
+    -- The close that breached the barrier, not the barrier itself: with daily
+    -- closes a stop touched intraday is invisible and a gap opens through it,
+    -- so this is the fill we can actually prove.
+    return_pct   REAL NOT NULL,
+    bars_held    INTEGER NOT NULL,
+    outcome      TEXT NOT NULL,   -- target | stopped | timeout
+    evaluated_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, horizon, direction, up2_date, strategy)
+);
+"""
+
 # The Rule #1 reading for each company, recomputed every run from the same
 # batch request that fetches RSI. One row per symbol, overwritten.
 #
@@ -161,7 +188,7 @@ CREATE TABLE IF NOT EXISTS rule_one (
 """
 
 SCHEMA = (_RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL + _EARNINGS_DDL
-          + _OUTCOMES_DDL + _RULE_ONE_DDL)
+          + _OUTCOMES_DDL + _RULE_ONE_DDL + _STRATEGY_TRADES_DDL)
 
 
 
@@ -637,6 +664,60 @@ class Store:
             )
         self._conn.commit()
         return len(rows)
+
+    def record_trades(self, trades) -> int:
+        """Write strategy trades, overwriting any earlier measurement.
+
+        Same reasoning as `record_outcomes`: these are derived from prices, so
+        recomputing is cheap and the newest computation is the best one. It
+        also means changing a strategy's parameters in config and re-running
+        `evaluate` replaces its rows rather than leaving two generations of
+        numbers under one key.
+        """
+        import datetime as _dt
+
+        stamp = _dt.datetime.now().isoformat(timespec="seconds")
+        rows = [
+            (t.symbol, t.horizon, t.direction, t.up2_date, t.strategy, t.entry,
+             t.exit, t.return_pct, t.bars_held, t.outcome, stamp)
+            for t in trades
+        ]
+        if not rows:
+            return 0
+        with closing(self._conn.cursor()) as cur:
+            cur.executemany(
+                """INSERT INTO strategy_trades (symbol, horizon, direction, up2_date,
+                                                strategy, entry, exit, return_pct,
+                                                bars_held, outcome, evaluated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol, horizon, direction, up2_date, strategy)
+                   DO UPDATE SET
+                       entry=excluded.entry, exit=excluded.exit,
+                       return_pct=excluded.return_pct, bars_held=excluded.bars_held,
+                       outcome=excluded.outcome, evaluated_at=excluded.evaluated_at""",
+                rows,
+            )
+        self._conn.commit()
+        return len(rows)
+
+    def all_trades(self, strategy: str | None = None, horizon: str | None = None,
+                   direction: str | None = None):
+        """Recorded trades, optionally narrowed to one strategy or cohort."""
+        from .strategies import Trade
+
+        sql = ("SELECT symbol, horizon, direction, up2_date, strategy, entry,"
+               " exit, return_pct, bars_held, outcome FROM strategy_trades")
+        clauses, params = [], []
+        for column, value in (("strategy", strategy), ("horizon", horizon),
+                              ("direction", direction)):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(sql, params)
+            return [Trade(*row) for row in cur.fetchall()]
 
     def all_outcomes(self, bars: int | None = None, horizon: str | None = None):
         """Measured outcomes, optionally for one window or one timeframe."""
