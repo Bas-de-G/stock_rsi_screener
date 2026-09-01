@@ -266,9 +266,24 @@ class NotifyConfig:
     """
 
     push_horizons: tuple[str, ...] = DEFAULT_PUSH_HORIZONS
+    # Which market groups may ring a phone. Empty means every one of them,
+    # which is what the file said before this existed -- so an unset block
+    # keeps the old behaviour rather than silently muting anything.
+    push_markets: tuple[str, ...] = ()
 
-    def pushes(self, horizon_key: str) -> bool:
-        return horizon_key in self.push_horizons
+    def pushes(self, horizon_key: str, markets: tuple[str, ...] = ()) -> bool:
+        """Whether this signal may interrupt someone.
+
+        Both filters have to pass. `markets` is a ticker's own list and a
+        ticker can be in several, so one allowed market is enough -- BNTX is
+        tagged europe and nasdaq, and muting europe should not silence it if
+        nasdaq is still on.
+        """
+        if horizon_key not in self.push_horizons:
+            return False
+        if not self.push_markets:
+            return True
+        return any(m in self.push_markets for m in markets)
 
 
 @dataclass(frozen=True)
@@ -572,18 +587,40 @@ def _load_notify(raw: dict, horizons) -> NotifyConfig:
     """
     given = raw.get("push_horizons", None)
     if given is None:
-        return NotifyConfig()
-    if isinstance(given, str):
-        given = [given]
-    keys = [str(k) for k in given]
-    known = {h.key for h in horizons}
-    unknown = [k for k in keys if k not in known]
-    if unknown:
-        raise ValueError(
-            f"notify.push_horizons names no timeframe {', '.join(unknown)!r} — "
-            f"known timeframes are {', '.join(sorted(known))}"
-        )
-    return NotifyConfig(push_horizons=tuple(dict.fromkeys(keys)))
+        keys = list(DEFAULT_PUSH_HORIZONS)
+    else:
+        if isinstance(given, str):
+            given = [given]
+        keys = [str(k) for k in given]
+        known = {h.key for h in horizons}
+        unknown = [k for k in keys if k not in known]
+        if unknown:
+            raise ValueError(
+                f"notify.push_horizons names no timeframe {', '.join(unknown)!r} — "
+                f"known timeframes are {', '.join(sorted(known))}"
+            )
+
+    # Same failure mode as the timeframes, and the same answer: a typo here
+    # would silently mute a whole market and nothing would look broken.
+    given_markets = raw.get("push_markets", None)
+    if given_markets is None:
+        markets: list[str] = []
+    else:
+        if isinstance(given_markets, str):
+            given_markets = [given_markets]
+        markets = [str(m).strip().lower() for m in given_markets]
+        unknown_markets = [m for m in markets if m not in MARKETS]
+        if unknown_markets:
+            raise ValueError(
+                f"notify.push_markets names no market "
+                f"{', '.join(unknown_markets)!r} — known markets are "
+                f"{', '.join(MARKETS)}"
+            )
+
+    return NotifyConfig(
+        push_horizons=tuple(dict.fromkeys(keys)),
+        push_markets=tuple(dict.fromkeys(markets)),
+    )
 
 
 def _load_scoring(raw: dict) -> ScoringConfig:

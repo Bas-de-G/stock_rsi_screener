@@ -31,9 +31,11 @@ from .notified import COOLDOWN, Ledger, key_for
 from .outcomes import FORWARD_BARS as OUTCOME_BARS
 from .ruleone import FIELDS as RULE_ONE_FIELDS
 from .notify import (
+    format_pattern_buy,
     format_signal,
     format_strong_buy,
     issue_title,
+    pattern_issue_title,
     send_github_issue,
     send_push,
     send_webhook,
@@ -1366,19 +1368,34 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # could not survive.
             if row.suspended:
                 continue
-            fresh = [
-                s for s in row.buys
-                if s.fired
-                and signal_is_fresh(s, row.series, horizon)
-                and is_strong(
-                    (s.valuation_known, s.valuation_pass),
-                    (s.earnings_growth_known, s.earnings_growth_pass),
-                )
-            ]
+            # An unvalued ticker can never be strong -- `is_strong` requires a
+            # valuation and crypto has none -- so a strong-only rule does not
+            # merely alert less on crypto, it alerts never. The bar for those
+            # is the fired pattern itself, which is all the evidence that will
+            # ever exist for them, and the message says so in as many words.
+            if row.valued:
+                kind = "strong"
+                fresh = [
+                    s for s in row.buys
+                    if s.fired
+                    and signal_is_fresh(s, row.series, horizon)
+                    and is_strong(
+                        (s.valuation_known, s.valuation_pass),
+                        (s.earnings_growth_known, s.earnings_growth_pass),
+                    )
+                ]
+            else:
+                kind = "pattern"
+                fresh = [
+                    s for s in row.buys
+                    if s.fired and signal_is_fresh(s, row.series, horizon)
+                ]
             if not fresh:
                 continue
             up2 = max(s.up2_date for s in fresh)
-            key = key_for("strong", horizon.key, row.symbol, up2)
+            # Separate ledger kinds, so the two never dedupe against each other
+            # and the 12-hour cooldown is counted per kind.
+            key = key_for(kind, horizon.key, row.symbol, up2)
             if ledger.seen(key):
                 continue
             # A new pattern on a name announced hours ago is a better entry on
@@ -1388,7 +1405,7 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # freshness window on the intraday charts is measured in hours, so
             # a pattern held back today has aged out by the time the cooldown
             # lifts.
-            last = ledger.last_sent("strong", horizon.key, row.symbol)
+            last = ledger.last_sent(kind, horizon.key, row.symbol)
             if last is not None and (elapsed := dt.datetime.now() - last) < COOLDOWN:
                 hours = elapsed.total_seconds() / 3600
                 print(f"  {row.symbol} [{horizon.key}] — new pattern, but announced "
@@ -1401,24 +1418,34 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             )
             page = "index.html" if horizon.key == DEFAULT_HORIZON else f"{horizon.key}.html"
             url = f"{config.dashboard.site_url}/{page}" if config.dashboard.site_url else page
-            message = format_strong_buy(
-                row.symbol, discount, best.price, best.fair_value,
-                row.currency, horizon, config.rsi.threshold, url,
-            )
+            if kind == "strong":
+                message = format_strong_buy(
+                    row.symbol, discount, best.price, best.fair_value,
+                    row.currency, horizon, config.rsi.threshold, url,
+                )
+                title = issue_title(row.symbol, discount, horizon)
+            else:
+                message = format_pattern_buy(
+                    row.symbol, best.price, row.currency, horizon,
+                    config.rsi.threshold, url,
+                )
+                title = pattern_issue_title(row.symbol, horizon)
             print(message)
             # Both transports are optional and independent: a laptop run has
             # neither and simply prints, CI has the token and may have the
             # webhook too.
-            title = issue_title(row.symbol, discount, horizon)
-            # The phone is the only channel with a timeframe filter, because it
-            # is the only one that interrupts. The issue and the webhook still
-            # carry every horizon, so nothing is lost -- it just waits to be
-            # read. See `NotifyConfig`.
-            if config.notify.pushes(horizon.key):
+            #
+            # The phone is the only channel with filters, because it is the
+            # only one that interrupts. The issue and the webhook still carry
+            # every horizon and every market, so nothing is lost -- it just
+            # waits to be read. See `NotifyConfig`.
+            if config.notify.pushes(horizon.key, row.markets):
                 if send_push(title, message, url):
                     print("  (pushed to phones)")
-            else:
+            elif horizon.key not in config.notify.push_horizons:
                 print(f"  (no push — {horizon.label} is not a push timeframe)")
+            else:
+                print(f"  (no push — {row.symbol} is in no push market)")
             if send_webhook(message):
                 print("  (sent to webhook)")
             if send_github_issue(title, message, key):

@@ -126,6 +126,17 @@ card drops the Rule #1 and EPS-growth placeholders too: "no data *yet*"
 promises something that will never arrive. If you add a factor, ask whether an
 asset with no filings can score on it.
 
+**An alert rule gated on "strong" alerts never on crypto, not merely less.**
+`_notify_new_strong_buys` required `is_strong`, which requires a valuation, so
+adding crypto to `notify.push_markets` on its own would have changed nothing —
+the strong gate blocks it upstream and the phone stays silent while the config
+reads as correct. Unvalued tickers are announced on the fired pattern instead,
+under the ledger kind `pattern` rather than `strong` so the two never dedupe
+against each other and the 12-hour cooldown is counted per kind. The push says
+`PATTERN 📈`, never `STRONG BUY 🚀`: a notification is read in three seconds and
+acted on without opening anything, so it is the one place the distinction the
+dashboard makes carefully must not be blurred.
+
 **Exclude crypto by CoinGecko id, never by ticker symbol.** Symbols are not
 unique. A token called "Mezo Wrapped BTC" carries the symbol `BTC`, so
 filtering the wrapped-tokens category by symbol removed *real Bitcoin* — rank 1
