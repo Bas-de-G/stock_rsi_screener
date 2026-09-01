@@ -484,3 +484,39 @@ def test_a_damaged_journal_costs_a_column_not_the_build(tmp_path):
     path = tmp_path / "r.csv"
     path.write_bytes(b"\xff\xfe\x00binary rubbish")
     assert published_convictions(path) == {}
+
+
+# ------------------------------------------------- the exit-rule comparison
+
+
+def test_the_page_shows_the_exit_rules_when_trades_exist(config, tmp_path):
+    """The comparison is the point of the section, so its absence should fail
+    a test rather than quietly leave the page looking finished."""
+    from screener.cli import cmd_evaluate
+    from screener.historical import render_historical
+
+    with Store(config.storage.database) as store:
+        seed(store, "AAA", start=100.0, drift=1.0, days=90, signal_on=10)
+
+    class Args:
+        pass
+
+    cmd_evaluate(config, Args())
+
+    with Store(config.storage.database) as store:
+        page = render_historical(store, config)
+
+    assert 'class="exits"' in page
+    assert "Swing +3/-5" in page and "Hold +5/-5" in page
+    assert "<script" not in page.lower(), "the dashboards have never had any"
+
+
+def test_the_section_is_absent_rather_than_empty_without_trades(config):
+    """Nothing measured yet must not render a table of dashes."""
+    from screener.historical import render_historical
+
+    with Store(config.storage.database) as store:
+        seed(store, "AAA")
+        page = render_historical(store, config)
+
+    assert 'class="exits"' not in page

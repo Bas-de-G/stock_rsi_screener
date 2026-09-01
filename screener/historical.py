@@ -540,6 +540,95 @@ def _panel_html(panel: Panel, cohort: Cohort, horizon) -> str:
 # -------------------------------------------------------------- page
 
 
+def _exit_rules(store: Store, config: Config) -> str:
+    """The exit-rule comparison: the same signals under each take-profit/stop.
+
+    Split by direction rather than blended. Buys and sells score in opposite
+    directions on this sample, so one combined row would move with the ratio of
+    buys to sells as much as with the rule being tested.
+    """
+    from .strategies import compare, summarise
+
+    variants = list(config.strategies.variants)
+    if not variants:
+        return ""
+
+    by_key = {v.key: store.all_trades(strategy=v.key) for v in variants}
+    if not any(by_key.values()):
+        return ""
+
+    def row(label: str, trades, breakeven: float, klass: str = "") -> str:
+        s = summarise(trades)
+        if not s["n"]:
+            return f'<tr class="{klass}"><th>{html.escape(label)}</th>' \
+                   f'<td colspan="8" class="none">no trades</td></tr>'
+        pos = " up" if s["mean"] > 0 else " down"
+        return (
+            f'<tr class="{klass}">'
+            f'<th>{html.escape(label)}</th>'
+            f'<td>{s["n"]:,}</td>'
+            f'<td>{s["hit_rate"] * 100:.1f}%</td>'
+            f'<td class="muted">{breakeven:.1f}%</td>'
+            f'<td class="num{pos}">{s["mean"] * 100:+.2f}%</td>'
+            f'<td class="num">{s["median"] * 100:+.2f}%</td>'
+            f'<td>{s["target"]:,}</td>'
+            f'<td>{s["stopped"]:,}</td>'
+            f'<td>{s["timeout"]:,}</td>'
+            f'<td class="muted">{s["mean_bars"]:.1f}</td>'
+            f'</tr>'
+        )
+
+    body = []
+    for key, _ in compare(by_key):
+        v = config.strategies.variant(key)
+        be = v.breakeven_hit_rate * 100
+        trades = by_key[key]
+        label = f"{v.label}" + (f" · {v.max_bars}d" if v.max_bars else "")
+        body.append(row(label, trades, be, "rule"))
+        for direction in ("buy", "sell"):
+            body.append(row(
+                f"    {direction}",
+                [t for t in trades if t.direction == direction], be, "sub",
+            ))
+
+    notes = "".join(
+        f"<li>{n}</li>" for n in (
+            "<strong>Each row is the same signals</strong>, exited by a different "
+            "rule — so any difference between them is the rule and nothing else.",
+            "<strong>Needs</strong> is the hit rate a rule would break even at if "
+            "every exit landed exactly on its barrier. Real ones overshoot, so a "
+            "row can sit below it and still return positively. It says what a rule "
+            "asks of the signal; it is not a pass mark.",
+            "<strong>Exits are the close that breached the barrier</strong>, not "
+            "the barrier. We hold daily closes, so a stop touched at 11am and "
+            "recovered by the bell is invisible and a gap opens straight through "
+            "it. Tighter rules lose more to this than wide ones.",
+            "<strong>A timeout is not a loss.</strong> It is a position that "
+            "reached neither barrier and closed at the end of its window — worth "
+            "reading separately, because a rule earning its return from timeouts "
+            "is not doing what it was designed to do.",
+        )
+    )
+
+    return f"""
+<section class="exits">
+  <h2>Exit rules, compared</h2>
+  <p class="lede">Every recorded pattern taken to a take-profit or a stop,
+     walked bar by bar in date order. Ordered by mean return — not by hit rate,
+     which can disagree.</p>
+  <div class="scroll">
+  <table class="cmp">
+    <thead><tr>
+      <th>Rule</th><th>n</th><th>Hit</th><th>Needs</th><th>Mean</th>
+      <th>Median</th><th>Target</th><th>Stop</th><th>Timeout</th><th>Days</th>
+    </tr></thead>
+    <tbody>{"".join(body)}</tbody>
+  </table>
+  </div>
+  <ul class="fine">{notes}</ul>
+</section>"""
+
+
 def build_historical(store: Store, config: Config, output: Path) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_historical(store, config), encoding="utf-8")
@@ -580,6 +669,7 @@ def render_historical(store: Store, config: Config) -> str:
         _panel_html(panels[(c.key, h.key)], c, h)
         for c in COHORTS for h in horizons
     )
+    exits = _exit_rules(store, config)
 
     show_rules = "\n".join(
         f'#co-{c.key}:checked ~ #tf-{h.key}:checked ~ .panels .p-{c.key}-{h.key} '
@@ -649,6 +739,8 @@ def render_historical(store: Store, config: Config) -> str:
 {body_panels}
 </div>
 
+{exits}
+
 <div class="caveats">
   <h2>What these numbers are not</h2>
   <ul>
@@ -677,6 +769,33 @@ def render_historical(store: Store, config: Config) -> str:
 
 
 _EXTRA_CSS = """
+/* ---- Exit-rule comparison -------------------------------------------- */
+.exits { margin: 34px 0 8px; padding-top: 22px; border-top: 2px solid var(--ink); }
+.exits h2 { font-size: 1.05rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+.exits .lede { margin: 0 0 16px; color: var(--ink-3); max-width: 62ch; }
+/* Wide table, narrow phone: scrolls inside its own box so the page never does */
+.exits .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.cmp { border-collapse: collapse; width: 100%; min-width: 640px;
+            font-variant-numeric: tabular-nums; font-size: 0.86rem; }
+table.cmp th, table.cmp td { padding: 7px 10px; text-align: right;
+                             border-bottom: 1px solid var(--rule); }
+table.cmp thead th { font-size: 0.7rem; text-transform: uppercase;
+                     letter-spacing: 0.06em; color: var(--ink-3);
+                     border-bottom: 1px solid var(--ink); }
+table.cmp th:first-child, table.cmp thead th:first-child { text-align: left; }
+table.cmp tr.rule th { font-weight: 600; }
+table.cmp tr.rule td { font-weight: 600; }
+table.cmp tr.sub th { font-weight: 400; color: var(--ink-3); padding-left: 22px;
+                      white-space: pre; }
+table.cmp tr.sub td { color: var(--ink-3); }
+table.cmp .muted { color: var(--ink-3); }
+table.cmp .none { text-align: left; color: var(--ink-3); font-style: italic; }
+table.cmp .up { color: var(--green); }
+table.cmp .down { color: var(--crimson); }
+.exits ul.fine { margin: 14px 0 0; padding-left: 18px; color: var(--ink-3);
+                 font-size: 0.82rem; line-height: 1.55; max-width: 78ch; }
+.exits ul.fine li { margin-bottom: 5px; }
+
 /* ---- Historical Dashboard -------------------------------------------- */
 .sel { position: absolute; opacity: 0; pointer-events: none; }
 

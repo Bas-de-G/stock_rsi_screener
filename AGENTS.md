@@ -40,6 +40,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/earnings.py` | the event-risk window around a results release |
 | `screener/journal.py` | the append-only `recommendations.csv` |
 | `screener/outcomes.py` | forward returns, and the random-entry baseline |
+| `screener/strategies.py` | take-profit / stop-loss exit rules, walked bar by bar |
 | `screener/ruleone.py` | Phil Town's Rule #1 sticker price, MOS and score |
 | `screener/scoring.py` | the weighted 1–10 conviction score (shadow mode) |
 | `screener/historical.py` | the `history.html` Historical Dashboard |
@@ -106,6 +107,22 @@ first daily bar, and "the next twenty bars" silently becomes twenty bars from
 two years later. That one bug reported the 20-day buy cohort as +11.4% when it
 is +1.6%. `forward_outcomes` refuses to measure an uncovered signal; if you
 change how history is fetched, check that guard still holds.
+
+**A take-profit/stop-loss strategy must walk the path, never the extremes.**
+`outcomes` stores `max_gain` and `max_drawdown`, so a +5/−5 rule looks like a
+query: won if it ever reached +5%, lost if it ever reached −5%. Those columns do
+not record *which came first*, and a volatile name routinely hits both — so that
+query answers "did it ever touch +5%", a much easier question than the one
+asked. Every rule would score better than it deserves, tight stops most of all.
+`strategies.walk` iterates the bars in date order and exits at the first breach.
+The `outcomes` extremes are for describing a window, never for resolving a rule.
+
+**And exit at the close that breached, not at the barrier.** We hold daily
+closes: a stop touched at 11am and recovered by the bell is invisible, and a gap
+opens straight through the level. Recording −5.0% when the close was −6.3% would
+flatter every rule at exactly the point the flattery matters most. The tighter
+the barriers, the more of the real path falls between the closes we can see —
+which is why `history.html` says so on the page rather than in a docstring.
 
 **Rule #1 runs backwards, and must keep doing so.** Run forwards — pick a
 growth rate, compute a sticker, compare — it marked 204 of 226 companies red,

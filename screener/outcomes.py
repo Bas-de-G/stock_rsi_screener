@@ -54,6 +54,30 @@ def _signed(entry: float, price: float, direction: str) -> float:
     return -move if direction == "sell" else move
 
 
+def forward_series(up2_date: str, daily_closes) -> list[tuple[str, float]]:
+    """The (date, close) bars that follow a signal, or nothing if uncovered.
+
+    Split out because two callers need it and the coverage rule below is the
+    easiest thing in this module to get wrong. Returns [] rather than raising:
+    "no bars we can honestly measure" and "no bars" are the same answer.
+    """
+    closes = list(daily_closes)
+    if not closes:
+        return []
+    day = up2_date[:10]
+    # The daily series has to *reach back to* the signal, not merely contain
+    # bars after it. Each horizon is backfilled to its own depth -- five years
+    # of weekly bars against two of daily ones -- so a 2023 weekly pattern sits
+    # years before the first daily bar, and "the next twenty bars" would
+    # silently be twenty bars from 2025. Measured that way PLTR's August 2023
+    # sell scored -1052%: entered at 15.41 and exited at 177.57, two years and
+    # twenty days later. Every number computed from an uncovered signal is
+    # reading the future, so refuse to compute one.
+    if closes[0][0][:10] > day:
+        return []
+    return [(d, c) for d, c in closes if d[:10] > day]
+
+
 def forward_outcomes(
     symbol: str,
     horizon: str,
@@ -76,23 +100,8 @@ def forward_outcomes(
     """
     if not entry:
         return []
-    closes = list(daily_closes)
-    if not closes:
-        return []
     day = up2_date[:10]
-
-    # The daily series has to *reach back to* the signal, not merely contain
-    # bars after it. Each horizon is backfilled to its own depth -- five years
-    # of weekly bars against two of daily ones -- so a 2023 weekly pattern sits
-    # years before the first daily bar, and "the next twenty bars" would
-    # silently be twenty bars from 2025. Measured that way PLTR's August 2023
-    # sell scored -1052%: entered at 15.41 and exited at 177.57, two years and
-    # twenty days later. Every number computed from an uncovered signal is
-    # reading the future, so refuse to compute one.
-    if closes[0][0][:10] > day:
-        return []
-
-    ahead = [(d, c) for d, c in closes if d[:10] > day]
+    ahead = forward_series(up2_date, daily_closes)
     if not ahead:
         return []
 
