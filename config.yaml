@@ -784,6 +784,25 @@ notify:
   # Set to [] to stop phone alerts entirely and keep the emails.
   push_horizons: [4h, 1d]
 
+  # Which market groups may ring a phone. Omit the key entirely (or leave it
+  # empty) for all of them, which is what this file did before the setting
+  # existed. A ticker in several markets passes if ANY of them is listed, so
+  # muting `europe` will not silence BioNTech while `nasdaq` is still on.
+  #
+  # Crypto is worth understanding before changing it. Those tickers have no
+  # fair value, so they can never be a strong buy, so a strong-only alert rule
+  # does not merely alert less on them — it would never alert at all. They are
+  # announced on the fired pattern instead, and the push says PATTERN 📈 rather
+  # than STRONG BUY 🚀 because it is a weaker claim: the same double cross with
+  # nothing independent agreeing.
+  #
+  # Expected volume, from the equity rate over the last 90 days scaled to the
+  # 18 crypto tickers: roughly 1 a week across 4h and 1d together. Crypto is
+  # more volatile and trades through the weekend, so treat that as a floor —
+  # 1.5 to 2.5 a week is the honest range. The 12-hour per-symbol cooldown and
+  # the once-per-pattern ledger both still apply.
+  push_markets: [sp500, nasdaq, europe, asia, penny, crypto]
+
 # Exit rules the Historical Dashboard compares. Every recorded pattern is taken
 # to a take-profit or a stop under each of these, walked bar by bar, so the only
 # difference between two rows is the rule itself.

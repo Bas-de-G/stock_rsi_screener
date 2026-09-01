@@ -176,3 +176,114 @@ def test_the_card_says_pattern_only_and_scores_nothing(tmp_path):
     assert "No earnings growth data yet" not in card, "'yet' promises what never comes"
     assert "morningstar.com" not in card
     assert "tradingview.com" in card
+
+
+# ------------------------------------------------------ reaching a phone
+
+
+def test_the_push_filter_needs_both_the_timeframe_and_the_market():
+    from screener.config import NotifyConfig
+
+    notify = NotifyConfig(push_horizons=("4h", "1d"), push_markets=("crypto",))
+    assert notify.pushes("1d", ("crypto",))
+    assert not notify.pushes("1h", ("crypto",)), "wrong timeframe"
+    assert not notify.pushes("1d", ("sp500",)), "wrong market"
+
+
+def test_a_ticker_in_several_markets_passes_on_any_of_them():
+    """BioNTech is tagged europe and nasdaq. Muting europe must not silence it
+    while nasdaq is still on."""
+    from screener.config import NotifyConfig
+
+    notify = NotifyConfig(push_horizons=("1d",), push_markets=("nasdaq",))
+    assert notify.pushes("1d", ("europe", "nasdaq"))
+
+
+def test_no_market_list_means_every_market():
+    """The setting did not exist before, so an unset one must keep the old
+    behaviour rather than silently muting everything."""
+    from screener.config import NotifyConfig
+
+    notify = NotifyConfig(push_horizons=("1d",))
+    assert notify.pushes("1d", ("crypto",))
+    assert notify.pushes("1d", ()), "a ticker with no markets is not muted either"
+
+
+def test_a_mistyped_push_market_is_refused(tmp_path):
+    """Same failure mode as a mistyped timeframe: silence that looks like calm.
+    `push_markets: [cryptos]` would mute every crypto alert and nothing would
+    look broken."""
+    from screener.config import load_config
+
+    path = tmp_path / "c.yaml"
+    path.write_text(f"""
+tickers:
+  - {{symbol: BTC, tradingview: "BINANCE:BTCUSDT", markets: [crypto]}}
+rsi: {{period: 14, threshold: 30, overbought: 70, interval: "1D"}}
+signal: {{window_days: 14, window_unit: calendar, valuation_rule: price_below_fair_value}}
+storage:
+  database: "{tmp_path / 't.db'}"
+  csv_dir: "{tmp_path}"
+  fair_values: "{tmp_path / 'fv.yaml'}"
+  notifications: "{tmp_path / 'n.json'}"
+  recommendations: "{tmp_path / 'r.csv'}"
+dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
+notify: {{push_markets: [cryptos]}}
+""")
+    with pytest.raises(ValueError, match="push_markets names no market"):
+        load_config(path)
+
+
+def test_a_pattern_alert_does_not_read_like_a_strong_buy():
+    """The distinction the dashboard is careful about matters most on a phone,
+    where a push is read in three seconds and acted on without opening it."""
+    from screener.config import DEFAULT_HORIZONS
+    from screener.notify import format_pattern_buy, pattern_issue_title
+
+    horizon = next(h for h in DEFAULT_HORIZONS if h.key == "1d")
+    message = format_pattern_buy("BTC", 77_411.0, "USD", horizon, 30.0, "u")
+    assert "PATTERN" in message
+    assert "STRONG" not in message and "🚀" not in message
+    assert "no fair value exists" in message
+    assert "strong" not in pattern_issue_title("BTC", horizon).lower()
+
+
+def test_a_crypto_pattern_actually_reaches_the_phone(tmp_path, monkeypatch):
+    """The bug a market filter alone would have left in place.
+
+    `_notify_new_strong_buys` requires `is_strong`, and an unvalued ticker can
+    never be strong -- so listing crypto in `push_markets` would have changed
+    nothing at all: the strong gate blocks it upstream and the phone stays
+    silent while the config looks correct.
+    """
+    import datetime as dt
+
+    from screener import cli
+    from screener.storage import RsiPoint, Signal, Store
+
+    config = crypto_config(tmp_path)
+    pushed = []
+    monkeypatch.setattr(cli, "send_push", lambda t, m, u="": pushed.append((t, m)) or True)
+    monkeypatch.setattr(cli, "send_webhook", lambda m: False)
+    monkeypatch.setattr(cli, "send_github_issue", lambda t, m, k: False)
+
+    # Relative to today: freshness is measured against now, so a pattern
+    # seeded at a fixed date ages out and the test would pass for the wrong
+    # reason as soon as the calendar moved past it.
+    base = dt.date.today() - dt.timedelta(days=39)
+    dates = [(base + dt.timedelta(days=i)).isoformat() for i in range(40)]
+    with Store(config.storage.database) as store:
+        for i, date in enumerate(dates):
+            # Ends above the threshold, as a completed double cross must.
+            store.upsert_rsi_point(RsiPoint("BTC", date, 50_000.0 + i, 35.0,
+                                            "test", horizon="1d"))
+        store.record_signal(Signal(
+            "BTC", dates[-4], dates[-3], dates[-2], 50_000.0, None,
+            False, False, True, "now", horizon="1d", direction="buy",
+        ))
+        sent = cli._notify_new_strong_buys(store, config)
+
+    assert sent == 1, "a crypto pattern with no valuation must still be announced"
+    title, message = pushed[0]
+    assert "PATTERN" in message and "STRONG" not in message
+    assert "BTC" in title

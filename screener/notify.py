@@ -85,10 +85,42 @@ def format_strong_buy(symbol: str, discount,  price, fair_value, currency: str,
     ])
 
 
+def format_pattern_buy(symbol: str, price, currency: str, horizon,
+                       threshold: float, url: str) -> str:
+    """A fired pattern on something with no valuation to confirm it.
+
+    Crypto. It has to read as a *weaker* claim than a strong buy, because it
+    is: the same double cross, with nothing independent agreeing. Rendering it
+    with the rocket and the word "strong" would erase in the notification the
+    distinction the dashboard is careful to make -- and the phone is where the
+    distinction matters most, since a push is read in three seconds and acted
+    on without opening anything.
+
+    So: a different marker, the word "pattern", and a line saying outright that
+    no valuation exists rather than leaving a suspicious blank where the fair
+    value normally sits.
+    """
+    money = f"{price:,.2f}" if price is not None else "?"
+    ccy = "" if currency == "USD" else f" {currency}"
+    return "\n".join([
+        f"PATTERN 📈 — {symbol}",
+        f"  Second cross of {threshold:g} within the last {horizon.fresh_label}"
+        f" on the {horizon.label} chart",
+        f"  {money}{ccy} · no fair value exists for this, so the pattern is"
+        f" the only evidence",
+        f"  {url}",
+    ])
+
+
 def issue_title(symbol: str, discount, horizon) -> str:
     """One line, because this is what lands in the email subject."""
     gap = f" — {discount * 100:.0f}% below fair value" if discount is not None else ""
     return f"🚀 {symbol} strong buy on the {horizon.label} chart{gap}"
+
+
+def pattern_issue_title(symbol: str, horizon) -> str:
+    """The same distinction in the email subject, where it is read fastest."""
+    return f"📈 {symbol} RSI pattern on the {horizon.label} chart — no valuation"
 
 
 NTFY_SERVER = "https://ntfy.sh"
