@@ -40,13 +40,14 @@ WINDOW_UNITS = ("calendar", "trading")
 # Market groups the dashboard can filter by. A ticker can belong to several --
 # AAPL is both an S&P 500 constituent and Nasdaq-listed -- so `markets` on a
 # Ticker is a list, not a single value.
-MARKETS = ("sp500", "nasdaq", "europe", "asia", "penny")
+MARKETS = ("sp500", "nasdaq", "europe", "asia", "penny", "crypto")
 MARKET_LABELS = {
     "sp500": "S&P 500",
     "nasdaq": "NASDAQ",
     "europe": "Europe",
     "asia": "Asia",
     "penny": "Under $10",
+    "crypto": "Crypto",
 }
 
 
@@ -135,7 +136,9 @@ DEFAULT_HORIZON = "1d"
 class Ticker:
     symbol: str
     tradingview: str
-    morningstar: str
+    # Empty for anything with no fair value to look up -- cryptocurrencies.
+    # `valued` is what the rest of the code should ask; see the note there.
+    morningstar: str = ""
     # Yahoo's symbol for backfill. Usually the same as `symbol`, but not
     # always: Rolls-Royce is RR. on TradingView and RR.L on Yahoo.
     yahoo: str = ""
@@ -151,8 +154,30 @@ class Ticker:
         object.__setattr__(self, "markets", tuple(self.markets))
 
     @property
+    def valued(self) -> bool:
+        """Whether a fair value can be looked up for this at all.
+
+        False for cryptocurrencies: there is no analyst fair value for Bitcoin,
+        and inventing a proxy would be worse than admitting it. The consequence
+        runs all the way to the verdict -- `signals.is_strong` requires a
+        valuation, so an unvalued ticker can fire a buy signal but can never
+        earn a rocket. That is deliberate, not an oversight to route around:
+        the pattern is the only evidence there is, and the card says so.
+        """
+        return bool(self.morningstar)
+
+    @property
     def morningstar_url(self) -> str:
         return f"https://www.morningstar.com/stocks/{self.morningstar}/quote"
+
+    @property
+    def tradingview_url(self) -> str:
+        """Where to look at the chart. The only external link an unvalued
+        ticker has, and the fallback for the card's primary button."""
+        return (
+            "https://www.tradingview.com/symbols/"
+            f"{self.tradingview.replace(':', '-')}/technicals/"
+        )
 
 
 @dataclass(frozen=True)
@@ -365,7 +390,7 @@ def load_config(path: str | Path | None = None) -> Config:
 
     tickers = []
     for entry in raw.get("tickers", []):
-        missing = {"symbol", "tradingview", "morningstar"} - set(entry)
+        missing = {"symbol", "tradingview"} - set(entry)
         if missing:
             raise ValueError(f"Ticker {entry!r} is missing: {', '.join(sorted(missing))}")
         raw_markets = entry.get("markets", []) or []
@@ -378,11 +403,22 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"Ticker {entry['symbol']!r} lists unknown market(s) "
                 f"{sorted(unknown)}; valid: {', '.join(MARKETS)}"
             )
+        slug = str(entry.get("morningstar", "") or "").strip("/")
+        # A missing slug has a real consequence -- the ticker can never earn a
+        # rocket, because `is_strong` requires a valuation -- so it has to be
+        # deliberate. Crypto is the case where it is; on an equity it is a typo,
+        # and one that would quietly downgrade the stock forever.
+        if not slug and "crypto" not in markets:
+            raise ValueError(
+                f"Ticker {entry['symbol']!r} has no morningstar slug. Only "
+                f"crypto tickers may omit it (they have no fair value); an "
+                f"equity without one could never be a strong buy."
+            )
         tickers.append(
             Ticker(
                 symbol=str(entry["symbol"]).upper(),
                 tradingview=str(entry["tradingview"]),
-                morningstar=str(entry["morningstar"]).strip("/"),
+                morningstar=slug,
                 yahoo=str(entry.get("yahoo", "") or ""),
                 currency=str(entry.get("currency", "USD")).upper(),
                 markets=markets,

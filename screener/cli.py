@@ -798,6 +798,8 @@ def _ranked_targets(store: Store, config: Config) -> list[tuple[str, int, str]]:
     ranked: list[tuple[str, int, str]] = []
 
     for ticker in config.tickers:
+        if not ticker.valued:
+            continue  # no Morningstar page exists for it, however urgent it looks
         best: tuple[int, str] | None = None
         for horizon in config.horizons:
             series = store.rsi_series(ticker.symbol, horizon.key)
@@ -888,18 +890,29 @@ def _resolve_scrape_targets(store: Store, config: Config, args) -> list:
         tickers = []
         for symbol in wanted:
             try:
-                tickers.append(config.ticker(symbol))
+                ticker = config.ticker(symbol)
             except KeyError as exc:
                 print(f"  ! {exc}")
+                continue
+            # Naming an unvalued ticker is a mistake worth saying out loud
+            # rather than skipping quietly: there is no Morningstar page for
+            # Bitcoin, and a silent omission would look like a failed scrape.
+            if not ticker.valued:
+                print(f"  ! {symbol} has no fair value to look up (crypto)")
+                continue
+            tickers.append(ticker)
         return tickers
 
     ranked = [config.ticker(s) for s in _signalled_symbols(store, config)]
     if not args.all:
         return ranked
     # --all still leads with the tickers a fair value would change something
-    # for; the rest follow in config order.
+    # for; the rest follow in config order. Unvalued tickers are not in either
+    # list -- there is no page to open.
     seen = {t.symbol for t in ranked}
-    return ranked + [t for t in config.tickers if t.symbol not in seen]
+    return ranked + [
+        t for t in config.tickers if t.symbol not in seen and t.valued
+    ]
 
 
 def _cap_targets(tickers: list, args) -> tuple[list, list]:
@@ -953,6 +966,78 @@ def _reference_prices(store: Store, tickers: list) -> dict[str, float]:
     return out
 
 
+def _propose_crypto(config: Config, args) -> int:
+    """Propose cryptocurrencies, checked against the feeds before printing.
+
+    Two sources, each doing what it is best at: CoinGecko ranks the assets and
+    says which are pegged or derived, TradingView says whether we can actually
+    price one. The verification is not a formality -- it is what removes the
+    tokenised money-market funds that no category catches (BUIDL and USYC both
+    sit in the top 40 at exactly 0.0% below their all-time high) and the
+    exchange tokens with no Binance pair.
+    """
+    from .coingecko import config_line, excluded_ids, top_assets
+    from .tradingview import fetch_daily_closes, fetch_live_batch
+
+    existing = {t.symbol.upper() for t in config.tickers}
+    limit = args.limit or 25
+
+    try:
+        excluded = excluded_ids()
+        assets = top_assets(limit=limit + 15, exclude=excluded)
+    except MarketDataError as exc:
+        print(f"  ! {exc}")
+        return 1
+    print(f"{len(excluded)} pegged or derived assets excluded by CoinGecko category.")
+
+    fresh = [a for a in assets if a.symbol not in existing]
+    if not fresh:
+        print("Nothing new in the top of the table.")
+        return 0
+
+    try:
+        rows = fetch_live_batch([a.tradingview for a in fresh], ["1D", "1W"])
+    except MarketDataError as exc:
+        print(f"  ! {exc}")
+        return 1
+
+    proposed, rejected = [], []
+    for asset in fresh:
+        row = rows.get(asset.tradingview) or {}
+        if row.get("RSI") is None:
+            rejected.append((asset.symbol, "no Binance USDT pair"))
+            continue
+        if row.get("RSI|1W") is None:
+            rejected.append((asset.symbol, "no weekly RSI — too recently listed"))
+            continue
+        try:
+            fetch_daily_closes(asset.yahoo)
+        except MarketDataError:
+            # Usually Yahoo disambiguating a colliding ticker: Uniswap is
+            # UNI7083-USD, not UNI-USD. Worth saying which, because the fix is
+            # a yahoo: field rather than dropping the asset.
+            rejected.append((asset.symbol, f"{asset.yahoo} returns no history — "
+                                           f"check for a numeric Yahoo suffix"))
+            continue
+        proposed.append(asset)
+        if len(proposed) >= limit:
+            break
+
+    print(f"\n{len(proposed)} proposed — paste under `tickers:` in config.yaml:\n")
+    for asset in proposed:
+        print(config_line(asset))
+
+    if rejected:
+        print(f"\n{len(rejected)} rejected:")
+        for symbol, why in rejected:
+            print(f"  {symbol:12s} {why}")
+
+    print("\nNothing was written. These carry no `morningstar:` field on purpose:")
+    print("  there is no fair value for a cryptocurrency, so they can signal on")
+    print("  the pattern but never reach strong. See the crypto note in config.yaml.")
+    return 0
+
+
 def cmd_universe(config: Config, args) -> int:
     """Propose tickers to add to the watchlist.
 
@@ -962,6 +1047,9 @@ def cmd_universe(config: Config, args) -> int:
     """
     from .tradingview import discover_market
     from .universe import as_yaml_line, parse_candidates, select
+
+    if args.crypto:
+        return _propose_crypto(config, args)
 
     wanted_indexes = tuple(
         i.strip() for i in (args.indexes or "").split(",") if i.strip()
@@ -1784,6 +1872,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_uni = sub.add_parser(
         "universe", help="propose tickers to add to the watchlist"
+    )
+    p_uni.add_argument(
+        "--crypto", action="store_true",
+        help="propose cryptocurrencies by market cap (CoinGecko) instead of equities",
     )
     p_uni.add_argument(
         "--market", default="america",

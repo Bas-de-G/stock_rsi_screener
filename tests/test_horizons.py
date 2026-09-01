@@ -321,7 +321,7 @@ def test_an_unknown_market_tag_is_rejected(tmp_path):
 
 
 def test_markets_constant_matches_what_config_accepts():
-    assert MARKETS == ("sp500", "nasdaq", "europe", "asia", "penny")
+    assert MARKETS == ("sp500", "nasdaq", "europe", "asia", "penny", "crypto")
 
 
 def test_every_market_has_a_dashboard_label():
