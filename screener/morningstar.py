@@ -223,7 +223,9 @@ def _scrape_on_page(
                 f"{'Retrying headless will not help; headless=false is already set.' if not ms_config.headless else 'Set morningstar.headless: false in config.yaml and try again — the interactive login uses a visible browser and gets through.'}"
             )
 
-        result = _extract(ticker.symbol, captured, page_text, reference_price)
+        result = _extract(
+            ticker.symbol, captured, page_text, reference_price, ticker.currency
+        )
 
         if not result.complete and ms_config.debug_on_failure:
             _dump_debug(page, ticker.symbol, captured)
@@ -355,6 +357,7 @@ def _extract(
     captured: list[dict],
     page_text: str,
     reference_price: float | None = None,
+    currency: str = "",
 ) -> ScrapeResult:
     """Try each extraction strategy in order of reliability.
 
@@ -379,9 +382,23 @@ def _extract(
                 result.price = px
                 result.method = result.method or "network-json"
 
+    # A JSON payload can carry the same pounds-against-pence split the rendered
+    # card does, and there it arrives with no currency marker at all. Corrected
+    # on the same terms as the text path: only for a pence-quoted listing, and
+    # only when x100 is plausible against a price that x1 is not.
+    if (
+        result.fair_value is not None
+        and reference_price
+        and currency.upper() == "GBX"
+        and not _plausible(result.fair_value, reference_price)
+        and _plausible(result.fair_value * 100, reference_price)
+    ):
+        result.fair_value *= 100
+        result.method = (result.method + "+pence").lstrip("+")
+
     # Strategy 2/3 — read the rendered card.
     if result.fair_value is None:
-        fv = _fair_value_from_text(page_text, reference_price)
+        fv = _fair_value_from_text(page_text, reference_price, currency)
         if fv is not None:
             result.fair_value = fv
             result.method = (result.method + "+text").lstrip("+")
@@ -461,7 +478,14 @@ def _fair_value_candidates(text: str) -> list[float]:
     return out
 
 
-def _fair_value_from_text(text: str, reference_price: float | None = None) -> float | None:
+def _plausible(candidate: float, reference_price: float) -> bool:
+    """Whether a fair value could belong to a stock at this price."""
+    return bool(candidate) and _RATIO_FLOOR <= reference_price / candidate <= _RATIO_CEILING
+
+
+def _fair_value_from_text(
+    text: str, reference_price: float | None = None, currency: str = ""
+) -> float | None:
     """Read the fair value, using a known price to disambiguate when there are
     several candidates.
 
@@ -471,6 +495,20 @@ def _fair_value_from_text(text: str, reference_price: float | None = None) -> fl
     TradingView already gave us the close), prefer the candidate that's within
     a plausible ratio of it and ignore the rest. Without a reference this falls
     back to "first match wins", which is the old behaviour.
+
+    London is the exception, and it is a real page rather than a hypothetical
+    one. Babcock's quote page prints the header as `GBX1,002.82` and the whole
+    Price vs Fair Value card in *pounds* — `Fair Value £10.85`, `1-Star Price
+    £12.37` — so the only candidate on the page is a hundredth of the price and
+    every one of them is correctly rejected as implausible. The page is not
+    broken and neither is the reader; the two halves are simply in different
+    units, which is exactly what the ticker's own `currency: GBX` records.
+
+    So for a pence-quoted listing, and only there, the same plausibility test is
+    retried against the candidate multiplied by 100. Reusing the one band rather
+    than inventing a second threshold matters: a value that is implausible in
+    pounds and implausible in pence is still refused, so this widens what can be
+    read without widening what is believed.
     """
     candidates = _fair_value_candidates(text)
     if not candidates:
@@ -478,11 +516,16 @@ def _fair_value_from_text(text: str, reference_price: float | None = None) -> fl
     if reference_price is None or reference_price <= 0:
         return candidates[0]
 
-    plausible = [
-        c for c in candidates
-        if _RATIO_FLOOR <= reference_price / c <= _RATIO_CEILING
-    ]
-    return plausible[0] if plausible else None
+    plausible = [c for c in candidates if _plausible(c, reference_price)]
+    if plausible:
+        return plausible[0]
+
+    if currency.upper() == "GBX":
+        in_pence = [c * 100 for c in candidates]
+        rescued = [c for c in in_pence if _plausible(c, reference_price)]
+        if rescued:
+            return rescued[0]
+    return None
 
 
 def _price_from_text(text: str) -> float | None:

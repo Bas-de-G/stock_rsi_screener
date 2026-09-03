@@ -19,6 +19,7 @@ from screener.morningstar import (
     _deep_find_number,
     _extract,
     _fair_value_from_text,
+    check_units,
     _looks_like_bot_challenge,
     _looks_logged_out,
     _price_from_text,
@@ -411,3 +412,80 @@ def test_a_reference_price_keeps_the_unit_guard_meaningful():
     result = _extract("RR", [], page, reference_price=1413.60)
     # No candidate is within 10x of 1413.60, so nothing is claimed at all.
     assert result.fair_value is None
+
+
+# ------------------------------------------------ pounds against pence
+#
+# Babcock's quote page prints the header as `GBX1,002.82` and the whole Price
+# vs Fair Value card in pounds — `Fair Value £10.85`, `1-Star Price £12.37`.
+# Every candidate on the page is a hundredth of the price, so all of them were
+# correctly rejected as implausible and the scrape recorded nothing at all:
+#
+#   BAB: page loaded but nothing usable came out (price=1024.0, fair_value=None)
+#
+# Neither half is wrong; they are in different units, which is what the
+# ticker's own `currency: GBX` already records.
+
+BAB_PAGE = """Babcock International Group PLC BAB
+GBX1,002.82 -21.18 (2.07%)
+Price vs Fair Value
+Fair Value £10.85 Aug 28, 2026
+Uncertainty Medium
+Price £10.24 Sep 1, 2026
+1-Star Price £12.37
+5-Star Price £9.53
+"""
+
+
+def test_a_pence_listing_reads_a_fair_value_quoted_in_pounds():
+    assert _fair_value_from_text(BAB_PAGE, 1024.0, "GBX") == 1085.0
+
+
+def test_the_same_page_without_the_pence_marker_is_still_refused():
+    """The ticker's currency authorises the correction, not the arithmetic.
+    Without it, x100 is indistinguishable from a parse error that happens to
+    be off by two orders of magnitude."""
+    assert _fair_value_from_text(BAB_PAGE, 1024.0) is None
+
+
+def test_a_pence_listing_already_quoted_in_pence_is_untouched():
+    """Rolls-Royce and Rentokil both scrape correctly today — 1520 and 510 in
+    pence — and must keep doing so. The correction is a fallback, not a rule."""
+    assert _fair_value_from_text("Fair Value GBX 1,520.00", 1413.6, "GBX") == 1520.0
+    assert _fair_value_from_text("Fair Value £510.00", 345.70, "GBX") == 510.0
+
+
+def test_a_real_parse_error_is_still_refused_on_a_pence_listing():
+    """Implausible in pounds AND implausible in pence is still implausible.
+    This widens what can be read, not what is believed."""
+    assert _fair_value_from_text("Fair Value £0.02", 1024.0, "GBX") is None
+
+
+def test_a_dollar_stock_is_never_rescaled():
+    """The UNH case: $16 against a $409 price is a parse error, and multiplying
+    it by a hundred would turn a refusal into a confident wrong answer."""
+    assert _fair_value_from_text("Fair Value $16.00", 409.0, "USD") is None
+    assert _fair_value_from_text("Fair Value €16.00", 409.0, "EUR") is None
+
+
+def test_the_whole_extraction_completes_and_passes_the_unit_check():
+    result = _extract("BAB", [], BAB_PAGE, 1024.0, "GBX")
+    assert result.complete
+    assert result.fair_value == 1085.0
+    assert result.price == 1024.0
+    check_units(result)  # must not raise
+    assert (result.fair_value / result.price - 1) == pytest.approx(0.0596, abs=1e-3)
+
+
+def test_a_json_fair_value_in_pounds_is_corrected_too():
+    """A payload carries no currency marker at all, so the same split arrives
+    with nothing to notice it by."""
+    result = _extract("BAB", [{"fairValue": 10.85}], "", 1024.0, "GBX")
+    assert result.fair_value == 1085.0
+    assert "pence" in result.method
+
+
+def test_a_json_fair_value_already_in_pence_is_left_alone():
+    result = _extract("RR", [{"fairValue": 1520.0}], "", 1413.6, "GBX")
+    assert result.fair_value == 1520.0
+    assert "pence" not in result.method
