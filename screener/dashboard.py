@@ -20,6 +20,8 @@ from .config import DEFAULT_HORIZON, MARKET_LABELS, MARKETS, Config, Horizon
 from .earnings import BEFORE, CLEAR_WINDOW, EarningsWindow, earnings_window
 from .earnings import to_date as to_release_date
 from .scoring import GREEN_AT, MAX_SCORE as SCORE_MAX, MIN_SCORE as SCORE_MIN
+from .drawdown import drawdown as _drawdown
+from .drawdown import gate as drawdown_gate
 from .signals import (
     BUY,
     SELL,
@@ -62,6 +64,13 @@ class Row:
     # read the same answer. Defaults to True: an equity always has one, and
     # only the crypto path sets it otherwise.
     valued: bool = True
+    # What a crypto asset has been worth, on two clocks. None for an equity,
+    # which is graded against a fair value instead.
+    highs: object | None = None
+    # The two-leg drawdown gate, already applied for this row's horizon. Held
+    # as the same (known, confirms) pair the Morningstar gate returns, so
+    # `is_strong` cannot tell the two apart and neither can anything after it.
+    drawdown_gate: tuple = (False, False)
     # The weighted conviction score, or None on a page built before it existed.
     # Shadow only: it ranks and explains, and decides nothing -- see
     # `screener.scoring.SHADOW`.
@@ -175,11 +184,24 @@ class Row:
     def sell_strong(self) -> bool:
         return any(
             s.fired and is_strong(
-                (s.valuation_known, s.valuation_pass),
+                self._grade(s),
                 (s.earnings_growth_known, s.earnings_growth_pass),
             )
             for s in self.sells
         )
+
+    def _grade(self, signal) -> tuple:
+        """The gate this row is graded by, in one place.
+
+        An equity is graded against its fair value, recorded on the signal at
+        the time. A crypto asset has none, so it is graded against how far
+        below its own highs it trades -- see `screener.drawdown`. Both return
+        (known, confirms), so `is_strong` keeps its asymmetric rule unchanged:
+        the gate is required, everything after it is a veto.
+        """
+        if self.valued:
+            return (signal.valuation_known, signal.valuation_pass)
+        return self.drawdown_gate
 
     @property
     def strong(self) -> bool:
@@ -193,7 +215,7 @@ class Row:
         """
         return any(
             s.fired and is_strong(
-                (s.valuation_known, s.valuation_pass),
+                self._grade(s),
                 (s.earnings_growth_known, s.earnings_growth_pass),
             )
             for s in self.buys
@@ -378,6 +400,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     signals = store.all_signals(horizon=horizon.key)
     releases = store.earnings_dates()
     readings = store.rule_one_readings()
+    highs = store.crypto_highs()
     # Whether results are near is a fact about the company, not the timeframe,
     # so it is judged once against the daily bars -- "three trading days" means
     # the same thing on the 1h page as on the 1w one.
@@ -412,6 +435,16 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 series=series,
                 crosses=_visible_crosses(full, window, config.rsi.threshold),
                 valued=ticker.valued,
+                highs=highs.get(ticker.symbol),
+                drawdown_gate=(
+                    (False, False) if ticker.valued or not config.crypto.enabled
+                    else drawdown_gate(
+                        series[-1].close if series else None,
+                        highs.get(ticker.symbol),
+                        horizon.margin, config.crypto.ath_floor,
+                        config.crypto.min_recent_bars,
+                    )
+                ),
                 valuation=valuations.get(ticker.symbol),
                 signals=sigs,
                 currency=ticker.currency,
@@ -702,15 +735,28 @@ def _card(row: Row, config: Config, horizon) -> str:
     )
 
     if not row.valued:
-        # Crypto. There is no analyst fair value for Bitcoin, and the honest
-        # thing is to say so rather than substitute a proxy -- distance to the
-        # all-time high was the tempting one, and it is just another way of
-        # saying the price has fallen, which the RSI signal already said. A
-        # gate that agrees with the signal by construction is not a second
-        # opinion, so this card carries no gate at all and never shows a rocket.
-        valuation_block = """
-        <p class="valuation none">No valuation — pattern only. Crypto has no
-        fair value to check, so this can signal but never reach strong.</p>"""
+        # Crypto, graded on where the price sits in its own range rather than
+        # against a fair value that does not exist. Two clocks, because one
+        # would only restate the RSI signal -- see `screener.drawdown`.
+        known, confirms = row.drawdown_gate
+        if not known:
+            valuation_block = """
+        <p class="valuation none">No highs recorded yet — pattern only.</p>"""
+        else:
+            price = row.series[-1].close if row.series else None
+            gate_class = "pass" if confirms else "fail"
+            from_ath = _drawdown(price, row.highs.all_time)
+            from_recent = _drawdown(price, row.highs.recent)
+            valuation_block = f"""
+        <dl class="valuation {gate_class}">
+          <div><dt>Below all-time</dt><dd>{from_ath:.0%}</dd></div>
+          <div><dt>Below 6-month</dt><dd>{from_recent:.0%}</dd></div>
+          <div><dt>Verdict</dt><dd>{"drawdown confirms" if confirms
+                                    else "not far enough down"}</dd></div>
+        </dl>
+        <p class="provenance">Needs {config.crypto.ath_floor:.0%} below its
+           all-time high and {horizon.margin_pct} below its 6-month high.
+           Not a valuation — a position in its own range.</p>"""
     elif row.valuation:
         val = row.valuation
         _, passed = _gate(val, config, horizon.margin)

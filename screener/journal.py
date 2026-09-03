@@ -261,10 +261,19 @@ def recommendation_from(row, signal, horizon, now: dt.datetime | None = None) ->
     from .signals import is_strong, signal_is_fresh
 
     now = now or dt.datetime.now()
+    # The gate the PAGE judged this by, not the signal's stored valuation
+    # columns. For an equity they are the same thing; for a crypto asset the
+    # columns are empty and the grading came from the drawdown gate, so reading
+    # them here would journal every crypto strong buy as a plain signal and the
+    # record would quietly disagree with what was published.
+    grade = row._grade(signal) if hasattr(row, "_grade") else (
+        bool(signal.valuation_known), bool(signal.valuation_pass)
+    )
     strong = is_strong(
-        (bool(signal.valuation_known), bool(signal.valuation_pass)),
+        grade,
         (bool(signal.earnings_growth_known), bool(signal.earnings_growth_pass)),
     )
+    extra = _drawdown_fields(row)
     discount = (
         (signal.fair_value - signal.price) / signal.price
         if signal.price and signal.fair_value else None
@@ -295,7 +304,35 @@ def recommendation_from(row, signal, horizon, now: dt.datetime | None = None) ->
         leverage=horizon.leverage,
         **_rule_one_fields(getattr(row, "rule_one", None)),
         **_conviction_fields(getattr(row, "conviction", None)),
+        extra=extra,
     )
+
+
+def _drawdown_fields(row) -> str:
+    """The crypto gate's own numbers, as JSON in `extra`.
+
+    In `extra` rather than as columns because that is what `extra` is for --
+    factors added later, without a schema migration for each one. Recorded on
+    every crypto row whether it passed or failed: "did the gated ones do
+    better?" needs both sides of the comparison, and a file containing only the
+    ones we liked answers a different question.
+    """
+    import json
+
+    highs = getattr(row, "highs", None)
+    if getattr(row, "valued", True) or highs is None:
+        return ""
+    from .drawdown import drawdown
+
+    price = row.series[-1].close if getattr(row, "series", None) else None
+    known, confirms = getattr(row, "drawdown_gate", (False, False))
+    return json.dumps({
+        "dd_ath": drawdown(price, highs.all_time),
+        "dd_recent": drawdown(price, highs.recent),
+        "dd_bars": highs.recent_bars,
+        "dd_known": int(bool(known)),
+        "dd_pass": int(bool(confirms)),
+    }, separators=(",", ":"))
 
 
 def _conviction_fields(comp) -> dict:

@@ -803,6 +803,38 @@ notify:
   # the once-per-pattern ledger both still apply.
   push_markets: [sp500, nasdaq, europe, asia, penny, crypto]
 
+# How a crypto signal is graded, in place of the fair value an equity gets.
+#
+# Two legs, and they must BOTH pass. That is the point: a single "how far below
+# its all-time high" test is just another way of saying the price has fallen,
+# which is what the RSI signal already said, so it would confirm nearly every
+# signal it saw. Two clocks disagree often enough to be informative — measured
+# across the watchlist the day this was written:
+#
+#   ZEC   -74% from its all-time high, but only  -4% from its 6-month high
+#   UNI   -87% from its all-time high, and        0% from its 6-month high
+#   BCH   -94% from its all-time high, and      -49% from its 6-month high
+#
+# Zcash and Uniswap collapsed years ago and have since recovered; Bitcoin Cash
+# is falling on both clocks. Requiring both admitted 8 of 18 assets that day,
+# against 16 for the all-time leg alone.
+#
+# ath_floor is a fact about the ASSET — something near its record high is not
+# cheap on any reading, and no holding period changes that — so it is one
+# global fraction. The recent leg is a fact about the TRADE, so it uses the
+# horizon's own margin: 10% below the 6-month high on the hourly chart, 50% on
+# the weekly one, exactly as the equity gate scales its discount to fair value.
+#
+# This is NOT a valuation and the card says so. Nobody is claiming an asset is
+# worth its old high. Whether it predicts anything is an open question — the
+# journal records the gate on every crypto signal, so the Historical Dashboard
+# can answer it rather than leaving it to argument.
+crypto:
+  ath_floor: 0.5          # at least 50% below the all-time high (a fraction, not a percent)
+  recent_window_bars: 180 # "6 months" — crypto has no weekends, so a bar is a day
+  min_recent_bars: 120    # refuse to call 3 weeks of history a 6-month high
+  enabled: true           # false returns crypto to pattern-only, gating nothing
+
 # Exit rules the Historical Dashboard compares. Every recorded pattern is taken
 # to a take-profit or a stop under each of these, walked bar by bar, so the only
 # difference between two rows is the rule itself.

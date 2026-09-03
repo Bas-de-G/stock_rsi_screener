@@ -187,8 +187,25 @@ CREATE TABLE IF NOT EXISTS rule_one (
 );
 """
 
+
+# What each crypto asset has been worth, on two clocks. One row per symbol,
+# overwritten each run: the all-time high comes from CoinGecko, the recent one
+# is recomputed from our own daily closes, and both are derived rather than
+# captured -- so the newest computation is by definition the best one.
+_CRYPTO_HIGHS_DDL = """
+CREATE TABLE IF NOT EXISTS crypto_highs (
+    symbol       TEXT PRIMARY KEY,
+    all_time     REAL,
+    recent       REAL,
+    recent_bars  INTEGER NOT NULL DEFAULT 0,
+    ath_date     TEXT NOT NULL DEFAULT '',
+    updated_at   TEXT NOT NULL
+);
+"""
+
 SCHEMA = (_RSI_HISTORY_DDL + _VALUATIONS_DDL + _SIGNALS_DDL + _EARNINGS_DDL
-          + _OUTCOMES_DDL + _RULE_ONE_DDL + _STRATEGY_TRADES_DDL)
+          + _OUTCOMES_DDL + _RULE_ONE_DDL + _STRATEGY_TRADES_DDL
+          + _CRYPTO_HIGHS_DDL)
 
 
 
@@ -737,6 +754,37 @@ class Store:
         with closing(self._conn.cursor()) as cur:
             cur.execute(sql, params)
             return [Outcome(*row) for row in cur.fetchall()]
+
+    def upsert_crypto_highs(self, highs) -> None:
+        """Record one asset's all-time and recent highs, overwriting."""
+        import datetime as _dt
+
+        stamp = _dt.datetime.now().isoformat(timespec="seconds")
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                """INSERT INTO crypto_highs (symbol, all_time, recent, recent_bars,
+                                             ath_date, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol) DO UPDATE SET
+                       all_time=excluded.all_time, recent=excluded.recent,
+                       recent_bars=excluded.recent_bars,
+                       ath_date=excluded.ath_date,
+                       updated_at=excluded.updated_at""",
+                (highs.symbol, highs.all_time, highs.recent, highs.recent_bars,
+                 highs.ath_date, stamp),
+            )
+        self._conn.commit()
+
+    def crypto_highs(self) -> dict:
+        """Every recorded set of highs, by symbol."""
+        from .drawdown import Highs
+
+        with closing(self._conn.cursor()) as cur:
+            cur.execute(
+                "SELECT symbol, all_time, recent, recent_bars, ath_date, updated_at"
+                " FROM crypto_highs"
+            )
+            return {row[0]: Highs(*row) for row in cur.fetchall()}
 
     def upsert_rule_one(self, symbol: str, reading) -> None:
         """Record a Rule #1 reading. One row per symbol, overwritten each run."""
