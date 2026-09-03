@@ -40,6 +40,7 @@ The valuation half runs from a laptop, on purpose — see "Credentials" below.
 | `screener/earnings.py` | the event-risk window around a results release |
 | `screener/journal.py` | the append-only `recommendations.csv` |
 | `screener/coingecko.py` | the crypto universe: ranking, and what to exclude |
+| `screener/drawdown.py` | the crypto gate: distance below the all-time and 6-month highs |
 | `screener/outcomes.py` | forward returns, and the random-entry baseline |
 | `screener/strategies.py` | take-profit / stop-loss exit rules, walked bar by bar |
 | `screener/ruleone.py` | Phil Town's Rule #1 sticker price, MOS and score |
@@ -129,13 +130,30 @@ indistinguishable from a parse error two orders of magnitude out, which is
 exactly the UNH `$16`-against-`$409` case the guard exists for.
 
 **A crypto ticker has no fundamentals, and nothing may invent them.** Crypto
-entries carry no `morningstar:` field, so `Ticker.valued` is False and
-`is_strong` — which requires a valuation — can never award the rocket. That is
-the design, not a gap to route around. The tempting substitute was distance
-below the all-time high, and it is not a valuation: it is another way of saying
-the price has fallen, which is exactly what the RSI signal already said. A gate
-that agrees with the signal by construction confirms nearly everything while
-looking like a second opinion, which is worse than no gate at all.
+entries carry no `morningstar:` field, so `Ticker.valued` is False and there is
+no fair value to grade against. What grades them instead is
+`screener/drawdown.py`: how far below their own highs they trade, on **two**
+clocks, both of which must pass.
+
+One clock would not do, and this is the part to keep. A single "how far below
+its all-time high" test is another way of saying the price has fallen, which is
+what the RSI signal already said — it would confirm nearly everything it saw
+while looking like an independent second opinion. Two clocks disagree often
+enough to be informative: Zcash sits 74% below its record and 4% off its
+6-month high, Uniswap 87% below its record and *at* its 6-month high, Bitcoin
+Cash 94% and 49%. Requiring both admitted 5 of 18 assets on the daily chart
+against 16 for the all-time leg alone.
+
+The all-time leg is a global floor because it is a fact about the *asset*; the
+recent leg uses `horizon.margin` because it is a fact about the *trade*, the
+same 10%-to-50% scale the equity gate uses. `Row._grade` is the single place
+that picks which gate applies, so `is_strong` cannot tell the two apart — and
+`journal.recommendation_from` must read that same grade, or a published crypto
+strong buy is recorded as a plain signal and the record disagrees with the page.
+
+It is not a valuation and the card says so. Whether it predicts anything is
+open; every crypto row is journalled with its two drawdowns in `extra`,
+passing *and* failing, so the Historical Dashboard can settle it.
 
 The same rule killed the conviction score for these tickers. The first version
 scored Bitcoin **6/10 on 24% coverage**, and every point came from "Earnings

@@ -294,6 +294,7 @@ def cmd_run(config: Config, args) -> int:
 
         _record_earnings_dates(store, config, rows)
         _record_rule_one(store, config, rows, horizons)
+        _record_crypto_highs(store, config)
 
         for horizon in horizons:
             print(f"\n[{horizon.key}] {horizon.label} bars")
@@ -679,6 +680,58 @@ def _record_earnings_dates(store: Store, config: Config, rows: dict) -> int:
         )
         recorded += 1
     return recorded
+
+
+def _record_crypto_highs(store: Store, config: Config) -> int:
+    """Refresh what each crypto asset has been worth, on two clocks.
+
+    The recent high is recomputed from our own daily closes -- free, and exact
+    for the window we hold. The all-time high has to come from CoinGecko: our
+    history is a year deep and most of these assets peaked years before it.
+
+    A CoinGecko failure is reported and swallowed. The stored highs simply stay
+    as they were, which degrades to "graded on yesterday's all-time high" --
+    a number that moves only when an asset sets a record. Failing the whole run
+    over it would trade a stale high for no RSI at all.
+    """
+    from .drawdown import Highs, recent_high
+
+    tickers = [t for t in config.tickers if not t.valued]
+    if not tickers or not config.crypto.enabled:
+        return 0
+
+    ath: dict[str, tuple[float | None, str]] = {}
+    try:
+        from .coingecko import top_assets
+
+        wanted = {t.symbol for t in tickers}
+        # Deep enough to cover the watchlist, which is drawn from the top of
+        # the same table; anything that has fallen out of it keeps its old high.
+        for asset in top_assets(limit=120):
+            if asset.symbol in wanted:
+                ath[asset.symbol] = (asset.ath, "")
+    except MarketDataError as exc:
+        print(f"  ! all-time highs unavailable ({exc}) — keeping the stored ones")
+
+    stored = store.crypto_highs()
+    written = 0
+    for ticker in tickers:
+        closes = [
+            p.close for p in store.rsi_series(ticker.symbol, DEFAULT_HORIZON)
+        ]
+        high, bars = recent_high(closes, config.crypto.recent_window_bars)
+        previous = stored.get(ticker.symbol)
+        all_time, ath_date = ath.get(
+            ticker.symbol,
+            (previous.all_time if previous else None,
+             previous.ath_date if previous else ""),
+        )
+        store.upsert_crypto_highs(Highs(
+            symbol=ticker.symbol, all_time=all_time, recent=high,
+            recent_bars=bars, ath_date=ath_date,
+        ))
+        written += 1
+    return written
 
 
 def _record_rule_one(store: Store, config: Config, rows: dict, horizons) -> int:
@@ -1373,23 +1426,31 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # merely alert less on crypto, it alerts never. The bar for those
             # is the fired pattern itself, which is all the evidence that will
             # ever exist for them, and the message says so in as many words.
-            if row.valued:
-                kind = "strong"
-                fresh = [
-                    s for s in row.buys
-                    if s.fired
-                    and signal_is_fresh(s, row.series, horizon)
-                    and is_strong(
-                        (s.valuation_known, s.valuation_pass),
-                        (s.earnings_growth_known, s.earnings_growth_pass),
-                    )
-                ]
-            else:
+            # `row._grade` is the gate this row is judged by: a fair value for
+            # an equity, the two-clock drawdown for a crypto asset. Both return
+            # the same (known, confirms) pair, so one rule covers both.
+            strong = [
+                s for s in row.buys
+                if s.fired
+                and signal_is_fresh(s, row.series, horizon)
+                and is_strong(
+                    row._grade(s),
+                    (s.earnings_growth_known, s.earnings_growth_pass),
+                )
+            ]
+            if strong:
+                kind, fresh = "strong", strong
+            elif not row.valued:
+                # A crypto pattern that fired without clearing the drawdown
+                # gate. Still worth saying -- it is the only evidence these
+                # assets have -- but as the weaker claim it is.
                 kind = "pattern"
                 fresh = [
                     s for s in row.buys
                     if s.fired and signal_is_fresh(s, row.series, horizon)
                 ]
+            else:
+                fresh = []
             if not fresh:
                 continue
             up2 = max(s.up2_date for s in fresh)

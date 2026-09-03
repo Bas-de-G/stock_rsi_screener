@@ -9,6 +9,8 @@ import datetime as dt
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .drawdown import DEFAULT_ATH_FLOOR, RECENT_WINDOW_BARS
+
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -317,6 +319,28 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 
 
 @dataclass(frozen=True)
+class CryptoConfig:
+    """The gate that grades a crypto signal, in place of a fair value.
+
+    Two legs, configured differently because they answer different questions.
+    `ath_floor` is a fact about the asset -- how far below its record it trades
+    -- so it is one global number no holding period changes. The recent leg is a
+    fact about the trade, so it reuses the horizon's own margin: 10% below the
+    six-month high on the hourly chart, 50% on the weekly one, exactly as the
+    equity gate scales its discount to fair value.
+
+    `min_recent_bars` refuses to grade an asset whose recent window is too
+    short. Without it a listing three weeks old would be measured against three
+    weeks of history while the card said "6-month high".
+    """
+
+    ath_floor: float = DEFAULT_ATH_FLOOR
+    recent_window_bars: int = RECENT_WINDOW_BARS
+    min_recent_bars: int = 120
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class StrategiesConfig:
     """Exit rules to measure the recorded signals under.
 
@@ -362,6 +386,7 @@ class Config:
     scoring: ScoringConfig = field(default_factory=lambda: ScoringConfig())
     notify: NotifyConfig = field(default_factory=lambda: NotifyConfig())
     strategies: StrategiesConfig = field(default_factory=lambda: StrategiesConfig())
+    crypto: CryptoConfig = field(default_factory=lambda: CryptoConfig())
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -516,12 +541,14 @@ def load_config(path: str | Path | None = None) -> Config:
     scoring = _load_scoring(raw.get("scoring", {}) or {})
     notify = _load_notify(raw.get("notify", {}) or {}, horizons)
     strategies = _load_strategies(raw.get("strategies", None))
+    crypto = _load_crypto(raw.get("crypto", {}) or {})
 
     return Config(
         tickers=tickers,
         scoring=scoring,
         notify=notify,
         strategies=strategies,
+        crypto=crypto,
         rsi=rsi,
         signal=signal,
         storage=storage,
@@ -576,6 +603,46 @@ def _load_strategies(raw) -> StrategiesConfig:
             note=str(item.get("note", "")),
         ))
     return StrategiesConfig(variants=tuple(variants))
+
+
+def _load_crypto(raw: dict) -> CryptoConfig:
+    """Read the `crypto:` block, keeping every default the file doesn't set.
+
+    An unknown key is an error. These numbers decide which crypto signals earn
+    a rocket, and a typo like `ath_floor_pct:` would silently leave the default
+    in place while the file appeared to say otherwise.
+    """
+    known = {"ath_floor", "recent_window_bars", "min_recent_bars", "enabled"}
+    unknown = set(raw) - known
+    if unknown:
+        raise ValueError(
+            f"crypto has no setting {', '.join(sorted(unknown))!r} — "
+            f"valid: {', '.join(sorted(known))}"
+        )
+
+    floor = float(raw.get("ath_floor", DEFAULT_ATH_FLOOR))
+    # A fraction, like every other margin in this file. 50 would read as
+    # "5000% below the all-time high" and silently gate everything out.
+    if not 0.0 <= floor < 1.0:
+        raise ValueError(
+            f"crypto.ath_floor is a fraction between 0 and 1 (0.5 = 50% below "
+            f"the all-time high); got {floor}"
+        )
+    window = int(raw.get("recent_window_bars", RECENT_WINDOW_BARS))
+    min_bars = int(raw.get("min_recent_bars", 120))
+    if window < 1:
+        raise ValueError("crypto.recent_window_bars must be at least 1")
+    if min_bars > window:
+        raise ValueError(
+            f"crypto.min_recent_bars ({min_bars}) exceeds recent_window_bars "
+            f"({window}), so nothing could ever qualify"
+        )
+    return CryptoConfig(
+        ath_floor=floor,
+        recent_window_bars=window,
+        min_recent_bars=min_bars,
+        enabled=bool(raw.get("enabled", True)),
+    )
 
 
 def _load_notify(raw: dict, horizons) -> NotifyConfig:

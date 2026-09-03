@@ -64,12 +64,14 @@ def test_an_equity_without_a_slug_is_refused(tmp_path):
         ))
 
 
-def test_an_unvalued_ticker_can_never_be_strong():
-    """The whole of option 1 in one assertion. A crypto pattern is real and
-    reportable; it is never confirmed, because there is nothing to confirm it
-    with."""
+def test_an_ungraded_ticker_can_never_be_strong():
+    """`is_strong` requires a gate that was actually applied. Crypto now has
+    one — the two-clock drawdown — but an asset with no recorded highs has
+    nothing applied to it, and must not slide into the strong cohort on a
+    default. Renamed from "unvalued can never be strong", which stopped being
+    true the day the drawdown gate shipped."""
     assert not is_strong((False, False))
-    assert not is_strong((False, True)), "unknown valuation is never a pass"
+    assert not is_strong((False, True)), "an ungraded asset is never a pass"
 
 
 def test_an_unvalued_ticker_links_to_the_chart_instead():
@@ -171,7 +173,9 @@ def test_the_card_says_pattern_only_and_scores_nothing(tmp_path):
     assert row.conviction is None, "no composite where four of five factors cannot exist"
 
     card = _card(row, config, horizon)
-    assert "No valuation — pattern only" in card
+    # No highs recorded in this fixture, so the gate cannot be applied and the
+    # card says which -- not "does not qualify", which would be a claim.
+    assert "No highs recorded yet" in card
     assert "Buffett score" not in card, "a permanent dash is not information"
     assert "No earnings growth data yet" not in card, "'yet' promises what never comes"
     assert "morningstar.com" not in card
@@ -287,3 +291,147 @@ def test_a_crypto_pattern_actually_reaches_the_phone(tmp_path, monkeypatch):
     title, message = pushed[0]
     assert "PATTERN" in message and "STRONG" not in message
     assert "BTC" in title
+
+
+# --------------------------------------- the drawdown gate, end to end
+
+
+def _seed_crypto(store, config, price, all_time, recent, bars=180):
+    """A crypto row with a fired, fresh buy pattern and known highs."""
+    import datetime as dt
+
+    from screener.drawdown import Highs
+    from screener.storage import RsiPoint, Signal
+
+    base = dt.date.today() - dt.timedelta(days=39)
+    dates = [(base + dt.timedelta(days=i)).isoformat() for i in range(40)]
+    for i, date in enumerate(dates):
+        store.upsert_rsi_point(RsiPoint("BTC", date, price, 35.0, "test", horizon="1d"))
+    store.record_signal(Signal(
+        "BTC", dates[-4], dates[-3], dates[-2], price, None,
+        False, False, True, "now", horizon="1d", direction="buy",
+    ))
+    store.upsert_crypto_highs(Highs(
+        symbol="BTC", all_time=all_time, recent=recent, recent_bars=bars,
+    ))
+    return dates
+
+
+def test_a_crypto_signal_clearing_both_legs_is_a_strong_buy(tmp_path):
+    """What was asked for: a rocket on crypto, gated on distance from the
+    6-month high AND the all-time high, with the RSI pattern already fired."""
+    from screener.dashboard import _card, _collect
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    horizon = config.horizon("1d")   # wants 30% off the 6-month high
+    with Store(config.storage.database) as store:
+        _seed_crypto(store, config, price=245.0, all_time=3785.0, recent=480.0)
+        row = next(r for r in _collect(store, config, horizon) if r.symbol == "BTC")
+
+    assert row.drawdown_gate == (True, True)
+    assert row.strong, "93% below its record and 49% below its 6-month high"
+    assert row.state == "strong"
+    card = _card(row, config, horizon)
+    assert "Below all-time" in card and "Below 6-month" in card
+    assert "drawdown confirms" in card
+    assert "Not a valuation" in card, "the card must not call this a fair value"
+
+
+def test_a_crypto_signal_that_has_recovered_is_not_strong(tmp_path):
+    """Zcash: 74% below its record, but 4% off its 6-month high. A single
+    all-time-high gate would have called this a strong buy."""
+    from screener.dashboard import _collect
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    horizon = config.horizon("1d")
+    with Store(config.storage.database) as store:
+        _seed_crypto(store, config, price=819.61, all_time=3191.93, recent=852.19)
+        row = next(r for r in _collect(store, config, horizon) if r.symbol == "BTC")
+
+    assert row.drawdown_gate == (True, False)
+    assert not row.strong
+    assert row.fired, "still a signal — the pattern is real, it just isn't confirmed"
+
+
+def test_the_journal_records_the_gate_the_page_judged_by(tmp_path):
+    """The signal's stored valuation columns are empty for crypto, so reading
+    them here would journal a published strong buy as a plain signal and the
+    record would disagree with the page."""
+    import json
+
+    from screener.dashboard import _collect
+    from screener.journal import recommendation_from
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    horizon = config.horizon("1d")
+    with Store(config.storage.database) as store:
+        _seed_crypto(store, config, price=245.0, all_time=3785.0, recent=480.0)
+        row = next(r for r in _collect(store, config, horizon) if r.symbol == "BTC")
+
+    rec = recommendation_from(row, row.buys[-1], horizon)
+    assert rec.verdict == "strong"
+    extra = json.loads(rec.extra)
+    assert extra["dd_pass"] == 1
+    assert extra["dd_ath"] == pytest.approx(0.935, abs=0.01)
+    assert extra["dd_recent"] == pytest.approx(0.49, abs=0.01)
+
+
+def test_a_failing_crypto_row_is_journalled_too(tmp_path):
+    """Both sides of the comparison, or 'did the gated ones do better?' cannot
+    be answered."""
+    import json
+
+    from screener.dashboard import _collect
+    from screener.journal import recommendation_from
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    horizon = config.horizon("1d")
+    with Store(config.storage.database) as store:
+        _seed_crypto(store, config, price=819.61, all_time=3191.93, recent=852.19)
+        row = next(r for r in _collect(store, config, horizon) if r.symbol == "BTC")
+
+    rec = recommendation_from(row, row.buys[-1], horizon)
+    assert rec.verdict == "signal"
+    assert json.loads(rec.extra)["dd_pass"] == 0
+
+
+def test_turning_the_gate_off_returns_crypto_to_pattern_only(tmp_path):
+    from dataclasses import replace
+
+    from screener.dashboard import _collect
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    config = replace(config, crypto=replace(config.crypto, enabled=False))
+    horizon = config.horizon("1d")
+    with Store(config.storage.database) as store:
+        _seed_crypto(store, config, price=245.0, all_time=3785.0, recent=480.0)
+        row = next(r for r in _collect(store, config, horizon) if r.symbol == "BTC")
+
+    assert row.drawdown_gate == (False, False)
+    assert not row.strong and row.fired
+
+
+def test_a_crypto_strong_buy_reaches_the_phone_as_a_strong_buy(tmp_path, monkeypatch):
+    """Not as PATTERN. The distinction has to survive into the push, in both
+    directions: a gated crypto buy is the strong claim and must read as one."""
+    from screener import cli
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    pushed = []
+    monkeypatch.setattr(cli, "send_push", lambda t, m, u="": pushed.append(m) or True)
+    monkeypatch.setattr(cli, "send_webhook", lambda m: False)
+    monkeypatch.setattr(cli, "send_github_issue", lambda t, m, k: False)
+
+    with Store(config.storage.database) as store:
+        _seed_crypto(store, config, price=245.0, all_time=3785.0, recent=480.0)
+        sent = cli._notify_new_strong_buys(store, config)
+
+    assert sent == 1
+    assert "STRONG BUY" in pushed[0]
+    assert "PATTERN" not in pushed[0]
