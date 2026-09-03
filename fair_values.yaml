@@ -180,6 +180,10 @@ BA:
   fair_value: 246.0
   checked: '2026-08-19'
   source: scraped
+BAB:
+  fair_value: 1085.0
+  checked: '2026-09-03'
+  source: scraped
 BAC:
   fair_value: 66.0
   checked: '2026-08-19'
