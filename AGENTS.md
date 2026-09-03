@@ -109,6 +109,25 @@ two years later. That one bug reported the 20-day buy cohort as +11.4% when it
 is +1.6%. `forward_outcomes` refuses to measure an uncovered signal; if you
 change how history is fetched, check that guard still holds.
 
+**A London page can quote the price in pence and the fair value in pounds.**
+Not a hypothetical: Babcock's page prints `GBX1,002.82` in the header and the
+entire Price vs Fair Value card in pounds — `Fair Value £10.85`, `1-Star Price
+£12.37`. Every candidate is a hundredth of the price, all are correctly
+rejected as implausible, and the scrape records nothing while reporting that
+the page loaded. Rolls-Royce and Rentokil quote the same card in pence and
+scrape fine, so it varies by page, not by exchange — Babcock carries a
+*quantitative* rating rather than analyst coverage, which is the visible
+difference.
+
+`_fair_value_from_text` retries the plausibility test against the candidate
+x100, and only for a ticker whose own `currency` is GBX. Two things about that
+are load-bearing. It reuses the one band rather than adding a second threshold,
+so a value implausible in pounds *and* in pence is still refused — this widens
+what can be read, never what is believed. And the ticker's currency is what
+authorises it, not the arithmetic: without that marker, x100 is
+indistinguishable from a parse error two orders of magnitude out, which is
+exactly the UNH `$16`-against-`$409` case the guard exists for.
+
 **A crypto ticker has no fundamentals, and nothing may invent them.** Crypto
 entries carry no `morningstar:` field, so `Ticker.valued` is False and
 `is_strong` — which requires a valuation — can never award the rocket. That is
