@@ -662,6 +662,41 @@ tickers:
   - {symbol: LHA,  tradingview: "XETR:LHA",     morningstar: xetr/lha, yahoo: LHA.DE, currency: EUR, markets: [europe]}   # RSI 33
   - {symbol: BAB,  tradingview: "LSE:BAB",      morningstar: xlon/bab, yahoo: BAB.L,  currency: GBX, markets: [europe]}   # RSI 30
 
+  # Twenty more picked for proximity to the line — every one near daily RSI 30,
+  # so the two upward crosses the screener looks for are plausible from here.
+  # Weighted to the thin sectors again, and again no Finance: it is still the
+  # heaviest at 48 and a good half of the oversold names are banks and REITs.
+  #
+  # Two candidates were dropped as duplicates of companies already watched, and
+  # neither shares a ticker with the entry it duplicates: PHG is the NYSE ADR of
+  # Koninklijke Philips, already held as EURONEXT:PHIA, and FMS is the ADR of
+  # Fresenius Medical Care, added two batches ago as XETR:FME. Matching on
+  # symbol would have missed both and put the same company on the list twice.
+  #
+  # Distribution Services (12) and Energy Minerals (13) are the two thinnest
+  # sectors and neither had anything oversold to offer — the whole of Energy
+  # Minerals is holding up, and Distribution Services had one name at RSI 40.
+  - {symbol: DY,   tradingview: "NYSE:DY",       morningstar: xnys/dy,    markets: [sp500]}   # RSI 26 · Industrial Services
+  - {symbol: LGN,  tradingview: "NASDAQ:LGN",    morningstar: xnas/lgn,   markets: [sp500, nasdaq]}   # RSI 36 · Industrial Services
+  - {symbol: VVV,  tradingview: "NYSE:VVV",      morningstar: xnys/vvv,   markets: [sp500]}   # RSI 27 · Consumer Services
+  - {symbol: NCLH, tradingview: "NYSE:NCLH",     morningstar: xnys/nclh,  markets: [sp500]}   # RSI 29 · Consumer Services
+  - {symbol: VIK,  tradingview: "NYSE:VIK",      morningstar: xnys/vik,   markets: [sp500]}   # RSI 31 · Consumer Services
+  - {symbol: WYNN, tradingview: "NASDAQ:WYNN",   morningstar: xnas/wynn,  markets: [sp500, nasdaq]}   # RSI 32 · Consumer Services
+  - {symbol: AS,   tradingview: "NYSE:AS",       morningstar: xnys/as,    markets: [sp500]}   # RSI 29 · Consumer Durables
+  - {symbol: PII,  tradingview: "NYSE:PII",      morningstar: xnys/pii,   markets: [sp500]}   # RSI 29 · Consumer Durables
+  - {symbol: TKC,  tradingview: "NYSE:TKC",      morningstar: xnys/tkc,   markets: [sp500]}   # RSI 29 · Communications
+  - {symbol: ZTO,  tradingview: "NYSE:ZTO",      morningstar: xnys/zto,   markets: [sp500]}   # RSI 29 · Transportation
+  - {symbol: DKS,  tradingview: "NYSE:DKS",      morningstar: xnys/dks,   markets: [sp500]}   # RSI 29 · Retail Trade
+  - {symbol: VIPS, tradingview: "NYSE:VIPS",     morningstar: xnys/vips,  markets: [sp500]}   # RSI 31 · Retail Trade
+  - {symbol: TPR,  tradingview: "NYSE:TPR",      morningstar: xnys/tpr,   markets: [sp500]}   # RSI 32 · Retail Trade
+  - {symbol: TSN,  tradingview: "NYSE:TSN",      morningstar: xnys/tsn,   markets: [sp500]}   # RSI 27 · Consumer Non-Durables
+  - {symbol: RL,   tradingview: "NYSE:RL",       morningstar: xnys/rl,    markets: [sp500]}   # RSI 29 · Consumer Non-Durables
+  - {symbol: HRL,  tradingview: "NYSE:HRL",      morningstar: xnys/hrl,   markets: [sp500]}   # RSI 30 · Consumer Non-Durables
+  - {symbol: BC,   tradingview: "NYSE:BC",       morningstar: xnys/bc,    markets: [sp500]}   # RSI 29 · Producer Manufacturing
+  - {symbol: ALH,  tradingview: "NYSE:ALH",      morningstar: xnys/alh,   markets: [sp500]}   # RSI 31 · Producer Manufacturing
+  - {symbol: DOV,  tradingview: "NYSE:DOV",      morningstar: xnys/dov,   markets: [sp500]}   # RSI 31 · Producer Manufacturing
+  - {symbol: KNF,  tradingview: "NYSE:KNF",      morningstar: xnys/knf,   markets: [sp500]}   # RSI 35 · Non-Energy Minerals
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data
