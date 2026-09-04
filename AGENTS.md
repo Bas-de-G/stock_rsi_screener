@@ -183,6 +183,24 @@ trap in reverse: `{SYMBOL}-USD` is right for most and wrong for Uniswap
 (`UNI7083-USD`) and Sui (`SUI20947-USD`), where the bare form returns a
 malformed chart rather than an error.
 
+**A strategy is an exit rule times a selection, and the walk belongs to the
+exit rule alone.** `strategies.exits` (when to get out) and
+`strategies.selections` (which signals, which charts) cross into the
+leaderboard, so seven and six make forty-two from thirteen lines of config.
+Walking a price path is the expensive part and depends only on the exit rule,
+so each rule is walked once and the selections filter the same trades
+afterwards -- which also guarantees two strategies sharing an exit rule are
+looking at literally the same trades rather than two similar sets.
+
+**Every leaderboard row needs a baseline for its own holding period.** Not one
+baseline for the page: this sample covers a period equities spent mostly
+rising, so a 60-day hold posts a good number for reasons that have nothing to
+do with the screener, and comparing it against a 20-day random entry would
+flatter it twice. With the baselines in place, only 12 of the 42 strategies
+beat a coin held the same length of time -- and several rows that look clearly
+profitable are below it. Without them the page would have read as forty-two
+winners.
+
 **A take-profit/stop-loss strategy must walk the path, never the extremes.**
 `outcomes` stores `max_gain` and `max_drawdown`, so a +5/−5 rule looks like a
 query: won if it ever reached +5%, lost if it ever reached −5%. Those columns do

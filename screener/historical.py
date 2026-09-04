@@ -540,93 +540,205 @@ def _panel_html(panel: Panel, cohort: Cohort, horizon) -> str:
 # -------------------------------------------------------------- page
 
 
-def _exit_rules(store: Store, config: Config) -> str:
-    """The exit-rule comparison: the same signals under each take-profit/stop.
+def _strategies_section(store: Store, config: Config) -> str:
+    """The leaderboard: every strategy ranked, with a legend explaining each.
 
-    Split by direction rather than blended. Buys and sells score in opposite
-    directions on this sample, so one combined row would move with the ratio of
-    buys to sells as much as with the rule being tested.
+    Ranked by mean return per trade rather than by hit rate, because the two
+    disagree and the disagreement is the interesting part -- a rule taking 5%
+    profits against 15% stops can be right most of the time and still lose
+    money. Total return is shown beside it so a rule that wins rarely and
+    hugely is not hidden behind a rule that wins often and barely.
+
+    Buys only. Sells are recorded and charted above, but "which strategy would
+    I run" is a question about entries, and mixing a cohort that scores
+    negatively on this sample into every row would move the ranking with the
+    buy/sell mix rather than with the rule.
     """
-    from .strategies import compare, summarise
+    from .strategies import ALL_BUYS, leaderboard
 
     variants = list(config.strategies.variants)
     if not variants:
         return ""
-
-    by_key = {v.key: store.all_trades(strategy=v.key) for v in variants}
-    if not any(by_key.values()):
+    trades = store.all_trades(direction=BUY)
+    if not trades:
         return ""
 
-    def row(label: str, trades, breakeven: float, klass: str = "") -> str:
-        s = summarise(trades)
-        if not s["n"]:
-            return f'<tr class="{klass}"><th>{html.escape(label)}</th>' \
-                   f'<td colspan="8" class="none">no trades</td></tr>'
-        pos = " up" if s["mean"] > 0 else " down"
-        return (
-            f'<tr class="{klass}">'
-            f'<th>{html.escape(label)}</th>'
-            f'<td>{s["n"]:,}</td>'
-            f'<td>{s["hit_rate"] * 100:.1f}%</td>'
-            f'<td class="muted">{breakeven:.1f}%</td>'
-            f'<td class="num{pos}">{s["mean"] * 100:+.2f}%</td>'
-            f'<td class="num">{s["median"] * 100:+.2f}%</td>'
-            f'<td>{s["target"]:,}</td>'
-            f'<td>{s["stopped"]:,}</td>'
-            f'<td>{s["timeout"]:,}</td>'
-            f'<td class="muted">{s["mean_bars"]:.1f}</td>'
+    rows = leaderboard(trades, variants)
+    best = rows[0][1] if rows and rows[0][1].get("n") else None
+    baselines = _baselines(store, config, sorted({r.max_bars for r in config.strategies.exits}))
+
+    body = []
+    for rank, (strategy, st) in enumerate(rows, start=1):
+        if not st["n"]:
+            body.append(
+                f'<tr class="empty"><td class="rank">{rank}</td>'
+                f'<th>{html.escape(strategy.name)}</th>'
+                f'<td colspan="7" class="none">never triggered on this sample</td></tr>'
+            )
+            continue
+        top = " top" if best is not None and st is best else ""
+        pos = " up" if st["mean"] > 0 else " down"
+        body.append(
+            f'<tr class="{top.strip()}">'
+            f'<td class="rank">{rank}</td>'
+            f'<th>{html.escape(strategy.name)}</th>'
+            f'<td>{st["n"]:,}</td>'
+            f'<td>{st["hit_rate"] * 100:.0f}%</td>'
+            f'<td class="num{pos}">{st["mean"] * 100:+.2f}%</td>'
+            f'<td class="num">{st["median"] * 100:+.2f}%</td>'
+            f'<td class="num">{st["total"] * 100:+,.0f}%</td>'
+            f'<td class="muted">{st["target"]}/{st["stopped"]}/{st["timeout"]}</td>'
+            f'<td class="muted">{st["mean_bars"]:.0f}</td>'
             f'</tr>'
         )
 
-    body = []
-    for key, _ in compare(by_key):
-        v = config.strategies.variant(key)
-        be = v.breakeven_hit_rate * 100
-        trades = by_key[key]
-        label = f"{v.label}" + (f" · {v.max_bars}d" if v.max_bars else "")
-        body.append(row(label, trades, be, "rule"))
-        for direction in ("buy", "sell"):
-            body.append(row(
-                f"    {direction}",
-                [t for t in trades if t.direction == direction], be, "sub",
-            ))
+    base_rows = "".join(
+        f'<tr class="baseline"><td class="rank">·</td>'
+        f'<th>Random entry · held {bars} days</th>'
+        f'<td>{st["n"]:,}</td><td>{st["hit_rate"] * 100:.0f}%</td>'
+        f'<td class="num">{st["mean"] * 100:+.2f}%</td>'
+        f'<td class="num">{st["median"] * 100:+.2f}%</td>'
+        f'<td colspan="3" class="none">no rules at all — the number to beat</td></tr>'
+        for bars, st in sorted(baselines.items()) if st.get("n")
+    )
 
-    notes = "".join(
-        f"<li>{n}</li>" for n in (
-            "<strong>Each row is the same signals</strong>, exited by a different "
-            "rule — so any difference between them is the rule and nothing else.",
-            "<strong>Needs</strong> is the hit rate a rule would break even at if "
-            "every exit landed exactly on its barrier. Real ones overshoot, so a "
-            "row can sit below it and still return positively. It says what a rule "
-            "asks of the signal; it is not a pass mark.",
-            "<strong>Exits are the close that breached the barrier</strong>, not "
-            "the barrier. We hold daily closes, so a stop touched at 11am and "
-            "recovered by the bell is invisible and a gap opens straight through "
-            "it. Tighter rules lose more to this than wide ones.",
-            "<strong>A timeout is not a loss.</strong> It is a position that "
-            "reached neither barrier and closed at the end of its window — worth "
-            "reading separately, because a rule earning its return from timeouts "
-            "is not doing what it was designed to do.",
-        )
+    exits = "".join(
+        f'<div class="def"><dt>{html.escape(r.label)}</dt>'
+        f'<dd>{html.escape(_exit_sentence(r))}</dd></div>'
+        for r in config.strategies.exits
+    )
+    picks = "".join(
+        f'<div class="def"><dt>{html.escape(sel.label)}</dt>'
+        f'<dd>{html.escape(_selection_sentence(sel))}</dd></div>'
+        for sel in config.strategies.selections
     )
 
     return f"""
-<section class="exits">
-  <h2>Exit rules, compared</h2>
-  <p class="lede">Every recorded pattern taken to a take-profit or a stop,
-     walked bar by bar in date order. Ordered by mean return — not by hit rate,
-     which can disagree.</p>
+<section class="strategies">
+  <div class="divider"><span>Strategies</span></div>
+
+  <h2>Which set of rules would actually have worked?</h2>
+  <p class="lede">Every strategy below is the same three choices in a
+     different combination: <strong>which signals to take</strong>,
+     <strong>which charts to watch</strong>, and <strong>when to get
+     out</strong>. All of them are run over the same recorded patterns, walked
+     bar by bar, so the only thing separating two rows is the rule itself.</p>
+
+  <h3>The exit rules</h3>
+  <dl class="legend">{exits}</dl>
+
+  <h3>Which signals each one takes</h3>
+  <dl class="legend">{picks}</dl>
+
+  <h3>Leaderboard</h3>
+  <p class="lede">{len(variants)} permutations, buys only, ranked by mean
+     return per trade.</p>
   <div class="scroll">
-  <table class="cmp">
+  <table class="board">
     <thead><tr>
-      <th>Rule</th><th>n</th><th>Hit</th><th>Needs</th><th>Mean</th>
-      <th>Median</th><th>Target</th><th>Stop</th><th>Timeout</th><th>Days</th>
+      <th>#</th><th>Strategy</th><th>Trades</th><th>Hit</th><th>Mean</th>
+      <th>Median</th><th>Total</th><th title="target / stopped / timeout">T/S/O</th>
+      <th>Days</th>
     </tr></thead>
-    <tbody>{"".join(body)}</tbody>
+    <tbody>{base_rows}{"".join(body)}</tbody>
   </table>
   </div>
-  <ul class="fine">{notes}</ul>
+
+  <ul class="fine">
+    <li><strong>The dotted rows are the number to beat.</strong> Equities drift
+        upward, so <em>any</em> long strategy scores above half and returns
+        positively over a rising sample — including buying on days picked by a
+        coin. A strategy is only interesting where it parts company with the
+        random entry held for the same length of time, and several of these do
+        not.</li>
+    <li><strong>Ranked by mean, not hit rate.</strong> They disagree, and the
+        disagreement is the point: a rule taking small profits against large
+        stops can be right most of the time and still lose money. <em>Total</em>
+        is the sum of every trade's return — not compounded, because these
+        trades overlap in time and compounding would imply a position size and
+        a capital limit that nothing here models.</li>
+    <li><strong>T/S/O</strong> is how each strategy ended: hit its target,
+        stopped out, or timed out at the end of its window. A rule earning its
+        return from timeouts rather than targets is not doing what its name
+        says.</li>
+    <li><strong>{len(variants)} permutations against one sample is
+        {len(variants)} chances for the winner to have won by luck.</strong>
+        Nothing here corrects for that. Read the leaderboard as a shortlist to
+        test forward, not as a result — and prefer a rule that is good across
+        several neighbouring settings over one that spikes alone.</li>
+    <li><strong>"Strong only" is partly hindsight.</strong> Fair values only
+        exist from 2026-07-27, so a signal's strength is recomputed here
+        against the price on its own bar but today's fair value. Analyst fair
+        values move a few times a year, so this is far weaker hindsight than
+        the stored flag — and it is still hindsight. The clean comparison
+        starts from <code>recommendations.csv</code>, going forward.</li>
+    <li><strong>Exits are the close that breached the barrier</strong>, not the
+        barrier. With daily closes a stop touched at 11am and recovered by the
+        bell is invisible, and a gap opens straight through it. Tighter rules
+        lose more to this than wide ones.</li>
+  </ul>
 </section>"""
+
+
+def _baselines(store: Store, config: Config, windows) -> dict:
+    """Random-entry returns over each holding period the strategies use.
+
+    Without these the leaderboard is unreadable: this sample covers a period
+    equities spent mostly rising, so a 60-day hold posts a good number for
+    reasons that have nothing to do with the screener. Comparing a 60-day
+    strategy against a 20-day baseline would flatter it twice over, which is
+    why there is one baseline per window rather than one for the page.
+    """
+    from .outcomes import baseline_outcomes
+    from .outcomes import summarise as summarise_outcomes
+
+    windows = tuple(windows)
+    if not windows:
+        return {}
+    pooled = {bars: [] for bars in windows}
+    for ticker in config.tickers:
+        closes = [
+            (p.date, p.close) for p in store.rsi_series(ticker.symbol, DEFAULT_HORIZON)
+        ]
+        for outcome in baseline_outcomes(ticker.symbol, closes, bars=windows):
+            pooled[outcome.bars].append(outcome)
+    return {bars: summarise_outcomes(rows) for bars, rows in pooled.items()}
+
+
+def _exit_sentence(rule) -> str:
+    """The legend line for one exit rule, in plain words."""
+    if rule.take_profit is None and rule.stop_loss is None:
+        return (f"No target and no stop. Hold for {rule.max_bars} trading days "
+                f"and take whatever the price is then.")
+    parts = []
+    if rule.take_profit is not None:
+        parts.append(f"sell at +{rule.take_profit:g}%")
+    if rule.stop_loss is not None:
+        parts.append(f"cut at -{rule.stop_loss:g}%")
+    sentence = ", ".join(parts).capitalize()
+    breakeven = rule.breakeven_hit_rate
+    tail = (f" Needs to be right {breakeven:.0%} of the time to break even."
+            if breakeven is not None else "")
+    return (f"{sentence}, whichever comes first, or close after "
+            f"{rule.max_bars} trading days.{tail}")
+
+
+def _selection_sentence(selection) -> str:
+    """The legend line for one selection."""
+    from .strategies import STRONG_ONLY
+
+    many = len(selection.horizons) > 1
+    charts = (
+        ", ".join(selection.horizons[:-1]) + " and " + selection.horizons[-1]
+        if many else selection.horizons[0]
+    )
+    bar = (
+        "only signals that also cleared the valuation gate with nothing "
+        "vetoing them — the rocket on the cards above"
+        if selection.entry == STRONG_ONLY
+        else "every fired buy pattern, whether or not a fair value confirmed it"
+    )
+    return f"Takes {bar}, on the {charts} chart" + ("s." if many else ".")
 
 
 def build_historical(store: Store, config: Config, output: Path) -> Path:
@@ -669,7 +781,7 @@ def render_historical(store: Store, config: Config) -> str:
         _panel_html(panels[(c.key, h.key)], c, h)
         for c in COHORTS for h in horizons
     )
-    exits = _exit_rules(store, config)
+    exits = _strategies_section(store, config)
 
     show_rules = "\n".join(
         f'#co-{c.key}:checked ~ #tf-{h.key}:checked ~ .panels .p-{c.key}-{h.key} '
@@ -769,32 +881,70 @@ def render_historical(store: Store, config: Config) -> str:
 
 
 _EXTRA_CSS = """
-/* ---- Exit-rule comparison -------------------------------------------- */
-.exits { margin: 34px 0 8px; padding-top: 22px; border-top: 2px solid var(--ink); }
-.exits h2 { font-size: 1.05rem; margin: 0 0 6px; letter-spacing: -0.01em; }
-.exits .lede { margin: 0 0 16px; color: var(--ink-3); max-width: 62ch; }
+/* ---- Strategies + leaderboard ---------------------------------------- */
+.strategies { margin: 40px 0 8px; }
+.divider { display: flex; align-items: center; gap: 16px; margin: 0 0 26px; }
+.divider::before, .divider::after {
+  content: ""; flex: 1; height: 2px; background: var(--ink); opacity: .85;
+}
+.divider span {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .18em;
+  font-weight: 700; color: var(--ink);
+}
+.strategies h2 { font-size: 1.15rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+.strategies h3 {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-3); margin: 26px 0 10px;
+}
+.strategies .lede { margin: 0 0 4px; color: var(--ink-2); max-width: 68ch; }
+
+dl.legend {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2px 22px; margin: 0;
+}
+dl.legend .def {
+  display: grid; grid-template-columns: 8.5rem 1fr; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid var(--rule);
+}
+dl.legend dt { font-weight: 600; font-size: .84rem; }
+dl.legend dd { margin: 0; color: var(--ink-2); font-size: .82rem; line-height: 1.45; }
+
 /* Wide table, narrow phone: scrolls inside its own box so the page never does */
-.exits .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-table.cmp { border-collapse: collapse; width: 100%; min-width: 640px;
-            font-variant-numeric: tabular-nums; font-size: 0.86rem; }
-table.cmp th, table.cmp td { padding: 7px 10px; text-align: right;
-                             border-bottom: 1px solid var(--rule); }
-table.cmp thead th { font-size: 0.7rem; text-transform: uppercase;
-                     letter-spacing: 0.06em; color: var(--ink-3);
-                     border-bottom: 1px solid var(--ink); }
-table.cmp th:first-child, table.cmp thead th:first-child { text-align: left; }
-table.cmp tr.rule th { font-weight: 600; }
-table.cmp tr.rule td { font-weight: 600; }
-table.cmp tr.sub th { font-weight: 400; color: var(--ink-3); padding-left: 22px;
-                      white-space: pre; }
-table.cmp tr.sub td { color: var(--ink-3); }
-table.cmp .muted { color: var(--ink-3); }
-table.cmp .none { text-align: left; color: var(--ink-3); font-style: italic; }
-table.cmp .up { color: var(--green); }
-table.cmp .down { color: var(--crimson); }
-.exits ul.fine { margin: 14px 0 0; padding-left: 18px; color: var(--ink-3);
-                 font-size: 0.82rem; line-height: 1.55; max-width: 78ch; }
-.exits ul.fine li { margin-bottom: 5px; }
+.strategies .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.board {
+  border-collapse: collapse; width: 100%; min-width: 680px;
+  font-variant-numeric: tabular-nums; font-size: .84rem;
+}
+table.board th, table.board td {
+  padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--rule);
+}
+table.board thead th {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-3); border-bottom: 1px solid var(--ink); white-space: nowrap;
+}
+table.board th:nth-child(2), table.board thead th:nth-child(2) { text-align: left; }
+table.board td.rank { color: var(--ink-3); width: 2.2rem; }
+table.board tbody th { font-weight: 500; text-align: left; white-space: nowrap; }
+table.board tr.top { background: color-mix(in srgb, var(--green) 9%, transparent); }
+table.board tr.top th, table.board tr.top td { font-weight: 700; }
+table.board tr.empty th, table.board tr.empty td { color: var(--ink-3); }
+table.board tr.baseline { border-bottom: 2px solid var(--ink); }
+table.board tr.baseline th, table.board tr.baseline td {
+  color: var(--ink-2); font-style: italic;
+}
+table.board .muted { color: var(--ink-3); }
+table.board .none { text-align: left; font-style: italic; }
+table.board .up { color: var(--green); }
+table.board .down { color: var(--crimson); }
+.strategies ul.fine {
+  margin: 16px 0 0; padding-left: 18px; color: var(--ink-2);
+  font-size: .82rem; line-height: 1.55; max-width: 82ch;
+}
+.strategies ul.fine li { margin-bottom: 7px; }
+.strategies ul.fine code {
+  font-size: .95em; background: color-mix(in srgb, var(--ink) 6%, transparent);
+  padding: 1px 4px; border-radius: 3px;
+}
 
 /* ---- Historical Dashboard -------------------------------------------- */
 .sel { position: absolute; opacity: 0; pointer-events: none; }

@@ -506,8 +506,10 @@ def test_the_page_shows_the_exit_rules_when_trades_exist(config, tmp_path):
     with Store(config.storage.database) as store:
         page = render_historical(store, config)
 
-    assert 'class="exits"' in page
-    assert "Swing +3/-5" in page and "Hold +5/-5" in page
+    assert 'class="strategies"' in page
+    assert "Leaderboard" in page
+    assert "Scalp" in page and "Hold 60d" in page, "exit rules are named"
+    assert "1d · Strong only" in page, "and so are the selections"
     assert "<script" not in page.lower(), "the dashboards have never had any"
 
 
@@ -519,4 +521,4 @@ def test_the_section_is_absent_rather_than_empty_without_trades(config):
         seed(store, "AAA")
         page = render_historical(store, config)
 
-    assert 'class="exits"' not in page
+    assert 'class="strategies"' not in page
