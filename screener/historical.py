@@ -108,6 +108,10 @@ class Panel:
     base: list[float] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
     base_stats: dict = field(default_factory=dict)
+    # Signals that fired but have no bar after them yet, so there is nothing to
+    # plot. Listed rather than silently dropped: they are the ones most worth
+    # acting on, and their absence from the chart reads as "it wasn't recorded".
+    pending: list = field(default_factory=list)
 
 
 # ------------------------------------------------------------ gathering
@@ -180,6 +184,51 @@ def collect_panels(store: Store, config: Config) -> dict[tuple[str, str], Panel]
                     price_then, daily[ticker.symbol], signal.up2_date, CHART_DAYS
                 )
                 if len(path) < 2:
+                    # Two very different reasons a path can be too short, and
+                    # only one of them is temporary.
+                    #
+                    # A signal that fired today has no daily bar after it yet,
+                    # so an event study has nothing to draw -- it appears here
+                    # tomorrow. That one is worth naming on the page, because
+                    # it is exactly the signal someone is looking for.
+                    #
+                    # An old weekly pattern is a different case: the daily
+                    # series only reaches back a year, so `trajectory` refuses
+                    # rather than measure a path that starts two years after
+                    # the signal. That refusal is permanent and correct, and
+                    # listing those would suggest they are coming.
+                    # Three reasons a path can be too short, and only one of
+                    # them is "wait until tomorrow":
+                    #   * no price on the signal's own bar -- the intraday bar
+                    #     it fired on has since been pruned, so there is
+                    #     nothing to rebase from and there never will be;
+                    #   * the daily series starts after the signal -- an old
+                    #     weekly pattern, refused permanently and correctly;
+                    #   * neither of those, so it simply has no close yet.
+                    # Only the third is pending. Listing the first two would
+                    # promise a chart line that is never coming.
+                    covered = (
+                        price_then is not None
+                        and daily[ticker.symbol]
+                        and daily[ticker.symbol][0][0][:10] <= signal.up2_date[:10]
+                    )
+                    if covered:
+                        # Same cohort rule the plotted entries use, so a
+                        # pending signal lands where its finished counterpart
+                        # would have.
+                        strong_now = _retrospective_strong(
+                            signal, price_then,
+                            valuation.fair_value if valuation else None,
+                            config, horizon.margin,
+                        )
+                        base = BUY if signal.direction == BUY else SELL
+                        keys = [base]
+                        if strong_now:
+                            keys.append("strong" if base == BUY else "sell_strong")
+                        for key in keys:
+                            panels[(key, horizon.key)].pending.append(
+                                (ticker.symbol, signal.up2_date)
+                            )
                     continue
                 outcome = outcomes.get(
                     (ticker.symbol, horizon.key, signal.direction, signal.up2_date)
@@ -213,6 +262,7 @@ def collect_panels(store: Store, config: Config) -> dict[tuple[str, str], Panel]
     for panel in panels.values():
         # Newest first: the recent past is the part anyone can still remember.
         panel.entries.sort(key=lambda e: e.up2_date, reverse=True)
+        panel.pending.sort(key=lambda p: p[1], reverse=True)
         if len(panel.entries) >= MIN_FOR_MEAN:
             panel.mean = mean_path([e.path for e in panel.entries])
         panel.base = base_mean
@@ -533,8 +583,34 @@ def _panel_html(panel: Panel, cohort: Cohort, horizon) -> str:
   {_readout(panel)}
   <div class="plot-frame">{_plot(panel)}</div>
   {caveat}
+  {_pending(panel)}
   {_table(panel)}
 </section>"""
+
+
+def _pending(panel: Panel) -> str:
+    """Signals that fired but have no bar after them yet.
+
+    An event study needs somewhere for the line to go, so a signal that
+    completed today cannot be plotted -- there is no close after it. Left out
+    silently, that reads as "it was never recorded", which is exactly the wrong
+    conclusion about the freshest and most actionable signals on the site. So
+    they are named here, with the reason, until the next daily close brings
+    them onto the chart.
+    """
+    if not panel.pending:
+        return ""
+    names = ", ".join(
+        f"<strong>{html.escape(sym)}</strong> <span class=\"when\">{html.escape(date[:16])}</span>"
+        for sym, date in panel.pending[:12]
+    )
+    more = (f" and {len(panel.pending) - 12} more"
+            if len(panel.pending) > 12 else "")
+    return (
+        f'<p class="pending"><span class="tag">Just fired</span>{names}{more}'
+        f' — no close after them yet, so there is no path to draw. '
+        f'They join the chart at the next daily close.</p>'
+    )
 
 
 # -------------------------------------------------------------- page
@@ -864,6 +940,14 @@ def render_historical(store: Store, config: Config) -> str:
         what you would expect, not proof it is wrong forever.</li>
     <li><strong>Valuation is applied after the fact.</strong> See the note in
         the strong-buy and strong-sell panels.</li>
+    <li><strong>Two kinds of signal are missing from the charts, for two
+        different reasons.</strong> One that fired today has no close after it
+        yet, so there is no path to draw — those are named under their panel
+        and appear at the next daily close. An <em>old weekly</em> pattern can
+        be missing permanently: the daily series reaches back about a year, so
+        a 2024 weekly signal sits before it, and drawing a path that starts
+        long after the signal would describe a different quarter entirely. It
+        is refused rather than guessed.</li>
   </ul>
 </div>
 
@@ -880,6 +964,17 @@ def render_historical(store: Store, config: Config) -> str:
 
 _EXTRA_CSS = """
 /* ---- Strategies + leaderboard ---------------------------------------- */
+.pending {
+  margin: 10px 0 0; padding: 9px 12px; font-size: 12.5px; line-height: 1.5;
+  border-left: 3px solid var(--accent); color: var(--ink-2);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.pending .tag {
+  display: inline-block; margin-right: 8px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--accent);
+}
+.pending .when { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
 .strategies { margin: 40px 0 8px; }
 .divider { display: flex; align-items: center; gap: 16px; margin: 0 0 26px; }
 .divider::before, .divider::after {
