@@ -522,3 +522,70 @@ def test_the_section_is_absent_rather_than_empty_without_trades(config):
         page = render_historical(store, config)
 
     assert 'class="strategies"' not in page
+
+
+# ------------------------------------------- signals too new to plot
+
+
+def test_a_signal_with_no_close_after_it_is_named_not_dropped(config, tmp_path):
+    """The complaint this fixes: a strong buy that fired today is absent from
+    the chart, because an event study has nowhere to draw it — and silence
+    reads as "it was never recorded", which is the wrong conclusion about the
+    freshest signal on the site."""
+    from screener.historical import collect_panels, render_historical
+
+    with Store(config.storage.database) as store:
+        dates = seed(store, "AAA", days=30, signal_on=10, fair_value=None)
+        # A second pattern completing on the very last bar: nothing follows it.
+        store.record_signal(Signal(
+            "AAA", dates[-3], dates[-2], dates[-1],
+            100.0 + 1.0 * 29, None, False, False, True, "now",
+            horizon="1d", direction="buy",
+        ))
+        panels = collect_panels(store, config)
+        page = render_historical(store, config)
+
+    pending = panels[("buy", "1d")].pending
+    assert [p[0] for p in pending] == ["AAA"]
+    assert pending[0][1] == dates[-1]
+    assert "Just fired" in page
+    assert "no close after them yet" in page
+
+
+def test_a_signal_whose_own_bar_was_pruned_is_not_called_pending(config):
+    """A different reason for the same symptom. An intraday bar that has since
+    been pruned leaves no price to rebase from, so that signal can never be
+    plotted — listing it as "just fired" would promise a line that is never
+    coming."""
+    from screener.historical import collect_panels
+
+    with Store(config.storage.database) as store:
+        dates = seed(store, "AAA", days=30, signal_on=10)
+        # A pattern dated where no bar exists at all.
+        store.record_signal(Signal(
+            "AAA", "2025-01-01", "2025-01-02", "2025-01-03",
+            None, None, False, False, True, "now",
+            horizon="1d", direction="buy",
+        ))
+        panels = collect_panels(store, config)
+
+    assert panels[("buy", "1d")].pending == [], "no entry price, so not pending"
+
+
+def test_an_old_signal_the_daily_series_predates_is_not_pending(config):
+    """The look-ahead guard's case. The daily series starts after the signal,
+    so a path drawn from it would describe a different quarter — refused
+    permanently, and not advertised as arriving tomorrow."""
+    from screener.historical import collect_panels
+
+    with Store(config.storage.database) as store:
+        seed(store, "AAA", days=30, signal_on=10)
+        store.upsert_rsi_point(RsiPoint("AAA", "2023-01-05", 50.0, 35.0, "t", horizon="1d"))
+        store.record_signal(Signal(
+            "AAA", "2023-01-03", "2023-01-04", "2023-01-05",
+            50.0, None, False, False, True, "now",
+            horizon="1d", direction="buy",
+        ))
+        panels = collect_panels(store, config)
+
+    assert all(p[1] != "2023-01-05" for p in panels[("buy", "1d")].pending)
