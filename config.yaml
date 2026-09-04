@@ -870,32 +870,50 @@ crypto:
   min_recent_bars: 120    # refuse to call 3 weeks of history a 6-month high
   enabled: true           # false returns crypto to pattern-only, gating nothing
 
-# Exit rules the Historical Dashboard compares. Every recorded pattern is taken
-# to a take-profit or a stop under each of these, walked bar by bar, so the only
-# difference between two rows is the rule itself.
+# The strategies the Historical Dashboard ranks. Two lists, crossed: every exit
+# rule is run against every selection, so 7 x 6 = 42 strategies come out of the
+# thirteen entries below.
 #
-# take_profit and stop_loss are POSITIVE percentages in both directions --
-# `stop_loss: -5` reads naturally and would stop out every winner, so it is
-# rejected rather than accepted. max_bars closes anything that has reached
-# neither barrier, and that is reported as a timeout rather than a loss.
+# Walking a price path is the expensive part and it depends only on the exit
+# rule, so each rule is walked once and the selections are applied afterwards as
+# filters. Every strategy sharing an exit rule is therefore looking at literally
+# the same trades.
 #
-# Adding a variant is a config edit. Keep the list short anyway: each extra rule
-# tested against the same 7,291 signals raises the chance the winner won by
-# luck, and nothing here corrects for that. Delete the block entirely (or set it
-# to []) to turn the comparison off.
+# Keep both lists short. Forty-two strategies tested against one sample of
+# signals is forty-two chances for the winner to have won by luck, and nothing
+# here corrects for that — the page says so where the ranking is read.
 strategies:
-  - key: swing
-    label: "Swing +3/-5"
-    take_profit: 3.0
-    stop_loss: 5.0
-    max_bars: 20      # about three weeks
-    note: "a shorter rebound trade: takes what it can get"
-  - key: hold
-    label: "Hold +5/-5"
-    take_profit: 5.0
-    stop_loss: 5.0
-    max_bars: 60      # about a quarter
-    note: "a larger move over a longer horizon"
+
+  # WHEN TO GET OUT. take_profit and stop_loss are positive percentages in both
+  # directions; `null` means no barrier at all, which is how a pure
+  # holding-period rule is expressed. max_bars is in trading days.
+  exits:
+    - {key: scalp,  label: "Scalp",      take_profit: 5.0,  stop_loss: 5.0,  max_bars: 20,
+       note: "take 5%, cut 5%, three weeks at most"}
+    - {key: even,   label: "Even",       take_profit: 10.0, stop_loss: 10.0, max_bars: 60,
+       note: "take 10%, cut 10%, a quarter at most"}
+    - {key: wide,   label: "Wide",       take_profit: 15.0, stop_loss: 15.0, max_bars: 60,
+       note: "take 15%, cut 15%, a quarter at most"}
+    - {key: tight,  label: "Tight stop", take_profit: 10.0, stop_loss: 5.0,  max_bars: 60,
+       note: "take 10% but cut at 5% — needs to be right twice as often"}
+    - {key: runner, label: "Runner",     take_profit: 15.0, stop_loss: 5.0,  max_bars: 60,
+       note: "let it run to 15%, cut hard at 5%"}
+    - {key: hold20, label: "Hold 20d",   take_profit: null, stop_loss: null, max_bars: 20,
+       note: "no barriers at all — out after twenty trading days, whatever happened"}
+    - {key: hold60, label: "Hold 60d",   take_profit: null, stop_loss: null, max_bars: 60,
+       note: "no barriers — out after sixty trading days"}
+
+  # WHICH SIGNALS TO TAKE. `entry` is "strong" (pattern fired, valuation
+  # confirms, nothing vetoes) or "all" (every fired buy). `horizons` is which
+  # charts the strategy watches — more timeframes means more trades, not better
+  # ones, and which way that cuts is what the leaderboard is for.
+  selections:
+    - {key: d-strong,   label: "1d · Strong only",       entry: strong, horizons: [1d]}
+    - {key: d-all,      label: "1d · Every buy",         entry: all,    horizons: [1d]}
+    - {key: 4d-strong,  label: "4h+1d · Strong only",    entry: strong, horizons: [4h, 1d]}
+    - {key: 4d-all,     label: "4h+1d · Every buy",      entry: all,    horizons: [4h, 1d]}
+    - {key: 14d-strong, label: "1h+4h+1d · Strong only", entry: strong, horizons: [1h, 4h, 1d]}
+    - {key: 14d-all,    label: "1h+4h+1d · Every buy",   entry: all,    horizons: [1h, 4h, 1d]}
 
 scoring:
   # How much each factor counts towards the 1–10 conviction score on each card.

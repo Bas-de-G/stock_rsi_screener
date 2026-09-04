@@ -13,18 +13,23 @@ import pytest
 
 from screener.config import _load_strategies
 from screener.strategies import (
+    ALL_BUYS,
     STOPPED,
+    STRONG_ONLY,
     TARGET,
     TIMEOUT,
+    ExitRule,
+    Selection,
     Strategy,
     compare,
+    leaderboard,
     summarise,
     walk,
 )
 
 
-def rule(take=5.0, stop=5.0, bars=60, key="t") -> Strategy:
-    return Strategy(key=key, label=key, take_profit=take, stop_loss=stop, max_bars=bars)
+def rule(take=5.0, stop=5.0, bars=60, key="t") -> ExitRule:
+    return ExitRule(key=key, label=key, take_profit=take, stop_loss=stop, max_bars=bars)
 
 
 def series(*closes, start="2026-01-02"):
@@ -174,43 +179,80 @@ def test_an_empty_summary_reports_nothing_rather_than_zero():
 def test_compare_orders_by_mean_not_hit_rate():
     """The trap the ordering exists to avoid: a rule can be right more often
     and still return less."""
-    often_right = [take([100, 101.5], strategy=rule(take=1.0, stop=9.0, key="a"))] * 4 \
-        + [take([100, 90], strategy=rule(take=1.0, stop=9.0, key="a"))]
-    rarely_right = [take([100, 130], strategy=rule(take=25.0, stop=9.0, key="b"))]
+    # a: right four times out of five, but for 1.5% a time against a 10% loss.
+    a = rule(take=1.0, stop=9.0, key="a")
+    often_right = [take([100, 101.5], strategy=a)] * 4 + [take([100, 90], strategy=a)]
+    # b: right once in three, but the win is worth 30%.
+    b = rule(take=25.0, stop=9.0, key="b")
+    rarely_right = [take([100, 130], strategy=b)] + [take([100, 90], strategy=b)] * 2
+
+    assert summarise(often_right)["hit_rate"] > summarise(rarely_right)["hit_rate"]
+    assert summarise(often_right)["mean"] < summarise(rarely_right)["mean"]
 
     ranked = compare({"a": often_right, "b": rarely_right})
-    assert summarise(often_right)["hit_rate"] > summarise(rarely_right)["hit_rate"] or True
     assert ranked[0][0] == "b", "higher mean leads, regardless of hit rate"
 
 
 # ------------------------------------------------------------- the config
 
 
-def test_the_defaults_are_the_two_requested_variants():
-    variants = _load_strategies(None).variants
-    assert {v.key for v in variants} == {"swing", "hold"}
-    swing = next(v for v in variants if v.key == "swing")
-    assert (swing.take_profit, swing.stop_loss) == (3.0, 5.0)
+def test_the_defaults_cross_every_exit_with_every_selection():
+    config = _load_strategies(None)
+    assert len(config.variants) == len(config.exits) * len(config.selections)
+    assert len(config.variants) == 42, "7 exit rules x 6 selections"
 
 
-def test_an_empty_block_turns_the_comparison_off():
-    assert _load_strategies([]).variants == ()
+def test_an_empty_block_turns_the_leaderboard_off():
+    assert _load_strategies({}).variants == ()
+
+
+def test_the_old_flat_list_shape_says_what_to_do():
+    """This block used to be a list of variants. A bare TypeError three frames
+    down would not tell anyone what to edit."""
+    with pytest.raises(ValueError, match="two sections"):
+        _load_strategies([dict(key="x", take_profit=5.0, stop_loss=5.0)])
 
 
 def test_a_negative_stop_is_refused_rather_than_silently_inverted():
     """`stop_loss: -5` reads naturally and would stop out every winner."""
-    with pytest.raises(ValueError, match="positive percentages"):
-        _load_strategies([dict(key="x", take_profit=5.0, stop_loss=-5.0)])
+    with pytest.raises(ValueError, match="positive percentage"):
+        _load_strategies({"exits": [
+            dict(key="x", take_profit=5.0, stop_loss=-5.0, max_bars=20)
+        ], "selections": []})
+
+
+def test_a_null_barrier_is_allowed_because_a_holding_period_is_a_strategy():
+    config = _load_strategies({"exits": [
+        dict(key="hold", take_profit=None, stop_loss=None, max_bars=20)
+    ], "selections": []})
+    rule = config.exits[0]
+    assert rule.take_profit is None and rule.stop_loss is None
+    assert rule.breakeven_hit_rate is None, "no barriers, no breakeven to quote"
 
 
 def test_a_duplicate_key_is_refused():
-    with pytest.raises(ValueError, match="duplicate"):
-        _load_strategies([
-            dict(key="x", take_profit=5.0, stop_loss=5.0),
-            dict(key="x", take_profit=3.0, stop_loss=5.0),
-        ])
+    with pytest.raises(ValueError, match="duplicate exit rule"):
+        _load_strategies({"exits": [
+            dict(key="x", take_profit=5.0, stop_loss=5.0, max_bars=20),
+            dict(key="x", take_profit=3.0, stop_loss=5.0, max_bars=20),
+        ], "selections": []})
 
 
 def test_a_missing_field_names_what_is_missing():
-    with pytest.raises(ValueError, match="stop_loss"):
-        _load_strategies([dict(key="x", take_profit=5.0)])
+    with pytest.raises(ValueError, match="max_bars"):
+        _load_strategies({"exits": [dict(key="x", take_profit=5.0)],
+                          "selections": []})
+
+
+def test_an_unknown_entry_bar_is_refused():
+    with pytest.raises(ValueError, match="entry is"):
+        _load_strategies({"exits": [], "selections": [
+            dict(key="s", entry="strongish", horizons=["1d"])
+        ]})
+
+
+def test_a_selection_with_no_timeframes_is_refused():
+    with pytest.raises(ValueError, match="names no timeframes"):
+        _load_strategies({"exits": [], "selections": [
+            dict(key="s", entry="all", horizons=[])
+        ]})

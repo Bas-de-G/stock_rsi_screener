@@ -1599,12 +1599,18 @@ def cmd_evaluate(config: Config, args) -> int:
     whole back catalogue -- there is no need to have been collecting anything
     special, because the prices were always there.
     """
+    from .historical import _retrospective_strong
     from .outcomes import FORWARD_BARS, forward_outcomes
     from .strategies import walk
 
-    variants = list(config.strategies.variants)
+    # One walk per EXIT RULE, not per strategy. The entry filter and the
+    # timeframe set are selections over the same trades, applied when the
+    # leaderboard is built -- so 42 strategies cost 7 walks, and every strategy
+    # sharing an exit rule is guaranteed to be looking at the same trades.
+    rules = list(config.strategies.exits)
 
     with Store(config.storage.database) as store:
+        valuations = {v.symbol: v for v in store.latest_valuations()}
         # The daily series is the common ruler for every horizon, so it is
         # fetched once per symbol rather than once per signal.
         daily: dict[str, list[tuple[str, float]]] = {}
@@ -1639,13 +1645,27 @@ def cmd_evaluate(config: Config, args) -> int:
                         skipped += 1
                     measured.extend(results)
 
+                    # Was this strong when it fired? Recomputed against the
+                    # price on its own bar rather than read from the stored
+                    # flag, which `_rescore_signals` overwrites with today's
+                    # verdict. Still leans on today's fair value -- see the
+                    # caveat the page carries -- but that is a far weaker form
+                    # of hindsight than the stored flag.
+                    valuation = valuations.get(ticker.symbol)
+                    strong = _retrospective_strong(
+                        signal, entry,
+                        valuation.fair_value if valuation else None,
+                        config, horizon.margin,
+                    )
+
                     # The same signal under each exit rule. Walked here rather
                     # than derived later from max_gain/max_drawdown, which
                     # cannot say which barrier was touched first.
-                    for strategy in variants:
+                    for rule in rules:
                         trade = walk(
                             ticker.symbol, horizon.key, signal.direction,
-                            signal.up2_date, entry, daily[ticker.symbol], strategy,
+                            signal.up2_date, entry, daily[ticker.symbol], rule,
+                            strong=strong,
                         )
                         if trade is not None:
                             trades.append(trade)
@@ -1655,9 +1675,9 @@ def cmd_evaluate(config: Config, args) -> int:
 
     print(f"Measured {written} outcome(s) across {len(FORWARD_BARS)} windows "
           f"({', '.join(f'+{b}' for b in FORWARD_BARS)} trading days).")
-    if variants:
-        print(f"Took {traded} trade(s) under {len(variants)} exit rule(s): "
-              f"{', '.join(v.label for v in variants)}.")
+    if rules:
+        print(f"Took {traded} trade(s) under {len(rules)} exit rule(s): "
+              f"{', '.join(r.label for r in rules)}.")
     if skipped:
         print(f"  {skipped} pattern(s) not yet measurable — too recent, or no "
               f"close recorded on the bar they completed on.")
@@ -1665,58 +1685,42 @@ def cmd_evaluate(config: Config, args) -> int:
 
 
 def _print_strategy_comparison(config: Config) -> None:
-    """The exit rules, side by side over the same signals.
+    """The leaderboard, on the terminal. Same numbers the page ranks.
 
     Ordered by mean return rather than hit rate, because the two disagree: a
     rule taking 3% profits against 5% stops has to be right 62.5% of the time
-    merely to break even, so it can lead on hit rate and still lose money. The
-    breakeven column is printed next to the hit rate so the comparison is
-    readable without doing that arithmetic in your head.
+    merely to break even, so it can lead on hit rate and still lose money.
     """
-    from .strategies import compare, summarise
+    from .strategies import leaderboard
 
     variants = list(config.strategies.variants)
     if not variants:
         return
 
     with Store(config.storage.database) as store:
-        by_key = {v.key: store.all_trades(strategy=v.key) for v in variants}
-    if not any(by_key.values()):
-        print("Exit rules: no trades recorded yet — run `evaluate`.\n")
+        trades = store.all_trades(direction=BUY)
+    if not trades:
+        print("Strategies: no trades recorded yet — run `evaluate`.\n")
         return
 
-    print("Exit rules, same signals\n")
-    header = (f"{'rule':<22}{'n':>7}{'hit':>8}{'needs':>8}{'mean':>8}"
-              f"{'median':>8}{'target':>8}{'stop':>7}{'timeout':>9}{'days':>7}")
+    rows = leaderboard(trades, variants)
+    print(f"Strategy leaderboard — {len(variants)} permutations, buys only\n")
+    header = (f"{'#':>3}  {'strategy':<38}{'n':>6}{'hit':>7}{'mean':>8}"
+              f"{'median':>8}{'total':>9}{'days':>6}")
     print(header)
     print("-" * len(header))
-
-    def line(label: str, rows) -> None:
-        s = summarise(rows)
-        if not s["n"]:
-            print(f"{label:<22}{'—':>7}")
-            return
-        print(f"{label:<22}{s['n']:>7}{s['hit_rate'] * 100:>7.1f}%"
-              f"{breakeven:>7.1f}%{s['mean'] * 100:>7.2f}%"
-              f"{s['median'] * 100:>7.2f}%{s['target']:>8}{s['stopped']:>7}"
-              f"{s['timeout']:>9}{s['mean_bars']:>7.1f}")
-
-    # Split by direction, because the blended row is not a strategy anyone
-    # would run: buys and sells score in opposite directions on this sample,
-    # so mixing them measures the ratio of buys to sells as much as the rule.
-    for key, _ in compare(by_key):
-        v = config.strategies.variant(key)
-        breakeven = v.breakeven_hit_rate * 100
-        rows = by_key[key]
-        line(v.label, rows)
-        for direction in (BUY, SELL):
-            line(f"  {direction}", [t for t in rows if t.direction == direction])
+    for rank, (strategy, stats) in enumerate(rows, start=1):
+        if not stats["n"]:
+            print(f"{rank:>3}  {strategy.name:<38}{'—':>6}   never triggered")
+            continue
+        print(f"{rank:>3}  {strategy.name:<38}{stats['n']:>6}"
+              f"{stats['hit_rate'] * 100:>6.1f}%{stats['mean'] * 100:>7.2f}%"
+              f"{stats['median'] * 100:>7.2f}%{stats['total'] * 100:>8.0f}%"
+              f"{stats['mean_bars']:>6.1f}")
     print()
-    print("  · `needs` is the hit rate the rule would break even at IF every exit")
-    print("    landed exactly on its barrier. Real ones overshoot — a gap opens")
-    print("    through the stop, a timeout closes anywhere — so a row can sit")
-    print("    below `needs` and still show a positive mean. Use it to compare")
-    print("    what two rules are asking of the signal, not as a pass mark.")
+    print(f"  · {len(variants)} permutations against one sample of signals is")
+    print("    that many chances for the winner to have won by luck. Treat the")
+    print("    ranking as a shortlist, not a result.")
     print("  · Exits are the close that breached the barrier, not the barrier —")
     print("    with daily closes an intraday touch is invisible, so tight rules")
     print("    under-trigger and their fills are worse than the level implies.")

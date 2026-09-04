@@ -342,35 +342,70 @@ class CryptoConfig:
 
 @dataclass(frozen=True)
 class StrategiesConfig:
-    """Exit rules to measure the recorded signals under.
+    """Exit rules and signal selections, crossed to make the leaderboard.
 
-    Adding a variant is a config edit, not a code change -- which is the point:
-    the comparison is only useful if trying a fifth rule costs nothing.
+    Kept as two lists rather than one flat list of strategies because that is
+    how they actually combine: seven exit rules times six selections is
+    forty-two strategies from thirteen lines of config, and every strategy
+    sharing an exit rule is guaranteed to be walking literally the same trades.
 
-    Keep the list short. Every extra variant tested against the same patterns
-    raises the chance that the winner won by luck, and there is no correction
-    for that here beyond restraint.
+    Keep both lists short anyway. Forty-two strategies tested against one
+    sample of signals is forty-two chances for the winner to have won by luck,
+    and nothing here corrects for that -- the page says so where the ranking
+    is read.
     """
 
-    variants: tuple = ()
+    exits: tuple = ()
+    selections: tuple = ()
 
-    def variant(self, key: str):
-        for v in self.variants:
-            if v.key == key:
-                return v
-        raise KeyError(f"no strategy {key!r}")
+    def exit_rule(self, key: str):
+        for rule in self.exits:
+            if rule.key == key:
+                return rule
+        raise KeyError(f"no exit rule {key!r}")
+
+    @property
+    def variants(self) -> tuple:
+        """Every (exit rule, selection) pair, as Strategy objects."""
+        from .strategies import Strategy
+
+        return tuple(
+            Strategy(exit_rule=rule, selection=sel)
+            for rule in self.exits for sel in self.selections
+        )
 
 
-DEFAULT_STRATEGIES = (
-    # The two the comparison was asked for. Both cut at -5%; they differ only
-    # in what they ask for on the upside, which is the cleanest possible A/B --
-    # any difference in the result is the take-profit and nothing else.
-    dict(key="swing", label="Swing +3/-5", take_profit=3.0, stop_loss=5.0,
-         max_bars=20,
-         note="a shorter rebound trade: takes what it can get, three weeks"),
-    dict(key="hold", label="Hold +5/-5", take_profit=5.0, stop_loss=5.0,
-         max_bars=60,
-         note="a larger move over a longer horizon: a quarter to be right"),
+# The exit rules. Names are short and memorable because they are read in a
+# ranked table -- "Runner" beside "1d · Strong only" says what the row does,
+# where "Strategy 14" would say nothing.
+DEFAULT_EXITS = (
+    dict(key="scalp",   label="Scalp",     take_profit=5.0,  stop_loss=5.0,  max_bars=20,
+         note="take 5%, cut 5%, three weeks at most"),
+    dict(key="even",    label="Even",      take_profit=10.0, stop_loss=10.0, max_bars=60,
+         note="take 10%, cut 10%, a quarter at most"),
+    dict(key="wide",    label="Wide",      take_profit=15.0, stop_loss=15.0, max_bars=60,
+         note="take 15%, cut 15%, a quarter at most"),
+    dict(key="tight",   label="Tight stop", take_profit=10.0, stop_loss=5.0, max_bars=60,
+         note="take 10% but cut at 5% -- needs to be right twice as often"),
+    dict(key="runner",  label="Runner",    take_profit=15.0, stop_loss=5.0,  max_bars=60,
+         note="let it run to 15%, cut hard at 5%"),
+    dict(key="hold20",  label="Hold 20d",  take_profit=None, stop_loss=None, max_bars=20,
+         note="no barriers at all -- out after twenty trading days, whatever happened"),
+    dict(key="hold60",  label="Hold 60d",  take_profit=None, stop_loss=None, max_bars=60,
+         note="no barriers -- out after sixty trading days"),
+)
+
+# Which signals each strategy acts on. Two entry bars times three timeframe
+# sets: exactly the axes worth separating, because "does the faster chart help
+# or just add trades?" and "is the valuation gate worth waiting for?" are the
+# two questions the screener cannot answer from the cards alone.
+DEFAULT_SELECTIONS = (
+    dict(key="d-strong",   label="1d · Strong only",       entry="strong", horizons=["1d"]),
+    dict(key="d-all",      label="1d · Every buy",         entry="all",    horizons=["1d"]),
+    dict(key="4d-strong",  label="4h+1d · Strong only",    entry="strong", horizons=["4h", "1d"]),
+    dict(key="4d-all",     label="4h+1d · Every buy",      entry="all",    horizons=["4h", "1d"]),
+    dict(key="14d-strong", label="1h+4h+1d · Strong only", entry="strong", horizons=["1h", "4h", "1d"]),
+    dict(key="14d-all",    label="1h+4h+1d · Every buy",   entry="all",    horizons=["1h", "4h", "1d"]),
 )
 
 
@@ -560,49 +595,93 @@ def load_config(path: str | Path | None = None) -> Config:
 
 
 def _load_strategies(raw) -> StrategiesConfig:
-    """Read the `strategies:` block, falling back to the two built-in variants.
+    """Read the `strategies:` block: exit rules and selections, crossed.
 
     An omitted block gives the defaults; an explicitly empty one gives none,
-    which is how the comparison is turned off without deleting the code.
+    which is how the leaderboard is turned off without deleting the code.
     """
-    from .strategies import Strategy
+    from .strategies import ALL_BUYS, STRONG_ONLY, ExitRule, Selection
 
-    entries = DEFAULT_STRATEGIES if raw is None else (raw or ())
-    variants = []
-    seen = set()
-    for item in entries:
-        if not isinstance(item, dict):
-            raise ValueError(f"strategies entries must be mappings, got {item!r}")
-        missing = {"key", "take_profit", "stop_loss"} - set(item)
+    if raw is None:
+        raw = {"exits": DEFAULT_EXITS, "selections": DEFAULT_SELECTIONS}
+    if not raw:
+        return StrategiesConfig()
+    if isinstance(raw, list):
+        # The shape this block had before the leaderboard: a flat list of
+        # take-profit/stop-loss variants. Named explicitly because a bare
+        # TypeError three frames down would not tell anyone what to edit.
+        raise ValueError(
+            "strategies is now two sections, `exits:` and `selections:`, "
+            "crossed to make the leaderboard — not a flat list of variants. "
+            "See the block in config.yaml."
+        )
+
+    unknown = set(raw) - {"exits", "selections"}
+    if unknown:
+        raise ValueError(
+            f"strategies has no section {', '.join(sorted(unknown))!r} — "
+            f"valid: exits, selections"
+        )
+
+    exits, seen = [], set()
+    for item in raw.get("exits", DEFAULT_EXITS) or ():
+        missing = {"key", "max_bars"} - set(item)
         if missing:
             raise ValueError(
-                f"strategy {item.get('key', '?')!r} is missing "
+                f"exit rule {item.get('key', '?')!r} is missing "
                 f"{', '.join(sorted(missing))}"
             )
         key = str(item["key"])
         if key in seen:
-            raise ValueError(f"duplicate strategy key {key!r}")
+            raise ValueError(f"duplicate exit rule key {key!r}")
         seen.add(key)
 
-        take, stop = float(item["take_profit"]), float(item["stop_loss"])
-        # Both must be positive: a "stop_loss: -5" reads naturally but would
-        # invert the comparison silently, stopping out every winner.
-        if take <= 0 or stop <= 0:
-            raise ValueError(
-                f"strategy {key!r}: take_profit and stop_loss are positive "
-                f"percentages in both directions (got {take}, {stop})"
-            )
-        bars = int(item.get("max_bars", 60))
+        take, stop = item.get("take_profit"), item.get("stop_loss")
+        # Both are positive percentages: a "stop_loss: -5" reads naturally and
+        # would invert the comparison silently, stopping out every winner.
+        for name, value in (("take_profit", take), ("stop_loss", stop)):
+            if value is not None and float(value) <= 0:
+                raise ValueError(
+                    f"exit rule {key!r}: {name} is a positive percentage in "
+                    f"both directions, or null for no barrier (got {value})"
+                )
+        bars = int(item["max_bars"])
         if bars < 1:
-            raise ValueError(f"strategy {key!r}: max_bars must be at least 1")
-
-        variants.append(Strategy(
-            key=key,
-            label=str(item.get("label", key)),
-            take_profit=take, stop_loss=stop, max_bars=bars,
-            note=str(item.get("note", "")),
+            raise ValueError(f"exit rule {key!r}: max_bars must be at least 1")
+        exits.append(ExitRule(
+            key=key, label=str(item.get("label", key)),
+            take_profit=float(take) if take is not None else None,
+            stop_loss=float(stop) if stop is not None else None,
+            max_bars=bars, note=str(item.get("note", "")),
         ))
-    return StrategiesConfig(variants=tuple(variants))
+
+    selections, seen = [], set()
+    for item in raw.get("selections", DEFAULT_SELECTIONS) or ():
+        missing = {"key", "entry", "horizons"} - set(item)
+        if missing:
+            raise ValueError(
+                f"selection {item.get('key', '?')!r} is missing "
+                f"{', '.join(sorted(missing))}"
+            )
+        key = str(item["key"])
+        if key in seen:
+            raise ValueError(f"duplicate selection key {key!r}")
+        seen.add(key)
+        entry = str(item["entry"])
+        if entry not in (STRONG_ONLY, ALL_BUYS):
+            raise ValueError(
+                f"selection {key!r}: entry is {STRONG_ONLY!r} or {ALL_BUYS!r}, "
+                f"got {entry!r}"
+            )
+        horizons = tuple(str(h) for h in (item["horizons"] or ()))
+        if not horizons:
+            raise ValueError(f"selection {key!r} names no timeframes")
+        selections.append(Selection(
+            key=key, label=str(item.get("label", key)),
+            entry=entry, horizons=horizons,
+        ))
+
+    return StrategiesConfig(exits=tuple(exits), selections=tuple(selections))
 
 
 def _load_crypto(raw: dict) -> CryptoConfig:
