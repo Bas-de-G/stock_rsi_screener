@@ -573,7 +573,7 @@ def _strategies_section(store: Store, config: Config) -> str:
             body.append(
                 f'<tr class="empty"><td class="rank">{rank}</td>'
                 f'<th>{html.escape(strategy.name)}</th>'
-                f'<td colspan="7" class="none">never triggered on this sample</td></tr>'
+                f'<td colspan="6" class="none">never triggered on this sample</td></tr>'
             )
             continue
         top = " top" if best is not None and st is best else ""
@@ -586,7 +586,6 @@ def _strategies_section(store: Store, config: Config) -> str:
             f'<td>{st["hit_rate"] * 100:.0f}%</td>'
             f'<td class="num{pos}">{st["mean"] * 100:+.2f}%</td>'
             f'<td class="num">{st["median"] * 100:+.2f}%</td>'
-            f'<td class="num">{st["total"] * 100:+,.0f}%</td>'
             f'<td class="muted">{st["target"]}/{st["stopped"]}/{st["timeout"]}</td>'
             f'<td class="muted">{st["mean_bars"]:.0f}</td>'
             f'</tr>'
@@ -598,7 +597,7 @@ def _strategies_section(store: Store, config: Config) -> str:
         f'<td>{st["n"]:,}</td><td>{st["hit_rate"] * 100:.0f}%</td>'
         f'<td class="num">{st["mean"] * 100:+.2f}%</td>'
         f'<td class="num">{st["median"] * 100:+.2f}%</td>'
-        f'<td colspan="3" class="none">no rules at all — the number to beat</td></tr>'
+        f'<td colspan="2" class="none">no rules at all — the number to beat</td></tr>'
         for bars, st in sorted(baselines.items()) if st.get("n")
     )
 
@@ -624,12 +623,6 @@ def _strategies_section(store: Store, config: Config) -> str:
      out</strong>. All of them are run over the same recorded patterns, walked
      bar by bar, so the only thing separating two rows is the rule itself.</p>
 
-  <h3>The exit rules</h3>
-  <dl class="legend">{exits}</dl>
-
-  <h3>Which signals each one takes</h3>
-  <dl class="legend">{picks}</dl>
-
   <h3>Leaderboard</h3>
   <p class="lede">{len(variants)} permutations, buys only, ranked by mean
      return per trade.</p>
@@ -637,12 +630,18 @@ def _strategies_section(store: Store, config: Config) -> str:
   <table class="board">
     <thead><tr>
       <th>#</th><th>Strategy</th><th>Trades</th><th>Hit</th><th>Mean</th>
-      <th>Median</th><th>Total</th><th title="target / stopped / timeout">T/S/O</th>
+      <th>Median</th><th title="target / stopped / timeout">T/S/O</th>
       <th>Days</th>
     </tr></thead>
     <tbody>{base_rows}{"".join(body)}</tbody>
   </table>
   </div>
+
+  <h3>The exit rules</h3>
+  <dl class="legend">{exits}</dl>
+
+  <h3>Which signals each one takes</h3>
+  <dl class="legend">{picks}</dl>
 
   <ul class="fine">
     <li><strong>The dotted rows are the number to beat.</strong> Equities drift
@@ -653,10 +652,9 @@ def _strategies_section(store: Store, config: Config) -> str:
         not.</li>
     <li><strong>Ranked by mean, not hit rate.</strong> They disagree, and the
         disagreement is the point: a rule taking small profits against large
-        stops can be right most of the time and still lose money. <em>Total</em>
-        is the sum of every trade's return — not compounded, because these
-        trades overlap in time and compounding would imply a position size and
-        a capital limit that nothing here models.</li>
+        stops can be right most of the time and still lose money. Mean is per
+        trade, so a rule that fires rarely is not rewarded for its scarcity nor
+        punished for it.</li>
     <li><strong>T/S/O</strong> is how each strategy ended: hit its target,
         stopped out, or timed out at the end of its window. A rule earning its
         return from timeouts rather than targets is not doing what its name
