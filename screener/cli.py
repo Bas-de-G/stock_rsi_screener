@@ -1706,7 +1706,7 @@ def _print_strategy_comparison(config: Config) -> None:
     rows = leaderboard(trades, variants)
     print(f"Strategy leaderboard — {len(variants)} permutations, buys only\n")
     header = (f"{'#':>3}  {'strategy':<38}{'n':>6}{'hit':>7}{'mean':>8}"
-              f"{'median':>8}{'total':>9}{'days':>6}")
+              f"{'median':>8}{'days':>6}")
     print(header)
     print("-" * len(header))
     for rank, (strategy, stats) in enumerate(rows, start=1):
@@ -1715,8 +1715,7 @@ def _print_strategy_comparison(config: Config) -> None:
             continue
         print(f"{rank:>3}  {strategy.name:<38}{stats['n']:>6}"
               f"{stats['hit_rate'] * 100:>6.1f}%{stats['mean'] * 100:>7.2f}%"
-              f"{stats['median'] * 100:>7.2f}%{stats['total'] * 100:>8.0f}%"
-              f"{stats['mean_bars']:>6.1f}")
+              f"{stats['median'] * 100:>7.2f}%{stats['mean_bars']:>6.1f}")
     print()
     print(f"  · {len(variants)} permutations against one sample of signals is")
     print("    that many chances for the winner to have won by luck. Treat the")
