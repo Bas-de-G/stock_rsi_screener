@@ -1829,3 +1829,4 @@ decided_at,symbol,horizon,direction,up2_date,verdict,fresh,price,currency,rsi,fa
 2026-09-07T18:25:52,LINK,4h,sell,2026-09-07T12:00,sell,1,12.781,USD,63.05866438617971,,,0,0,,0,0,clear,,0.2,5,,n/a,,,,,,,,,,,,,2,"{""dd_ath"":0.757476281,""dd_recent"":0.0,""dd_bars"":180,""dd_known"":1,""dd_pass"":0}"
 2026-09-07T18:25:52,ZEC,4h,sell,2026-09-05T04:00,sell,0,1160.5,USD,64.3862028132832,,,0,0,,0,0,clear,,0.2,5,,n/a,,,,,,,,,,,,,2,"{""dd_ath"":0.636426864,""dd_recent"":0.0,""dd_bars"":180,""dd_known"":1,""dd_pass"":0}"
 2026-09-07T18:25:52,ZEC,4h,sell,2026-09-07T12:00,sell,1,1160.5,USD,64.3862028132832,,,0,0,,0,0,clear,,0.2,5,,n/a,,,,,,,,,,,,,2,"{""dd_ath"":0.636426864,""dd_recent"":0.0,""dd_bars"":180,""dd_known"":1,""dd_pass"":0}"
+2026-09-07T21:47:43,AVAX,1h,sell,2026-09-07T21:46,sell_strong,1,8.126,USD,69.73698745907282,,,0,0,,0,0,clear,,0.1,10,,n/a,,,,,,,,,,,,,2,"{""dd_ath"":0.943943157,""dd_recent"":0.225290064,""dd_bars"":180,""dd_known"":1,""dd_pass"":1}"
