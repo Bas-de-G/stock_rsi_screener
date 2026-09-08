@@ -508,6 +508,10 @@ DOW:
   fair_value: 10.0
   checked: '2026-08-28'
   source: scraped
+DRS:
+  fair_value: 38.17
+  checked: '2026-09-08'
+  source: scraped
 DSFIR:
   fair_value: 103.0
   checked: '2026-08-18'
@@ -583,6 +587,10 @@ EPAM:
 EQIX:
   fair_value: 1100.0
   checked: '2026-08-20'
+  source: scraped
+ESAB:
+  fair_value: 121.0
+  checked: '2026-09-08'
   source: scraped
 ETN:
   fair_value: 333.0
@@ -719,6 +727,10 @@ HCA:
 HD:
   fair_value: 325.0
   checked: '2026-08-18'
+  source: scraped
+HEI:
+  fair_value: 294.0
+  checked: '2026-09-08'
   source: scraped
 HEIA:
   fair_value: 86.0
@@ -1208,6 +1220,10 @@ PII:
   fair_value: 73.0
   checked: '2026-09-08'
   source: scraped
+PINS:
+  fair_value: 22.0
+  checked: '2026-09-08'
+  source: scraped
 PKG:
   fair_value: 167.0
   checked: '2026-09-01'
@@ -1516,6 +1532,10 @@ TT:
   fair_value: 422.0
   checked: '2026-08-26'
   source: scraped
+TTWO:
+  fair_value: 170.0
+  checked: '2026-09-08'
+  source: scraped
 TU:
   fair_value: 14.5
   checked: '2026-08-31'
@@ -1603,6 +1623,10 @@ VRT:
 VRTX:
   fair_value: 450.0
   checked: '2026-08-19'
+  source: scraped
+VST:
+  fair_value: 106.0
+  checked: '2026-09-08'
   source: scraped
 VVV:
   fair_value: 35.08
