@@ -697,6 +697,54 @@ tickers:
   - {symbol: DOV,  tradingview: "NYSE:DOV",      morningstar: xnys/dov,   markets: [sp500]}   # RSI 31 · Producer Manufacturing
   - {symbol: KNF,  tradingview: "NYSE:KNF",      morningstar: xnys/knf,   markets: [sp500]}   # RSI 35 · Non-Energy Minerals
 
+  # Thirty more near daily RSI 30. The five thinnest sectors had nothing to
+  # offer this time — Distribution Services, Energy Minerals, Communications,
+  # Industrial Services and Utilities all had zero candidates in the band, so
+  # this necessarily draws on the mid-weight ones instead of correcting the
+  # tail further.
+  #
+  # Still no Finance: it remains the heaviest at 48, and 20 of the 84
+  # candidates were Finance — mostly REITs, which would have made it worse.
+  # Electronic Technology and Technology Services are capped at two apiece for
+  # the same reason, taking only the most oversold quality names in each.
+  - {symbol: BFAM, tradingview: "NYSE:BFAM",     morningstar: xnys/bfam,  markets: [sp500]}   # RSI 35 · Commercial Services
+  - {symbol: KLAR, tradingview: "NYSE:KLAR",     morningstar: xnys/klar,  markets: [sp500]}   # RSI 35 · Commercial Services
+  - {symbol: KBH,  tradingview: "NYSE:KBH",      morningstar: xnys/kbh,   markets: [sp500]}   # RSI 36 · Consumer Durables
+  - {symbol: SON,  tradingview: "NYSE:SON",      morningstar: xnys/son,   markets: [sp500]}   # RSI 30 · Process Industries
+  - {symbol: CALM, tradingview: "NASDAQ:CALM",   morningstar: xnas/calm,  markets: [sp500, nasdaq]}   # RSI 32 · Process Industries
+  - {symbol: DD,   tradingview: "NYSE:DD",       morningstar: xnys/dd,    markets: [sp500]}   # RSI 35 · Process Industries
+  - {symbol: LPX,  tradingview: "NYSE:LPX",      morningstar: xnys/lpx,   markets: [sp500]}   # RSI 36 · Non-Energy Minerals
+  - {symbol: AAL,  tradingview: "NASDAQ:AAL",    morningstar: xnas/aal,   markets: [sp500, nasdaq]}   # RSI 35 · Transportation
+  - {symbol: ETSY, tradingview: "NYSE:ETSY",     morningstar: xnys/etsy,  markets: [sp500]}   # RSI 34 · Retail Trade
+  - {symbol: PDD,  tradingview: "NASDAQ:PDD",    morningstar: xnas/pdd,   markets: [sp500, nasdaq]}   # RSI 34 · Retail Trade
+  - {symbol: CPNG, tradingview: "NYSE:CPNG",     morningstar: xnys/cpng,  markets: [sp500]}   # RSI 36 · Retail Trade
+  - {symbol: RRR,  tradingview: "NASDAQ:RRR",    morningstar: xnas/rrr,   markets: [sp500, nasdaq]}   # RSI 34 · Consumer Services
+  - {symbol: TXRH, tradingview: "NASDAQ:TXRH",   morningstar: xnas/txrh,  markets: [sp500, nasdaq]}   # RSI 32 · Consumer Services
+  - {symbol: BROS, tradingview: "NYSE:BROS",     morningstar: xnys/bros,  markets: [sp500]}   # RSI 33 · Consumer Services
+  - {symbol: H,    tradingview: "NYSE:H",        morningstar: xnys/h,     markets: [sp500]}   # RSI 34 · Consumer Services
+  - {symbol: BDRX, tradingview: "NASDAQ:BDRX",   morningstar: xnas/bdrx,  markets: [sp500, nasdaq]}   # RSI 24 · Health Technology
+  - {symbol: INDV, tradingview: "NASDAQ:INDV",   morningstar: xnas/indv,  markets: [sp500, nasdaq]}   # RSI 31 · Health Technology
+  - {symbol: HLN,  tradingview: "NYSE:HLN",      morningstar: xnys/hln,   markets: [sp500]}   # RSI 31 · Health Technology
+  - {symbol: COO,  tradingview: "NASDAQ:COO",    morningstar: xnas/coo,   markets: [sp500, nasdaq]}   # RSI 33 · Health Technology
+  - {symbol: NVS,  tradingview: "NYSE:NVS",      morningstar: xnys/nvs,   markets: [sp500]}   # RSI 33 · Health Technology
+  - {symbol: COCO, tradingview: "NASDAQ:COCO",   morningstar: xnas/coco,  markets: [sp500, nasdaq]}   # RSI 27 · Consumer Non-Durables
+  - {symbol: ONON, tradingview: "NYSE:ONON",     morningstar: xnys/onon,  markets: [sp500]}   # RSI 28 · Consumer Non-Durables
+  - {symbol: CLX,  tradingview: "NYSE:CLX",      morningstar: xnys/clx,   markets: [sp500]}   # RSI 30 · Consumer Non-Durables
+  - {symbol: CPB,  tradingview: "NASDAQ:CPB",    morningstar: xnas/cpb,   markets: [sp500, nasdaq]}   # RSI 34 · Consumer Non-Durables
+  - {symbol: PNR,  tradingview: "NYSE:PNR",      morningstar: xnys/pnr,   markets: [sp500]}   # RSI 32 · Producer Manufacturing
+  - {symbol: ESAB, tradingview: "NYSE:ESAB",     morningstar: xnys/esab,  markets: [sp500]}   # RSI 36 · Producer Manufacturing
+  - {symbol: DRS,  tradingview: "NASDAQ:DRS",    morningstar: xnas/drs,   markets: [sp500, nasdaq]}   # RSI 26 · Electronic Technology
+  - {symbol: HEI,  tradingview: "NYSE:HEI",      morningstar: xnys/hei,   markets: [sp500]}   # RSI 27 · Electronic Technology
+  - {symbol: PINS, tradingview: "NYSE:PINS",     morningstar: xnys/pins,  markets: [sp500]}   # RSI 31 · Technology Services
+  - {symbol: TTWO, tradingview: "NASDAQ:TTWO",   morningstar: xnas/ttwo,  markets: [sp500, nasdaq]}   # RSI 29 · Technology Services
+
+  # Asked for by name rather than found by the RSI scan, and worth noting why:
+  # Vistra was at 39.7 when the scan above ran and had rallied to 62 by the
+  # time it was added, so it joins as a watch rather than a dip. It also fills
+  # a sector the oversold scan could not reach — Utilities had zero candidates
+  # in the band, being one of the five holding up.
+  - {symbol: VST,  tradingview: "NYSE:VST",     morningstar: xnys/vst,   markets: [sp500]}   # RSI 62 · Utilities
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data
