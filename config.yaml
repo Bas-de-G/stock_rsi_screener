@@ -738,6 +738,13 @@ tickers:
   - {symbol: PINS, tradingview: "NYSE:PINS",     morningstar: xnys/pins,  markets: [sp500]}   # RSI 31 · Technology Services
   - {symbol: TTWO, tradingview: "NASDAQ:TTWO",   morningstar: xnas/ttwo,  markets: [sp500, nasdaq]}   # RSI 29 · Technology Services
 
+  # Asked for by name rather than found by the RSI scan, and worth noting why:
+  # Vistra was at 39.7 when the scan above ran and had rallied to 62 by the
+  # time it was added, so it joins as a watch rather than a dip. It also fills
+  # a sector the oversold scan could not reach — Utilities had zero candidates
+  # in the band, being one of the five holding up.
+  - {symbol: VST,  tradingview: "NYSE:VST",     morningstar: xnys/vst,   markets: [sp500]}   # RSI 62 · Utilities
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data
