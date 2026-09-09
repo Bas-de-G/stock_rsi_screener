@@ -332,6 +332,10 @@ CHPT:
   fair_value: 7.66
   checked: '2026-08-18'
   source: scraped
+CI:
+  fair_value: 354.0
+  checked: '2026-09-09'
+  source: scraped
 CL:
   fair_value: 88.0
   checked: '2026-08-19'
