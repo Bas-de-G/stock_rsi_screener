@@ -745,6 +745,36 @@ tickers:
   # in the band, being one of the five holding up.
   - {symbol: VST,  tradingview: "NYSE:VST",     morningstar: xnys/vst,   markets: [sp500]}   # RSI 62 · Utilities
 
+  # Twenty more near daily RSI 30. Three of the five sectors that were empty
+  # last time now have something — Industrial Services (APG), Transportation
+  # (SARO) and Non-Energy Minerals (AMRZ) — but Distribution Services, Energy
+  # Minerals, Communications and Utilities still had zero candidates in the
+  # band, and Health Services had only the two ADR duplicates below.
+  #
+  # Finance skipped again, and by a wider margin than ever: 38 of the 109
+  # candidates were Finance, almost all REITs. Electronic Technology (41) and
+  # Technology Services (37) are capped at one apiece.
+  - {symbol: APG,  tradingview: "NYSE:APG",      morningstar: xnys/apg,   markets: [sp500]}   # RSI 34 · Industrial Services
+  - {symbol: TOL,  tradingview: "NYSE:TOL",      morningstar: xnys/tol,   markets: [sp500]}   # RSI 35 · Consumer Durables
+  - {symbol: XPEV, tradingview: "NYSE:XPEV",     morningstar: xnys/xpev,  markets: [sp500]}   # RSI 33 · Consumer Durables
+  - {symbol: AMRZ, tradingview: "NYSE:AMRZ",     morningstar: xnys/amrz,  markets: [sp500]}   # RSI 31 · Non-Energy Minerals
+  - {symbol: SARO, tradingview: "NYSE:SARO",     morningstar: xnys/saro,  markets: [sp500]}   # RSI 34 · Transportation
+  - {symbol: SLGN, tradingview: "NYSE:SLGN",     morningstar: xnys/slgn,  markets: [sp500]}   # RSI 30 · Process Industries
+  - {symbol: SMG,  tradingview: "NYSE:SMG",      morningstar: xnys/smg,   markets: [sp500]}   # RSI 33 · Process Industries
+  - {symbol: CCK,  tradingview: "NYSE:CCK",      morningstar: xnys/cck,   markets: [sp500]}   # RSI 35 · Process Industries
+  - {symbol: CASY, tradingview: "NASDAQ:CASY",   morningstar: xnas/casy,  markets: [sp500, nasdaq]}   # RSI 20 · Retail Trade
+  - {symbol: JD,   tradingview: "NASDAQ:JD",     morningstar: xnas/jd,    markets: [sp500, nasdaq]}   # RSI 31 · Retail Trade
+  - {symbol: TNL,  tradingview: "NYSE:TNL",      morningstar: xnys/tnl,   markets: [sp500]}   # RSI 29 · Consumer Services
+  - {symbol: CAVA, tradingview: "NYSE:CAVA",     morningstar: xnys/cava,  markets: [sp500]}   # RSI 31 · Consumer Services
+  - {symbol: YUMC, tradingview: "NYSE:YUMC",     morningstar: xnys/yumc,  markets: [sp500]}   # RSI 31 · Consumer Services
+  - {symbol: STE,  tradingview: "NYSE:STE",      morningstar: xnys/ste,   markets: [sp500]}   # RSI 30 · Health Technology
+  - {symbol: GEHC, tradingview: "NASDAQ:GEHC",   morningstar: xnas/gehc,  markets: [sp500, nasdaq]}   # RSI 31 · Health Technology
+  - {symbol: KMB,  tradingview: "NASDAQ:KMB",    morningstar: xnas/kmb,   markets: [sp500, nasdaq]}   # RSI 29 · Consumer Non-Durables
+  - {symbol: SFD,  tradingview: "NASDAQ:SFD",    morningstar: xnas/sfd,   markets: [sp500, nasdaq]}   # RSI 22 · Consumer Non-Durables
+  - {symbol: FBIN, tradingview: "NYSE:FBIN",     morningstar: xnys/fbin,  markets: [sp500]}   # RSI 31 · Producer Manufacturing
+  - {symbol: KRMN, tradingview: "NYSE:KRMN",     morningstar: xnys/krmn,  markets: [sp500]}   # RSI 21 · Electronic Technology
+  - {symbol: ADSK, tradingview: "NASDAQ:ADSK",   morningstar: xnas/adsk,  markets: [sp500, nasdaq]}   # RSI 31 · Technology Services
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data
