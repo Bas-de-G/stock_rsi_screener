@@ -362,7 +362,17 @@ tickers:
 
   # Madrid
   - {symbol: ACS,    tradingview: "BME:ACS",               morningstar: xmad/acs,       yahoo: ACS.MC,      currency: EUR, markets: [europe]}   # RSI 33
-  - {symbol: FER,    tradingview: "BME:FER",               morningstar: xmad/fer,       yahoo: FER.MC,      currency: EUR, markets: [europe]}   # RSI 31
+  # Ferrovial left Madrid. BME:FER stopped resolving on 2026-09-10 and took
+  # the whole screener run down with it; the company now trades as Ferrovial
+  # N.V. on Euronext Amsterdam and Nasdaq. Repointed rather than deleted, so
+  # its year of history and its recorded patterns survive -- they are keyed on
+  # `symbol`, not on the exchange. The two lines are continuous in price
+  # (EUR 48.84 Amsterdam against EUR 48.67 Madrid on the last day both quoted).
+  #
+  # Note this reverses an earlier call: BME:FER was chosen over the Amsterdam
+  # line because Madrid carried 112x the volume. That is no longer true, and
+  # was never going to stay true through a relisting.
+  - {symbol: FER,    tradingview: "EURONEXT:FER",         morningstar: xams/fer,       yahoo: FER.AS,      currency: EUR, markets: [europe]}   # RSI 29
 
   # Zurich (SIX)
   - {symbol: ARYN,   tradingview: "SIX:ARYN",              morningstar: xswx/aryn,      yahoo: ARYN.SW,     currency: CHF, markets: [europe]}   # RSI 24
