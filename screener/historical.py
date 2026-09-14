@@ -291,7 +291,9 @@ def _stats(returns) -> dict:
 
 
 def _bounds(panel: Panel) -> tuple[float, float]:
-    values = [v for e in panel.entries[:MAX_PATHS] for v in e.path]
+    # Over the entries actually drawn, not the newest ones -- otherwise the
+    # y-axis is scaled to paths the reader cannot see.
+    values = [v for e in _drawable(panel)[:MAX_PATHS] for v in e.path]
     values += panel.mean + panel.base
     if not values:
         return 90.0, 110.0
@@ -303,21 +305,60 @@ def _bounds(panel: Panel) -> tuple[float, float]:
     return lo - pad, hi + pad
 
 
+def _matured(entry: Entry) -> bool:
+    """Whether this path has run the full width of the chart."""
+    return len(entry.path) - 1 >= CHART_DAYS
+
+
+def _drawable(panel: Panel) -> list[Entry]:
+    """The entries worth drawing, best first.
+
+    Newest-first is the right order for "what did the screener just say" and
+    exactly the wrong one for a chart whose x-axis is *time since the signal*:
+    the newer an entry is, the less of its path exists. Selecting the newest
+    therefore selected the shortest, and on the fast horizons that meant every
+    drawn line was a stub. Measured on the live database, the median drawn path
+    was **one day** on the 1h and 4h panels, 5 days on the 1d buy panel, and of
+    sixteen panels only four had a single numbered line reaching +60d. The
+    chart showed a cohort mean stretching to sixty days above a thicket of
+    lines that all stopped in the first two percent of the width, so the one
+    thing an event study is for -- watching the spread open up as the trades
+    run -- was invisible.
+
+    Nothing was missing from the data. `strong/4h` holds 256 complete
+    sixty-day paths across 96 symbols; the chart was drawing 24 one-day stubs
+    instead.
+
+    So matured paths come first, still newest-first among themselves, and the
+    longest of the rest only top up a panel too young to fill the key -- which
+    is the two 1w strong cohorts and nothing else. Selecting on maturity is a
+    *recency* bias, not a performance one: it cannot prefer winners, because
+    age is not an outcome. It does mean the drawn lines skip the most recent
+    weeks, so `_running` names those underneath and every statistic on the page
+    still runs over the full sample.
+    """
+    matured, young = [], []
+    for e in panel.entries:                 # already newest-first
+        (matured if _matured(e) else young).append(e)
+    young.sort(key=lambda e: len(e.path), reverse=True)
+    return matured + young
+
+
 def _named(panel: Panel) -> list[Entry]:
     """The entries that get a number on the chart and a row in the table.
 
-    Newest first, one per symbol. The dedupe is the same finding that produced
-    the alert cooldown: an intraday pattern completes on almost every run, so
-    the twelve newest 1h strong buys were eight companies from a single
-    afternoon, four of them listed twice. Twelve numbered lines should be
-    twelve different companies -- repeats of one name teach nothing about the
-    cohort and waste half the key.
+    One per symbol. The dedupe is the same finding that produced the alert
+    cooldown: an intraday pattern completes on almost every run, so the twelve
+    newest 1h strong buys were eight companies from a single afternoon, four of
+    them listed twice. Twelve numbered lines should be twelve different
+    companies -- repeats of one name teach nothing about the cohort and waste
+    half the key.
 
     Only the named subset is deduplicated. The context paths and every
     statistic on the page still run over the full sample.
     """
     out, seen = [], set()
-    for e in panel.entries:
+    for e in _drawable(panel):
         if e.symbol in seen:
             continue
         seen.add(e.symbol)
@@ -389,9 +430,10 @@ def _plot(panel: Panel) -> str:
     def path_points(path) -> str:
         return " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in enumerate(path))
 
+    drawable = _drawable(panel)
     named = _named(panel)
     seen = {id(e) for e in named}
-    context = [e for e in panel.entries[:MAX_PATHS] if id(e) not in seen]
+    context = [e for e in drawable[:MAX_PATHS] if id(e) not in seen]
 
     def trace(e, klass: str) -> str:
         return (
@@ -446,13 +488,36 @@ def _plot(panel: Panel) -> str:
             f'y="{y(final) - 7:.1f}">{final - 100:+.1f}%</text>'
         )
 
-    shown = min(len(panel.entries), MAX_PATHS)
+    drawn = drawable[:MAX_PATHS]
+    shown = len(drawn)
     numbered = len(named)
+    # A chart that silently picks its own sample is worse than one that picks
+    # badly, so the caption says which entries these are -- and says it
+    # differently when the panel was too young to fill the key from matured
+    # paths alone.
+    short = sum(1 for e in drawn if not _matured(e))
+    if not short:
+        selection = (f"the most recent that have run the full {CHART_DAYS} days")
+    else:
+        matured_drawn = shown - short
+        selection = (
+            f"every one that has run the full {CHART_DAYS} days "
+            f"({matured_drawn}), plus the {short} longest of the rest"
+        )
     mean_key = (
         '<span class="k mean-k">Cohort mean</span>' if panel.mean
         else f'<span class="k count">too few signals to average '
              f'(under {MIN_FOR_MEAN})</span>'
     )
+    # Only key the styles that are actually on the chart. With matured paths
+    # drawn, "still running" is usually absent, and a legend entry for a line
+    # nobody can find is a small lie.
+    states = {e.right for e in drawn}
+    state_keys = "".join(k for present, k in (
+        (True in states, '<span class="k win-k">Individual, call was right</span>'),
+        (False in states, '<span class="k loss-k">…was wrong</span>'),
+        (None in states, '<span class="k open-k">…still running</span>'),
+    ) if present)
     return f"""<svg class="study" viewBox="0 0 {_W:.0f} {_H:.0f}" role="img"
      aria-label="Price paths after {panel.stats.get('n', 0)} signals, rebased to 100
                  on the signal day; cohort mean ends at
@@ -465,28 +530,32 @@ def _plot(panel: Panel) -> str:
 <p class="legend">
   {mean_key}
   <span class="k base-k">Random entry</span>
-  <span class="k win-k">Individual, call was right</span>
-  <span class="k loss-k">…was wrong</span>
-  <span class="k open-k">…still running</span>
-  <span class="k count">{shown} of {len(panel.entries):,} drawn ·
+  {state_keys}
+  <span class="k count">{shown} of {len(panel.entries):,} drawn — {selection} ·
     <strong>1–{numbered}</strong> numbered, and named in the table below</span>
 </p>"""
 
 
 def _table(panel: Panel) -> str:
-    """The key to the numbered lines above, newest first.
+    """The key to the numbered lines above, in the order they are drawn.
 
-    This used to drop every entry without a `+20d` return, which sounds like
-    tidiness and was a bug in effect: a return at twenty trading days cannot
-    exist until twenty trading days have passed, so the newest row on the page
-    was always a month old and the 1h panel -- where every drawn line is days
-    old -- listed nothing recent at all. The page looked stale while working
-    perfectly.
+    It has to be exactly the numbered lines and nothing else -- the numbers are
+    the only thing joining a row to a curve -- so this follows `_named` wherever
+    that goes rather than choosing its own rows.
 
-    So a recommendation still inside its twenty days is listed too, with the
-    return it has *so far* and how far through it is. It is excluded from the
-    cohort statistics, which still need the full window to compare like with
-    like.
+    That used to mean "newest first", and this table is where the cost of
+    changing it lands: recent recommendations no longer appear here, because
+    the chart no longer draws them. They are not lost, they moved up the page
+    to `_running`, which names them with how far through they are. That is the
+    same information the "so far / at +20d" columns carried, in the one place
+    it can be shown without a chart line pretending to be an outcome.
+
+    An entry still inside its twenty days keeps its partial return here when
+    one is drawn, for the same reason as before: a return at twenty trading
+    days cannot exist until twenty trading days have passed, and blanking the
+    cell reads as "this went nowhere" rather than "ask again later". It is
+    excluded from the cohort statistics, which still need the full window to
+    compare like with like.
     """
     rows = _named(panel)
     if not rows:
@@ -511,19 +580,30 @@ def _table(panel: Panel) -> str:
             score = (f'<td class="num cvcell cv-{html.escape(e.conviction_band)}" '
                      f'title="The conviction this went out with, from the '
                      f'journal — not recomputed today">{e.conviction}</td>')
+        # The path's last point. For a matured row that is exactly +60d, which
+        # is what the column header now says; the rare topped-up row is flagged
+        # rather than quietly reported as if it had run the full window.
+        end = e.path[-1] - 100
+        if _matured(e):
+            end_cell = f'<td class="num">{end:+.1f}%</td>'
+        else:
+            end_cell = (f'<td class="num open" title="Only {len(e.path) - 1} of '
+                        f'{CHART_DAYS} days so far — drawn because this cohort has '
+                        f'too few matured paths to fill the key">{end:+.1f}%'
+                        f'<span class="of">·d{len(e.path) - 1}</span></td>')
         body += (
             f'<tr><td class="num idx">{n}</td>'
             f'<th scope="row">{html.escape(e.symbol)}</th>'
             f'<td class="num date">{html.escape(e.up2_date[:10])}</td>'
-            f'{score}'
-            f'<td class="num">{e.path[-1] - 100:+.1f}%</td>{outcome}</tr>'
+            f'{score}{end_cell}{outcome}</tr>'
         )
     return f"""<table class="names">
-  <caption>The {len(rows)} numbered lines above, newest first</caption>
+  <caption>The {len(rows)} numbered lines above, in the order they are drawn</caption>
   <thead><tr><th scope="col"><span class="vh">Line</span>#</th>
     <th scope="col">Symbol</th><th scope="col">Signal</th>
     <th scope="col" title="The weighted conviction score this went out with">Conv.</th>
-    <th scope="col">So far</th><th scope="col">At +{HEADLINE_BARS}d</th></tr></thead>
+    <th scope="col">At +{CHART_DAYS}d</th>
+    <th scope="col">At +{HEADLINE_BARS}d</th></tr></thead>
   <tbody>{body}</tbody>
 </table>"""
 
@@ -584,6 +664,7 @@ def _panel_html(panel: Panel, cohort: Cohort, horizon) -> str:
   <div class="plot-frame">{_plot(panel)}</div>
   {caveat}
   {_pending(panel)}
+  {_running(panel)}
   {_table(panel)}
 </section>"""
 
@@ -610,6 +691,48 @@ def _pending(panel: Panel) -> str:
         f'<p class="pending"><span class="tag">Just fired</span>{names}{more}'
         f' — no close after them yet, so there is no path to draw. '
         f'They join the chart at the next daily close.</p>'
+    )
+
+
+def _running(panel: Panel) -> str:
+    """The newest signals that have started but not finished.
+
+    These used to be the chart's numbered lines, which is what broke it: they
+    are the shortest paths on the page, so drawing them showed nothing and
+    crowded out the trades that had actually run. Now the chart draws matured
+    paths and these are named here instead, with how far through each one is.
+
+    Left out entirely they would simply vanish -- too old for "just fired",
+    too young to be drawn -- and the freshest calls the screener has made are
+    the last thing this page should lose. The progress figure is the honest
+    version of what the old table column said: a partial return with the
+    number of days behind it, never dressed up as a result.
+    """
+    # Deduplicated by symbol for the same reason `_named` is: an intraday
+    # pattern completes on almost every run, so the eight newest 1h entries
+    # were four companies listed twice. Counted by company too -- "and 596
+    # more" is a true statement about rows and a misleading one about how much
+    # is actually running.
+    young, seen = [], set()
+    for e in panel.entries:
+        if _matured(e) or len(e.path) < 2 or e.symbol in seen:
+            continue
+        seen.add(e.symbol)
+        young.append(e)
+    if not young:
+        return ""
+    names = ", ".join(
+        f'<strong>{html.escape(e.symbol)}</strong> '
+        f'<span class="when">{e.path[-1] - 100:+.1f}% · day {len(e.path) - 1}'
+        f'/{CHART_DAYS}</span>'
+        for e in young[:8]
+    )
+    more = f" and {len(young) - 8} more" if len(young) > 8 else ""
+    return (
+        f'<p class="pending running"><span class="tag">Still running</span>{names}'
+        f'{more} — too young to have run the full {CHART_DAYS} days, so they are '
+        f'not drawn above. Their returns so far are not results, and they are in '
+        f'the cohort statistics only once past +{HEADLINE_BARS}d.</p>'
     )
 
 

@@ -589,3 +589,149 @@ def test_an_old_signal_the_daily_series_predates_is_not_pending(config):
         panels = collect_panels(store, config)
 
     assert all(p[1] != "2023-01-05" for p in panels[("buy", "1d")].pending)
+
+
+# ------------------------------- drawing paths that have actually run
+
+
+def _full(n=None, end=120.0):
+    """A path that ran the whole chart window."""
+    from screener.historical import CHART_DAYS
+
+    n = CHART_DAYS if n is None else n
+    return [100.0 + (end - 100.0) * i / n for i in range(n + 1)]
+
+
+def test_the_chart_draws_paths_that_have_run_not_the_newest(config):
+    """The bug, and it made the individual lines useless on every fast panel.
+
+    `_named` and the context traces both sliced `panel.entries`, which is
+    sorted newest first -- and the newer a signal is, the less of its path
+    exists. Selecting the newest therefore selected the *shortest*. Measured on
+    the live database the median drawn path was one day on the 1h and 4h
+    panels, and of sixteen panels only four had a single numbered line reaching
+    +60d, so the one thing an event study is for was invisible.
+    """
+    from screener.historical import CHART_DAYS, _drawable, _named
+
+    panel = _panel_with(
+        # Newest first, exactly as `collect_panels` leaves them: three stubs
+        # from the last few days, then older paths that have run in full.
+        [(f"NEW{i}", f"2026-09-1{i}", [100.0, 100.5], None) for i in range(3)]
+        + [(f"OLD{i}", f"2026-06-0{i}", _full(), 0.2) for i in range(5)]
+    )
+    drawn = _drawable(panel)[:5]
+    assert [e.symbol for e in drawn] == ["OLD0", "OLD1", "OLD2", "OLD3", "OLD4"]
+    assert all(len(e.path) - 1 == CHART_DAYS for e in _named(panel)[:5])
+
+
+def test_matured_paths_are_still_newest_first_among_themselves(config):
+    """Maturity decides which entries, not which order. Within the matured
+    pool the recent past is still the part anyone can remember."""
+    from screener.historical import _drawable
+
+    panel = _panel_with([
+        ("NEWER", "2026-07-01", _full(), 0.2),
+        ("OLDER", "2026-05-01", _full(), 0.2),
+    ])
+    assert [e.symbol for e in _drawable(panel)] == ["NEWER", "OLDER"]
+
+
+def test_a_young_cohort_tops_up_with_the_longest_it_has(config):
+    """The two 1w strong cohorts have fewer matured paths than the key has
+    slots. Drawing nothing there would be worse than drawing the best
+    available -- but it must be the longest, not the newest."""
+    from screener.historical import _drawable
+
+    panel = _panel_with([
+        ("STUB", "2026-09-10", [100.0, 100.5], None),
+        ("HALF", "2026-08-01", _full(30), None),
+        ("DONE", "2026-06-01", _full(), 0.2),
+    ])
+    assert [e.symbol for e in _drawable(panel)] == ["DONE", "HALF", "STUB"]
+
+
+def test_the_legend_states_which_entries_were_drawn(config):
+    """A chart that silently picks its own sample is worse than one that picks
+    badly."""
+    from screener.historical import CHART_DAYS, _plot
+
+    full = _plot(_panel_with([(f"OLD{i}", f"2026-06-0{i}", _full(), 0.2)
+                              for i in range(5)]))
+    assert f"the most recent that have run the full {CHART_DAYS} days" in full
+
+    topped = _plot(_panel_with([
+        ("DONE", "2026-06-01", _full(), 0.2),
+        ("HALF", "2026-08-01", _full(30), None),
+    ]))
+    assert "plus the 1 longest of the rest" in topped
+
+
+def test_the_y_axis_is_scaled_to_what_is_drawn(config):
+    """Bounds used to come off the newest entries, so the axis could be scaled
+    to paths the reader cannot see."""
+    from screener.historical import _bounds
+
+    panel = _panel_with([
+        ("STUB", "2026-09-10", [100.0, 100.1], None),
+        ("DONE", "2026-06-01", _full(end=180.0), 0.8),
+    ])
+    lo, hi = _bounds(panel)
+    assert hi > 175.0, "the drawn path reaches 180 and must fit"
+
+
+def test_recent_signals_are_named_even_though_they_are_not_drawn(config):
+    """They used to be the numbered lines. Dropping them from the chart must
+    not drop them from the page -- they are the freshest calls on the site."""
+    from screener.historical import _running
+
+    html = _running(_panel_with([
+        ("FRESH", "2026-09-10", [100.0, 102.0], None),
+        ("DONE", "2026-06-01", _full(), 0.2),
+    ]))
+    assert "FRESH" in html and "+2.0%" in html and "day 1" in html
+    assert "DONE" not in html, "a matured path is on the chart, not in this list"
+
+
+def test_the_running_list_is_one_per_company(config):
+    """Same finding as the numbered lines: an intraday pattern completes on
+    almost every run, so the newest eight were four companies listed twice."""
+    from screener.historical import _running
+
+    html = _running(_panel_with([
+        ("AAA", "2026-09-10T21:00", [100.0, 101.0], None),
+        ("AAA", "2026-09-10T20:00", [100.0, 101.0], None),
+        ("BBB", "2026-09-10T19:00", [100.0, 102.0], None),
+    ]))
+    assert html.count("<strong>AAA</strong>") == 1
+    assert "<strong>BBB</strong>" in html
+
+
+def test_nothing_running_renders_nothing(config):
+    from screener.historical import _running
+
+    assert _running(_panel_with([("DONE", "2026-06-01", _full(), 0.2)])) == ""
+
+
+def test_the_selection_does_not_touch_the_cohort_mean(config):
+    """Only the drawn lines changed. The mean and every statistic still run
+    over the whole sample, or the headline numbers would quietly shift."""
+    from screener.historical import collect_panels
+
+    with Store(config.storage.database) as store:
+        seed(store, "AAA", fair_value=500.0)
+        seed(store, "BBB", fair_value=500.0)
+        panels = collect_panels(store, config)
+    panel = panels[("buy", "1d")]
+    assert panel.mean == mean_path([e.path for e in panel.entries])
+
+
+def test_the_legend_only_keys_line_styles_that_are_present(config):
+    """With matured paths drawn, "still running" is usually absent — and a
+    legend entry for a line nobody can find is a small lie."""
+    from screener.historical import _plot
+
+    settled = _plot(_panel_with([(f"W{i}", f"2026-06-0{i}", _full(), 0.2)
+                                 for i in range(5)]))
+    assert "still running" not in settled
+    assert "call was right" in settled
