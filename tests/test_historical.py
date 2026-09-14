@@ -658,7 +658,7 @@ def test_the_legend_states_which_entries_were_drawn(config):
 
     full = _plot(_panel_with([(f"OLD{i}", f"2026-06-0{i}", _full(), 0.2)
                               for i in range(5)]))
-    assert f"the most recent that have run the full {CHART_DAYS} days" in full
+    assert f"spread evenly across every one that has run the full {CHART_DAYS} days" in full
 
     topped = _plot(_panel_with([
         ("DONE", "2026-06-01", _full(), 0.2),
@@ -735,3 +735,107 @@ def test_the_legend_only_keys_line_styles_that_are_present(config):
                                  for i in range(5)]))
     assert "still running" not in settled
     assert "call was right" in settled
+
+
+# ------------------------------- sampling the record, and a readable axis
+
+
+def test_the_drawn_paths_are_spread_across_the_record(tmp_path):
+    """Taking the newest matured entries looks like a recency preference and is
+    really a market-timing one.
+
+    On a fast horizon dozens of patterns complete in a day, so the newest 24
+    all fired in the same few sessions. Before this was fixed the 1h strong-buy
+    panel drew 24 lines from three days out of a two-year pool — one market
+    moment sampled 24 times — and it showed 8 green against 16 red under a
+    headline hit rate of 62.5%. A reader trusting their eyes over the number
+    was being misled by the chart.
+    """
+    from screener.historical import _drawable
+
+    # Forty matured entries spanning January to December, newest first.
+    panel = _panel_with([
+        (f"S{i:02d}", f"2026-{12 - (i // 4):02d}-01", _full(), 0.2)
+        for i in range(40)
+    ])
+    months = {e.up2_date[5:7] for e in _drawable(panel)}
+    assert len(months) >= 8, "the sample must cover the record, not one corner"
+
+
+def test_the_numbered_lines_are_spread_too(tmp_path):
+    """They are the twelve a reader actually looks at, so taking the first
+    twelve of twenty-four date-ordered lines would re-cluster exactly the ones
+    that matter into the recent half."""
+    from screener.historical import _drawable, _named
+
+    panel = _panel_with([
+        (f"S{i:02d}", f"2026-{12 - (i // 4):02d}-01", _full(), 0.2)
+        for i in range(40)
+    ])
+    drawn = _drawable(panel)
+    named = _named(panel)
+    # The named set must reach into the older half of what is drawn.
+    oldest_half = {id(e) for e in drawn[len(drawn) // 2:]}
+    assert any(id(e) in oldest_half for e in named)
+
+
+def test_every_numbered_line_is_one_of_the_drawn_ones(tmp_path):
+    """`_named` used to select from an unsliced pool, so a numbered line could
+    land outside the drawn set and the chart rendered twenty-five."""
+    from screener.historical import MAX_PATHS, _drawable, _named
+
+    panel = _panel_with([
+        (f"S{i:02d}", f"2026-01-{(i % 28) + 1:02d}", [100.0, 100.0 + i], None)
+        for i in range(MAX_PATHS + 10)
+    ])
+    drawn = {id(e) for e in _drawable(panel)}
+    assert len(drawn) <= MAX_PATHS
+    assert all(id(e) in drawn for e in _named(panel))
+
+
+def test_one_runaway_path_does_not_own_the_whole_axis(tmp_path):
+    """Fitting the axis to min and max hands the vertical scale to a single
+    outlier: one path reaching 628 squeezed the mean, the baseline and
+    twenty-three other paths into the bottom fifth of the frame."""
+    from screener.historical import _bounds
+
+    entries = [(f"S{i:02d}", f"2026-0{(i % 9) + 1}-01", _full(end=110.0), 0.1)
+               for i in range(20)]
+    entries.append(("MOON", "2026-05-01", _full(end=600.0), 5.0))
+    lo, hi = _bounds(_panel_with(entries))
+    assert hi < 200.0, "the bulk of the paths must keep the frame"
+
+
+def test_the_mean_is_never_cropped_off_the_axis(tmp_path):
+    """Percentiles decide the paths' share of the frame, never whether the
+    lines the page is about are visible."""
+    from screener.historical import _bounds, Panel
+
+    panel = _panel_with([(f"S{i:02d}", f"2026-0{(i % 9) + 1}-01", _full(end=105.0), 0.05)
+                         for i in range(20)])
+    panel.mean = _full(end=190.0)
+    lo, hi = _bounds(panel)
+    assert hi > 190.0 and lo < 100.0
+
+
+def test_paths_that_leave_the_frame_are_clipped_and_declared(tmp_path):
+    """A clipped line stopping at the top edge reads as a line that ended, so
+    the caption has to say it was cut off — and SVG does not crop to the
+    viewBox, so without the clipPath it would draw over the panel below."""
+    from screener.historical import _plot
+
+    entries = [(f"S{i:02d}", f"2026-0{(i % 9) + 1}-01", _full(end=110.0), 0.1)
+               for i in range(20)]
+    entries.append(("MOON", "2026-05-01", _full(end=600.0), 5.0))
+    svg = _plot(_panel_with(entries))
+    assert "<clipPath id=" in svg
+    assert 'clip-path="url(#clip-strong-1d)"' in svg
+    assert "run past the top or bottom of the frame" in svg
+
+
+def test_a_tidy_panel_says_nothing_about_clipping(tmp_path):
+    from screener.historical import _plot
+
+    svg = _plot(_panel_with([(f"S{i:02d}", f"2026-0{(i % 9) + 1}-01", _full(), 0.2)
+                             for i in range(20)]))
+    assert "run past the top" not in svg
