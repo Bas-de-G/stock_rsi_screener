@@ -307,7 +307,13 @@ dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
 
 
 def test_a_symbol_missing_everywhere_fails_only_itself(tmp_path, monkeypatch, capsys):
-    """And when the fallback fails too, it is still one ticker's problem."""
+    """And when the fallback fails too, the healthy ticker is still recorded.
+
+    This run does exit 1, but for a reason that only holds at this size: one
+    unreadable ticker out of two is half the watchlist, well past
+    `UNRESOLVED_TOLERANCE`, so it is classed as an outage rather than a bad
+    symbol. The tolerance itself is exercised below.
+    """
     from argparse import Namespace
 
     from screener import cli as cli_module
@@ -383,3 +389,123 @@ dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
     monkeypatch.setattr(cli_module, "fetch_live_batch", _boom)
     args = Namespace(date="2026-08-05", with_morningstar=False, horizon=None)
     assert cmd_run(config := load_config(path), args) == 1
+
+
+# ------------------------------- one dead listing must not hold the page back
+
+
+def _watchlist_config(tmp_path, symbols):
+    """A config of `symbols` plain US tickers, written to tmp_path."""
+    lines = "\n".join(
+        f'  - {{symbol: {s}, tradingview: "NYSE:{s}", '
+        f"morningstar: xnys/{s.lower()}, markets: [sp500]}}"
+        for s in symbols
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(f"""
+tickers:
+{lines}
+rsi: {{period: 14, threshold: 30, overbought: 70, interval: "1D"}}
+signal:
+  window_days: 14
+  window_unit: calendar
+  valuation_rule: price_below_fair_value
+  fire_without_valuation: true
+storage:
+  database: "{tmp_path / 't.db'}"
+  csv_dir: "{tmp_path}"
+  fair_values: "{tmp_path / 'fv.yaml'}"
+dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
+""")
+    return path
+
+
+def _run_with_dead(tmp_path, monkeypatch, symbols, dead):
+    """Run the screener over `symbols` with `dead` unreadable everywhere."""
+    from argparse import Namespace
+
+    from screener import cli as cli_module
+    from screener.cli import cmd_run
+    from screener.config import load_config
+
+    healthy = {}
+    for symbol in symbols:
+        if symbol in dead:
+            continue
+        row = {}
+        for interval in ("60", "240", "1D", "1W"):
+            row[tradingview.rsi_field_name(14, interval)] = 55.0
+            row[tradingview._close_field_name(interval)] = 100.0
+        healthy[f"NYSE:{symbol}"] = row
+
+    def _batch(tv_symbols, intervals, period=14, extra_fields=()):
+        return healthy
+
+    def _single(tv_symbol, period=14, interval="1D"):
+        raise MarketDataError(f"404 Client Error for {tv_symbol}")
+
+    monkeypatch.setattr(cli_module, "fetch_live_batch", _batch)
+    monkeypatch.setattr(cli_module, "fetch_live_rsi", _single)
+    args = Namespace(date="2026-08-05", with_morningstar=False, horizon=None)
+    return cmd_run(load_config(tmp_path / "config.yaml"), args)
+
+
+def test_one_dead_ticker_in_a_real_watchlist_does_not_fail_the_run(
+    tmp_path, monkeypatch, capsys
+):
+    """The regression this exists for, and it cost three days of publishing.
+
+    FER stopped resolving on TradingView and `run` exited 1, which skipped
+    evaluate, prune, dashboard, the commit and the Pages deploy behind it. The
+    other 470 tickers were read perfectly and nobody saw any of them.
+    """
+    symbols = [f"T{i:02d}" for i in range(20)]
+    _watchlist_config(tmp_path, symbols)
+    code = _run_with_dead(tmp_path, monkeypatch, symbols, {"T07"})
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "1 of 20 tickers could not be read" in out, "it must still be reported"
+    assert "T07" in out
+
+
+def test_a_wholesale_failure_is_still_an_outage(tmp_path, monkeypatch):
+    """The other half. Tolerating one bad symbol must not tolerate the feed
+    quietly returning nothing for most of the watchlist."""
+    symbols = [f"T{i:02d}" for i in range(20)]
+    _watchlist_config(tmp_path, symbols)
+    assert _run_with_dead(tmp_path, monkeypatch, symbols, set(symbols[:5])) == 1
+
+
+def test_a_ticker_dead_on_every_horizon_counts_once(tmp_path, monkeypatch, capsys):
+    """Four horizons means four failures for one symbol.
+
+    Counting those separately would measure 4 against a watchlist of 20 and
+    call a single dead listing a 20% outage -- so the tolerance would fire on
+    exactly the case it exists to survive.
+    """
+    symbols = [f"T{i:02d}" for i in range(20)]
+    _watchlist_config(tmp_path, symbols)
+    assert _run_with_dead(tmp_path, monkeypatch, symbols, {"T03"}) == 0
+    assert "1 of 20 tickers could not be read" in capsys.readouterr().out
+
+
+def test_the_run_warns_github_actions_about_a_tolerated_failure(
+    tmp_path, monkeypatch, capsys
+):
+    """Not failing must not mean going quiet: a permanently broken symbol
+    still has to be visible on the run's summary page."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    symbols = [f"T{i:02d}" for i in range(20)]
+    _watchlist_config(tmp_path, symbols)
+    assert _run_with_dead(tmp_path, monkeypatch, symbols, {"T11"}) == 0
+    assert "::warning title=Unreadable tickers::T11" in capsys.readouterr().out
+
+
+def test_a_clean_run_says_nothing_about_unresolved_tickers(
+    tmp_path, monkeypatch, capsys
+):
+    symbols = [f"T{i:02d}" for i in range(5)]
+    _watchlist_config(tmp_path, symbols)
+    assert _run_with_dead(tmp_path, monkeypatch, symbols, set()) == 0
+    assert "could not be read" not in capsys.readouterr().out

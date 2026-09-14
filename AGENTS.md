@@ -82,6 +82,33 @@ cleared from the database on the next run.
 only on `main` (see the branch guard in `.github/workflows/daily.yml`). A human
 committing it will collide with the bot.
 
+**One unreadable ticker must never stop the run.** Every per-symbol
+`MarketDataError` used to set `exit_code = 1`, and `run` is the second step in
+`daily.yml` — so a single symbol TradingView stopped serving skipped evaluate,
+prune, dashboard, the commit and the Pages deploy behind it. Nothing was
+published at all while 470 tickers were being read perfectly. That happened
+three times; the last, FER, cost three days.
+
+`cli._report_unresolved` collects them instead and fails only when more than
+`UNRESOLVED_TOLERANCE` (10%) of the watchlist is unreadable, which is what an
+outage looks like from inside the loop — the genuinely global case never gets
+there, because `fetch_live_batch` raising already returns 1. Keyed by symbol,
+not by (symbol, horizon): four horizons would otherwise count one dead listing
+as four failures and trip a 20-ticker tolerance on its own. Tolerated is not
+silent — the block naming every symbol always prints, and under Actions a
+`::warning::` annotation puts it on the run summary without reddening it.
+
+**A vendor symbol going quiet is not a corporate action.** BME:FER began
+returning `symbol_not_exists` while EURONEXT:FER quoted a sensible price, which
+reads exactly like a completed relisting; it was repointed to Amsterdam on that
+basis and the reasoning was written up in `config.yaml`. It was wrong. Madrid
+came back four days later, and it is the *Amsterdam* line whose Yahoo history
+stops on the day of the switch. Nothing available at the time distinguished an
+outage from a move — the deciding evidence was which line kept printing, which
+only existed days later. Confirm a venue change against a second source
+(Yahoo's history for both lines is enough) before editing, and note that with
+the tolerance above the question is no longer urgent.
+
 **The watchlist only ever grows.** `screener universe` proposes additions and
 nothing else. A ticker that has left an index, been renamed, or gone quiet
 keeps its entry, its history and its card — dropping it would take its chart
@@ -366,11 +393,42 @@ value with no price beside it and then divides by None, and `TypeError` is not
 a `MorningstarError`, so nothing catches it.
 
 **The dashboard's market filter is pure CSS, and must stay that way.** Hidden
-radio inputs sit before `.sheet`, and `#mk-x:checked ~ .sheet .card:not(.in-x)`
-hides the rest. That keeps the page working from `file://` and with JS off. The
-timeframe selector can't work the same way — each horizon has different data —
-so it's links between four separately-built pages. Adding a market means adding
-it to `config.MARKETS` and `MARKET_LABELS`; the CSS rules generate from there.
+radio inputs sit before `.sheet`, and
+`#mk-x:checked ~ .sheet .book-stocks .card:not(.in-x)` hides the rest. That
+keeps the page working from `file://` and with JS off. The timeframe selector
+can't work the same way — each horizon has different data — so it's links
+between four separately-built pages. Adding a market means adding it to
+`config.MARKETS` and `MARKET_LABELS`; the CSS rules generate from there.
+
+**Stocks and crypto are two books, not two markets, and crypto is not a chip.**
+The page splits on `row.valued` into `.book-stocks` and `.book-crypto`,
+switched by a second radio group (`name="asset"`) on the same pure-CSS
+mechanism. Crypto used to be the sixth market chip, which is what made the two
+halves interleave: "All" put Bitcoin next to Unilever under one set of counts,
+and a single `Strong 🚀 3` spanned two groups that earn the rocket by completely
+unrelated rules — an analyst's fair value on one side, a two-clock drawdown on
+the other. Each book now carries its own rule paragraph, tile strip and lead.
+
+Three things about that are load-bearing:
+
+- **Split on `valued`, not on the `crypto` tag.** `Row._grade`, `_conviction`
+  and the card's own branches all key on `valued`, so using it here means the
+  section a card is filed under cannot disagree with the rule it is graded by.
+- **The market hide rules are scoped to `.book-stocks`.** Unscoped,
+  `.card:not(.in-europe)` hides every crypto card too — and the chip that did
+  it sits in the other section, out of sight, so Crypto just looks broken.
+- **Crypto is still a market everywhere else.** `MARKETS`, `Ticker.markets` and
+  `notify.push_markets` are unchanged; only the dashboard chips dropped it.
+  `config.active_markets` no longer drives those chips — the dashboard derives
+  them from the rows it is actually rendering, so a chip exists if and only if
+  a visible card carries it.
+
+The crypto book's lead (`_deepest_dip`) ranks by distance below the *six-month*
+high, not the all-time one. The all-time leg barely moves week to week — an
+asset 74% below its record is still 74% below it a fortnight later — so ranking
+on it would print the same order every day. Like the deal of the day it is the
+pick of what *fired*, not a second list of the rockets, so it is not gated on
+the drawdown passing; the line underneath says whether the pick clears.
 
 **Currency is not always dollars, and identifiers differ per venue.** Every
 non-US listing needs its own `tradingview` / `yahoo` / `morningstar` /

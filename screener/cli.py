@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import sys
 from collections import Counter
 from dataclasses import replace
@@ -248,6 +249,63 @@ def _selected_horizons(config: Config, args) -> list:
     return [config.horizon(key)] if key else list(config.horizons)
 
 
+# How much of the watchlist has to stop resolving before the run itself is
+# treated as broken.
+#
+# Every ticker that fails here used to fail the run, and the cost of that was
+# measured three times: a single symbol returning `symbol_not_exists` from
+# TradingView exits non-zero, and every step behind it in `daily.yml` --
+# evaluate, prune, dashboard, the commit, the Pages deploy -- is skipped. One
+# dead listing therefore published nothing at all, for as long as nobody
+# noticed. The last occurrence was FER, and it cost three days.
+#
+# That trade is backwards. A ticker that cannot be read is one missing card on
+# a page of several hundred; a page that never builds is the whole product. So
+# a few unreadable symbols are reported and survived, and only a wholesale
+# failure -- which is what a real outage looks like from here -- stops the run.
+#
+# The proportion is the test rather than a fixed count, because the watchlist
+# grows: ten failures out of forty is an outage and ten out of five hundred is
+# a handful of stale slugs. Note the genuinely global case never reaches this
+# code at all, because `fetch_live_batch` raising already returns 1 above.
+UNRESOLVED_TOLERANCE = 0.10
+
+
+def _report_unresolved(unresolved: dict[str, str], tracked: int) -> bool:
+    """Print what could not be read, and say whether it sinks the run.
+
+    Returns True when the failures are wholesale enough to be an outage.
+
+    Deliberately noisy even in the tolerated case. The risk of not failing is
+    that a permanently broken ticker sits unnoticed forever, so this prints a
+    block naming every symbol, and under Actions also emits a `::warning::`
+    annotation -- which surfaces on the run's summary page without turning it
+    red. Quiet tolerance would just trade a loud failure for a silent one.
+    """
+    if not unresolved:
+        return False
+
+    share = len(unresolved) / tracked if tracked else 1.0
+    fatal = share > UNRESOLVED_TOLERANCE
+    print(f"\n  {len(unresolved)} of {tracked} tickers could not be read "
+          f"({share:.0%}):")
+    for symbol, message in sorted(unresolved.items()):
+        print(f"    {symbol}: {message}")
+
+    if fatal:
+        print(f"\n  ! More than {UNRESOLVED_TOLERANCE:.0%} of the watchlist is "
+              f"unreadable — treating this as an outage rather than a few bad "
+              f"symbols.")
+    else:
+        print("\n  Continuing: the rest of the run is unaffected, and these "
+              "cards will be missing rather than wrong. Fix the symbols in "
+              "config.yaml when convenient.")
+        if os.environ.get("GITHUB_ACTIONS"):
+            names = ", ".join(sorted(unresolved))
+            print(f"::warning title=Unreadable tickers::{names}")
+    return fatal
+
+
 def cmd_run(config: Config, args) -> int:
     """The daily job: fetch, store, detect, notify."""
     today = args.date or dt.date.today().isoformat()
@@ -257,6 +315,11 @@ def cmd_run(config: Config, args) -> int:
           f"within {config.signal.window_days} {config.signal.window_unit} days\n")
 
     exit_code = 0
+    # symbol -> why it could not be read. A dict rather than a list so a symbol
+    # that fails on all four horizons is one entry, not four -- otherwise the
+    # tolerance below would be measured against a count four times the size of
+    # the watchlist it is a proportion of.
+    unresolved: dict[str, str] = {}
     horizons = _selected_horizons(config, args)
     with Store(config.storage.database) as store:
         recorded = sync_fair_values(store, config)
@@ -328,8 +391,12 @@ def cmd_run(config: Config, args) -> int:
                     print(f"  {ticker.symbol}: no {horizon.label} RSI yet — {exc}")
                     continue
                 except MarketDataError as exc:
+                    # Collected rather than fatal here -- one unreadable symbol
+                    # must not cost the other 470 their dashboard. Reported as
+                    # a block after every horizon, and only an outage-sized
+                    # share of them fails the run. See `_report_unresolved`.
                     print(f"  {ticker.symbol}: RSI unavailable — {exc}")
-                    exit_code = 1
+                    unresolved.setdefault(ticker.symbol, str(exc))
                     continue
                 store.upsert_rsi_point(
                     RsiPoint(
@@ -346,6 +413,9 @@ def cmd_run(config: Config, args) -> int:
                     else ""
                 )
                 print(f"  {ticker.symbol}: RSI {quote.rsi:6.2f}   close {quote.close:,.2f}{growth_note}")
+
+        if _report_unresolved(unresolved, len(config.tickers)):
+            exit_code = 1
 
         # --- Price + fair value, from Morningstar (opt-in) ---------------
         if not args.with_morningstar:

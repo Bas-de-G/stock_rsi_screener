@@ -157,6 +157,42 @@ class Row:
         return best
 
     @property
+    def crypto_dip(self) -> float | None:
+        """How far below its six-month high a fresh crypto buy is trading.
+
+        The crypto section's ranking, and the counterpart of `deal_discount`
+        rather than a copy of it: there is no fair value to measure a discount
+        against, so what ranks these is the leg of the drawdown gate that
+        actually moves. The all-time leg barely changes week to week -- an
+        asset 74% below its record is still 74% below it a fortnight later --
+        so ranking on that would produce the same order every day.
+
+        Same two conditions as the deal and no more: a *buy* pattern fresh on
+        the RSI, and highs on record to measure against. Deliberately not gated
+        on whether the drawdown confirms, for the same reason the deal is not
+        gated on the margin -- this is the pick of what fired, and the lead
+        says underneath whether the pick clears the bar.
+
+        None for anything valued: an equity is measured against its fair value
+        and has no business being ranked by this.
+        """
+        if self.valued or self.horizon is None or self.suspended:
+            return None
+        if self.highs is None or not self.highs.recent:
+            return None
+        price = self.series[-1].close if self.series else None
+        if not price:
+            return None
+        if not any(s.fired and signal_is_fresh(s, self.series, self.horizon)
+                   for s in self.buys):
+            return None
+        dip = _drawdown(price, self.highs.recent)
+        # `drawdown` floors at zero, so an asset sitting *at* its high reads
+        # 0.0 rather than a negative. That is not a dip and must not win the
+        # ranking by default when nothing else fired.
+        return dip if dip else None
+
+    @property
     def latest(self) -> RsiPoint | None:
         return self.series[-1] if self.series else None
 
@@ -747,12 +783,16 @@ def _card(row: Row, config: Config, horizon) -> str:
             gate_class = "pass" if confirms else "fail"
             from_ath = _drawdown(price, row.highs.all_time)
             from_recent = _drawdown(price, row.highs.recent)
+            # "Below all-time" wrapped mid-word in a three-column strip 320px
+            # wide, which is the width this page is actually read at. The
+            # section heading above already says these are measured against the
+            # all-time and six-month highs, so the cells do not have to.
             valuation_block = f"""
         <dl class="valuation {gate_class}">
-          <div><dt>Below all-time</dt><dd>{from_ath:.0%}</dd></div>
-          <div><dt>Below 6-month</dt><dd>{from_recent:.0%}</dd></div>
-          <div><dt>Verdict</dt><dd>{"drawdown confirms" if confirms
-                                    else "not far enough down"}</dd></div>
+          <div><dt>Below ATH</dt><dd>{from_ath:.0%}</dd></div>
+          <div><dt>Below 6-mo</dt><dd>{from_recent:.0%}</dd></div>
+          <div><dt>Verdict</dt><dd>{"confirms" if confirms
+                                    else "not far enough"}</dd></div>
         </dl>
         <p class="provenance">Needs {config.crypto.ath_floor:.0%} below its
            all-time high and {horizon.margin_pct} below its 6-month high.
@@ -1056,25 +1096,195 @@ def _gate(val: Valuation, config: Config, margin: float = 0.0) -> tuple[bool, bo
     return valuation_passes(val.price, val.fair_value, config.signal, margin)
 
 
+def _session_of(rows: list[Row]) -> str:
+    dated = [r.latest.date for r in rows if r.latest]
+    return max(dated) if dated else "—"
+
+
+def _aggregates(rows: list[Row], horizon, threshold: float, conviction: bool) -> str:
+    """The tile strip summarising one book.
+
+    Per book rather than per page, which is the whole point of the split: a
+    single "Strong 🚀 3" over both halves cannot be acted on, because the two
+    halves earn that rocket by completely different rules and the reader has no
+    way to tell which kind the three were.
+
+    Session is deliberately *not* here. It is a fact about the run rather than
+    about either half, so it says the same thing in both strips -- it lives in
+    the masthead once instead.
+
+    `conviction` drops two tiles for a book whose rows cannot be scored. Crypto
+    is exactly that case -- `_conviction` returns None for anything unvalued --
+    so the tile would read a permanent 0 and invite the reading that no crypto
+    asset is any good, rather than the truth, which is that the question was
+    never asked. That leaves eight tiles against six, and both divide evenly by
+    the three and two columns the strip collapses to on a phone; an odd count
+    strands a tile on a row of its own.
+    """
+    oversold = sum(1 for r in rows if r.rsi is not None and r.rsi < threshold)
+    fresh = sum(1 for r in rows if r.fresh)
+    fired = sum(1 for r in rows if r.fired)
+    strong = sum(1 for r in rows if r.strong)
+    sells = sum(1 for r in rows if r.sell_fired)
+    tiles = [
+        f"<div><dt>Tracked</dt><dd>{len(rows)}</dd></div>",
+        f"<div><dt>Below {threshold:g}</dt>"
+        f"<dd class=\"{'hot' if oversold else ''}\">{oversold}</dd></div>",
+        f'<div title="Patterns that completed within the last '
+        f'{html.escape(horizon.fresh_label)} — the ones still near their own '
+        f'bounce."><dt>Fresh</dt>'
+        f"<dd class=\"{'warn' if fresh else ''}\">{fresh}</dd></div>",
+        f"<div><dt>Signals</dt>"
+        f"<dd class=\"{'warn' if fired else ''}\">{fired}</dd></div>",
+        f"<div><dt>Strong 🚀</dt>"
+        f"<dd class=\"{'good' if strong else ''}\">{strong}</dd></div>",
+        f"<div><dt>Sells 🔻</dt>"
+        f"<dd class=\"{'hot' if sells else ''}\">{sells}</dd></div>",
+    ]
+    if conviction:
+        patterns = sum(len(r.signals) for r in rows)
+        high = sum(1 for r in rows
+                   if r.conviction is not None and r.conviction.score >= GREEN_AT)
+        tiles.insert(2, f"<div><dt>Patterns</dt><dd>{patterns}</dd></div>")
+        tiles.append(
+            f"""<div title="Names scoring {GREEN_AT:g} or better on the weighted
+      conviction score. It ranks and explains; it does not decide — the rocket
+      beside it still comes from the fair-value rule."><dt>Conviction ≥{GREEN_AT:g}</dt>
+      <dd class="{'good' if high else ''}">{high}</dd></div>"""
+        )
+    return '<dl class="aggregates">\n  ' + "\n  ".join(tiles) + "\n</dl>"
+
+
+def _stock_book(rows: list[Row], config: Config, horizon) -> str:
+    """Everything with a fair value behind it, and the rules that grade it."""
+    threshold = config.rsi.threshold
+    markets = tuple(m for m in MARKETS if any(m in r.markets for r in rows))
+    tabs = '<label for="mk-all">All</label>' + "".join(
+        f'<label for="mk-{m}">{html.escape(MARKET_LABELS[m])}</label>'
+        for m in markets
+    )
+    cards = "\n".join(_card(r, config, horizon) for r in rows)
+    return f"""<section class="book book-stocks" aria-label="Stocks">
+  <div class="book-head">
+    <h2 class="book-title">Stocks</h2>
+    <p class="book-rule">Graded against <strong>Morningstar's fair value</strong>.
+       A price at least {horizon.margin_pct} below it confirms the pattern and
+       earns the rocket; shrinking earnings veto it. {len(rows)} names, and this
+       timeframe suggests {horizon.leverage}x.</p>
+  </div>
+  {_aggregates(rows, horizon, threshold, conviction=True)}
+  {_deal_of_the_day(rows, horizon, threshold)}
+  <nav class="market-tabs" aria-label="Market">{tabs}</nav>
+  <main class="grid">
+{cards}
+  </main>
+</section>"""
+
+
+def _crypto_book(rows: list[Row], config: Config, horizon) -> str:
+    """The half with no fundamentals, and a gate that says so in as many words.
+
+    The rule paragraph is not decoration. Every number in this section means
+    something different from the identically-shaped number above it -- a rocket
+    here was earned by a drawdown, not by an analyst -- and when the two sets of
+    cards sat in one grid there was nowhere to say that except on each card,
+    which nobody reads twice. Given its own section it can be said once, at the
+    top, and the cards below can simply be read.
+    """
+    threshold = config.rsi.threshold
+    cards = "\n".join(_card(r, config, horizon) for r in rows)
+    return f"""<section class="book book-crypto" aria-label="Crypto">
+  <div class="book-head">
+    <h2 class="book-title">Crypto</h2>
+    <p class="book-rule">No analyst fair value exists for these, and nothing here
+       invents one. A crypto pattern is graded on <strong>where the price sits in
+       its own range</strong>, on two clocks that must both pass: at least
+       {config.crypto.ath_floor:.0%} below its all-time high, and
+       {horizon.margin_pct} below its six-month high. That is not a valuation,
+       and whether it predicts anything is still an open question — every one is
+       recorded so the <a href="history.html">track record</a> can settle it.</p>
+  </div>
+  {_aggregates(rows, horizon, threshold, conviction=False)}
+  {_deepest_dip(rows, horizon, threshold)}
+  <main class="grid">
+{cards}
+  </main>
+</section>"""
+
+
+def _deepest_dip(rows: list[Row], horizon, threshold: float) -> str:
+    """The crypto half's answer to "what do I look at first".
+
+    Deliberately the same shape as the deal of the day and deliberately not the
+    same claim. The equity lead ranks by discount to fair value; there is no
+    such number here, so this ranks by how far below its own six-month high a
+    fresh buy is trading -- the leg of the gate that actually moves, since the
+    all-time leg barely changes week to week.
+
+    Like the deal, it does not require the gate to pass: it is the pick of what
+    fired, and the line underneath says whether that pick clears the bar. A lead
+    that only ever showed gate-passing assets would be empty most weeks and
+    would duplicate the rockets below it when it wasn't.
+    """
+    candidates = [r for r in rows if r.crypto_dip is not None]
+    if not candidates:
+        fresh = sum(1 for r in rows if r.fresh)
+        near = (
+            f"{fresh} pattern{'' if fresh == 1 else 's'} fired in the last "
+            f"{html.escape(horizon.fresh_label)}, but none was a buy with its "
+            "highs on record."
+            if fresh else
+            f"Nothing has fired in the last {html.escape(horizon.fresh_label)}."
+        )
+        return f"""
+<section class="lead lead-quiet" aria-label="No crypto pick today">
+  <p class="lead-kicker">Nothing fresh</p>
+  <p class="lead-note">{near} This slot shows the fresh buy trading furthest
+     below its own six-month high.</p>
+</section>"""
+
+    best = max(candidates, key=lambda r: r.crypto_dip)
+    _, confirms = best.drawdown_gate
+    price = best.series[-1].close if best.series else None
+    from_ath = _drawdown(price, best.highs.all_time)
+    # The recent high is on record (crypto_dip required it) but the all-time one
+    # need not be -- CoinGecko is a separate call and is allowed to fail.
+    ath_note = ("" if from_ath is None
+                else f" — it is also {from_ath:.0%} below its all-time high")
+    verdict = (
+        "Both clocks agree, so this one carries the rocket below."
+        if confirms else
+        "It does not clear both clocks yet, so it is a pattern rather than a "
+        "strong buy — the card says which leg is short."
+    )
+    return f"""
+<section class="lead lead-crypto" aria-label="Furthest below its highs">
+  <p class="lead-kicker">Furthest below its highs</p>
+  <div class="lead-line">
+    <h2 class="lead-symbol">{html.escape(best.symbol)}</h2>
+    <span class="lead-leader" aria-hidden="true"></span>
+    <p class="lead-figure">{best.crypto_dip * 100:.0f}<span class="lead-unit">%</span></p>
+  </div>
+  <p class="lead-note">The pick of what fired in the last
+     {html.escape(horizon.fresh_label)}: a second cross of {threshold:g}, and the
+     furthest below its six-month high of any of them{ath_note}. {verdict}
+     <span class="lead-lev">{horizon.leverage}× suggested</span></p>
+</section>"""
+
+
 def render(rows: list[Row], config: Config, horizon=None, standalone: bool = True) -> str:
     horizon = horizon or config.horizon(DEFAULT_HORIZON)
     threshold = config.rsi.threshold
     generated = dt.datetime.now().strftime("%d %B %Y, %H:%M")
 
-    tracked = len(rows)
-    oversold = sum(1 for r in rows if r.rsi is not None and r.rsi < threshold)
-    patterns = sum(len(r.signals) for r in rows)
-    strong = sum(1 for r in rows if r.strong)
-    fired = sum(1 for r in rows if r.fired)
-    sells = sum(1 for r in rows if r.sell_fired)
-    high_conviction = sum(
-        1 for r in rows
-        if r.conviction is not None and r.conviction.score >= GREEN_AT
-    )
-    dated = [r.latest.date for r in rows if r.latest]
-    as_of = max(dated) if dated else "—"
-
-    cards = "\n".join(_card(r, config, horizon) for r in rows)
+    # The one split the whole page is organised around. `valued` rather than
+    # the `crypto` market tag because `valued` is what every downstream rule
+    # already keys on -- `Row._grade`, `_conviction`, the card's own branches --
+    # so the section a card lands in cannot disagree with the rule it is graded
+    # by. A mistagged ticker would otherwise be filed under one heading and
+    # scored by the other.
+    stocks = [r for r in rows if r.valued]
+    coins = [r for r in rows if not r.valued]
 
     def page_for(h) -> str:
         return "index.html" if h.key == DEFAULT_HORIZON else f"{h.key}.html"
@@ -1084,58 +1294,68 @@ def render(rows: list[Row], config: Config, horizon=None, standalone: bool = Tru
         f'href="{page_for(h)}">{html.escape(h.label)}</a>'
         for h in config.horizons
     ) + '<a class="tf" href="history.html">Historical</a>'
-    market_tabs = '<label for="mk-all">All</label>' + "".join(
-        f'<label for="mk-{m}">{html.escape(MARKET_LABELS[m])}</label>'
-        for m in config.active_markets
-    )
-    # Radios sit ahead of the sheet so `:checked ~ .sheet .card` can reach the
-    # cards. Whole filter is CSS -- no script, works with JS disabled.
+
+    # Radios sit ahead of the sheet so `:checked ~ .sheet` can reach into it.
+    # Two independent groups now: `asset` picks the book, `mk` filters inside
+    # the stock one. Both pure CSS -- no script, still works from file:// and
+    # with JS off, which the timeframe links cannot do because each horizon is
+    # genuinely different data.
+    #
+    # Crypto is deliberately NOT among the `mk` chips any more. It was one
+    # market filter among six, which is what made the two halves interleave:
+    # "All" meant Bitcoin next to Unilever, graded by different rules, under one
+    # set of counts. It is a different kind of thing, not a different region.
+    asset_radios = ""
+    asset_tabs = ""
+    if coins:
+        asset_radios = ('<input type="radio" name="asset" id="as-stocks" checked>'
+                        '<input type="radio" name="asset" id="as-crypto">')
+        asset_tabs = (
+            '<nav class="asset-tabs" aria-label="Asset class">'
+            f'<label for="as-stocks">Stocks <span class="count">{len(stocks)}</span></label>'
+            f'<label for="as-crypto">Crypto <span class="count">{len(coins)}</span></label>'
+            "</nav>"
+        )
     market_radios = '<input type="radio" name="mk" id="mk-all" checked>' + "".join(
-        f'<input type="radio" name="mk" id="mk-{m}">' for m in config.active_markets
+        f'<input type="radio" name="mk" id="mk-{m}">'
+        for m in MARKETS if any(m in r.markets for r in stocks)
     )
 
+    mix = (
+        f"{len(stocks)} equities and {len(coins)} crypto assets, screened the "
+        "same way and graded by different rules"
+        if coins else f"{len(stocks)} market leaders"
+    )
     masthead = f"""<header class="masthead">
   <div class="title-block">
     <p class="eyebrow">Relative Strength Screener · {html.escape(horizon.label)} chart</p>
     <h1>RSI Screener</h1>
     <p class="standfirst">
-      Tracking {tracked} market leaders on the {html.escape(horizon.label)}
-      chart. <strong>Buy</strong> on two upward crossings of RSI {threshold:g},
+      Tracking {mix}, on the {html.escape(horizon.label)} chart.
+      <strong>Buy</strong> on two upward crossings of RSI {threshold:g},
       <strong>sell</strong> on two downward crossings of
       {config.rsi.overbought:g} — both within {horizon.window_days} days of now,
-      with RSI still on the signalling side. A fair value at least
-      {horizon.margin_pct} away confirms; this timeframe suggests
-      {horizon.leverage}x.
+      with RSI still on the signalling side. What <em>confirms</em> a signal is
+      where the two halves part company, and each section states its own rule.
     </p>
     <nav class="timeframes" aria-label="RSI timeframe">{horizon_links}</nav>
   </div>
-  <dl class="aggregates">
-    <div><dt>Session</dt><dd>{html.escape(as_of)}</dd></div>
-    <div><dt>Tracked</dt><dd>{tracked}</dd></div>
-    <div><dt>Below {threshold:g}</dt><dd class="{'hot' if oversold else ''}">{oversold}</dd></div>
-    <div><dt>Patterns</dt><dd>{patterns}</dd></div>
-    <div><dt>Signals</dt><dd class="{'warn' if fired else ''}">{fired}</dd></div>
-    <div><dt>Strong 🚀</dt><dd class="{'good' if strong else ''}">{strong}</dd></div>
-    <div><dt>Sells 🔻</dt><dd class="{'hot' if sells else ''}">{sells}</dd></div>
-    <div title="Names scoring {GREEN_AT:g} or better on the weighted conviction
-      score. It ranks and explains; it does not decide — the rocket above still
-      comes from the fair-value rule."><dt>Conviction ≥{GREEN_AT:g}</dt>
-      <dd class="{'good' if high_conviction else ''}">{high_conviction}</dd></div>
-  </dl>
+  <p class="as-of">Session <span>{html.escape(_session_of(rows))}</span></p>
 </header>"""
 
-    body = f"""{market_radios}
+    books = _stock_book(stocks, config, horizon)
+    if coins:
+        books += "\n" + _crypto_book(coins, config, horizon)
+
+    body = f"""{asset_radios}{market_radios}
 <div class="sheet">
 {masthead}
-{_deal_of_the_day(rows, horizon, threshold)}
-<nav class="market-tabs" aria-label="Market">{market_tabs}</nav>
-<main class="grid">
-{cards}
-</main>
+{asset_tabs}
+{books}
 <footer class="colophon">
   <p>Generated {generated} · RSI ({config.rsi.period}) from TradingView,
      {html.escape(horizon.label)} bars · History from Yahoo Finance ·
-     Fair value from Morningstar</p>
+     Fair value from Morningstar · Crypto highs from CoinGecko</p>
   <p class="disclaimer">Leverage figures are a fixed number attached to each
      timeframe, not a calculation from the signal. Leverage multiplies losses
      as readily as gains. Nothing here is financial advice.</p>
@@ -1755,6 +1975,132 @@ input[name="mk"] { position: absolute; opacity: 0; pointer-events: none; }
   background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600;
 }
 
+/* ---- the two books --------------------------------------------------
+   Stocks and crypto are the page's top-level division, and the switch between
+   them has to outrank everything below it -- the market chips look like tabs
+   too, and if the two rows read as one row of chips the split is invisible.
+   So this one is a segmented control with a filled active state, sits directly
+   under the masthead rule, and carries a count so pressing it is a decision
+   rather than a guess. */
+input[name="asset"] { position: absolute; opacity: 0; pointer-events: none; }
+
+.asset-tabs {
+  display: flex;
+  gap: 0;
+  margin: 18px 0 6px;
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  overflow: hidden;
+  max-width: 420px;
+}
+.asset-tabs label {
+  flex: 1 1 0;
+  padding: 9px 16px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--ink-2);
+  background: var(--card);
+  border-right: 1px solid var(--rule);
+}
+.asset-tabs label:last-child { border-right: 0; }
+.asset-tabs label:hover { color: var(--accent); }
+.asset-tabs .count {
+  margin-left: 6px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: .65;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Each book opens with its own name and its own grading rule, because the two
+   halves mean different things by identical-looking numbers. */
+.book { margin-top: 4px; }
+.book-head {
+  padding: 14px 0 12px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 4px;
+}
+.book-title {
+  margin: 0;
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-weight: 400;
+  font-size: clamp(22px, 3.2vw, 28px);
+  line-height: 1.1;
+  letter-spacing: -.01em;
+}
+.book-rule {
+  margin: 6px 0 0;
+  max-width: 76ch;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.book-rule a { color: var(--accent); }
+
+/* The crypto half is marked by one restrained accent rather than a different
+   palette: it is the same screener on the same chart, and recolouring it
+   wholesale would suggest the RSI means something different there too. */
+.book-crypto .book-head { border-bottom-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.book-crypto .book-title::after {
+  content: "no fair value";
+  margin-left: 10px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  vertical-align: .32em;
+  white-space: nowrap;
+}
+.lead-crypto { border-top-color: var(--warn); background: color-mix(in srgb, var(--warn) 5%, transparent); }
+.lead-crypto .lead-kicker { color: var(--warn); }
+.lead-crypto .lead-figure { color: var(--warn); }
+.lead-crypto .lead-leader { border-bottom-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.lead-crypto .lead-lev { color: var(--warn); }
+
+/* Session moved out of the tile strip and into the masthead when the strip
+   became per-book: the date is a fact about the run, not about either half. */
+.as-of {
+  margin: 0;
+  align-self: flex-end;
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.as-of span {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 17px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.book .aggregates { margin: 14px 0 0; width: 100%; grid-auto-flow: column; }
+@media (max-width: 900px) {
+  .book .aggregates { grid-auto-flow: row; grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 720px) {
+  .book .aggregates { grid-template-columns: repeat(3, 1fr); }
+  .asset-tabs { max-width: none; }
+}
+@media (max-width: 480px) {
+  .book .aggregates { grid-template-columns: repeat(2, 1fr); }
+}
+
 .market-tabs {
   display: flex; gap: 4px; flex-wrap: wrap;
   margin: 0 0 14px; padding-top: 12px; border-top: 1px solid var(--rule);
@@ -1954,6 +2300,12 @@ def _market_filter_css() -> str:
     `MARKETS` (see `_page`). When the two were maintained separately, adding a
     market rendered a chip with no matching rule behind it — and a filter with
     no hide rule doesn't fail loudly, it just quietly shows everything.
+
+    Scoped to `.book-stocks` since the split: the crypto book has no market
+    chips of its own, and an unscoped `.card:not(.in-europe)` would hide every
+    crypto card the moment someone pressed Europe — so switching to Crypto
+    afterwards would show an empty grid, with the chip that emptied it sitting
+    in the section above and out of sight.
     """
     highlight = (
         "  background: var(--accent); color: var(--paper); "
@@ -1963,11 +2315,32 @@ def _market_filter_css() -> str:
         '#mk-all:checked ~ .sheet .market-tabs label[for="mk-all"] {\n' + highlight
     ]
     blocks += [
-        f"#mk-{m}:checked ~ .sheet .card:not(.in-{m}) {{ display: none; }}\n"
+        f"#mk-{m}:checked ~ .sheet .book-stocks .card:not(.in-{m}) {{ display: none; }}\n"
         f'#mk-{m}:checked ~ .sheet .market-tabs label[for="mk-{m}"] {{\n' + highlight
         for m in MARKETS
     ]
     return "\n".join(blocks)
 
 
-_CSS += "\n" + _market_filter_css()
+def _asset_switch_css() -> str:
+    """Show one book, hide the other, and light the tab that did it.
+
+    The same trick as the market filter and for the same reason — it has to
+    work from a `file://` URL and with JavaScript off. The two books are
+    siblings inside `.sheet`, so one `display: none` per state is the whole
+    mechanism.
+    """
+    on = ("  background: var(--ink); color: var(--paper);\n}")
+    return "\n".join([
+        "#as-crypto:checked ~ .sheet .book-stocks { display: none; }",
+        "#as-stocks:checked ~ .sheet .book-crypto { display: none; }",
+        '#as-stocks:checked ~ .sheet .asset-tabs label[for="as-stocks"] {\n' + on,
+        '#as-crypto:checked ~ .sheet .asset-tabs label[for="as-crypto"] {\n' + on,
+        # The switch owns the horizontal rule under the masthead once it is
+        # there; without this the masthead border and the tab row stack into
+        # two lines a few pixels apart.
+        ".masthead:has(+ .asset-tabs) { padding-bottom: 14px; }",
+    ])
+
+
+_CSS += "\n" + _market_filter_css() + "\n" + _asset_switch_css()
