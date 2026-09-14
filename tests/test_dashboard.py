@@ -462,14 +462,25 @@ def test_the_market_filter_is_pure_css_no_javascript(config):
     html = render([row(markets=("sp500",))], config)
     assert "<script" not in html.lower()
     assert 'input type="radio" name="mk"' in html
-    assert "#mk-sp500:checked ~ .sheet .card:not(.in-sp500)" in html
+    assert "#mk-sp500:checked ~ .sheet .book-stocks .card:not(.in-sp500)" in html
 
 
-def test_every_active_market_gets_a_radio_and_a_tab(config):
-    html = render([row(markets=("sp500",))], config)
-    for m in config.active_markets:
+def test_every_market_on_a_card_gets_a_radio_and_a_tab(config):
+    """A chip exists if and only if a visible card carries it.
+
+    This used to loop over `config.active_markets`, which is empty for this
+    fixture -- so the body never ran and the test asserted nothing but the
+    presence of the All chip. Driving it from the rows being rendered is both
+    the real rule and a test that can fail.
+    """
+    rows = [row(markets=("sp500", "nasdaq")), row(symbol="ASML", markets=("europe",))]
+    html = render(rows, config)
+    for m in ("sp500", "nasdaq", "europe"):
         assert f'id="mk-{m}"' in html
         assert f'for="mk-{m}"' in html
+    for absent in ("asia", "penny"):
+        assert f'id="mk-{absent}"' not in html
+        assert f'<label for="mk-{absent}">' not in html
     assert 'id="mk-all"' in html
 
 
@@ -481,9 +492,21 @@ def test_every_market_has_a_hide_rule_behind_its_chip(config):
     """
     html = render([row(markets=("sp500",))], config)
     for m in MARKETS:
-        assert f"#mk-{m}:checked ~ .sheet .card:not(.in-{m})" in html, (
+        assert f"#mk-{m}:checked ~ .sheet .book-stocks .card:not(.in-{m})" in html, (
             f"market {m!r} renders a chip with no hide rule"
         )
+
+
+def test_the_market_filter_cannot_reach_into_the_crypto_book(config):
+    """Scoping the hide rules is what keeps the two halves independent.
+
+    Unscoped, pressing Europe would hide every crypto card too -- and the chip
+    responsible would be sitting in the section above, out of sight, so the
+    Crypto tab would simply look broken.
+    """
+    html = render([row(markets=("sp500",))], config)
+    for m in MARKETS:
+        assert f"#mk-{m}:checked ~ .sheet .card:not(.in-{m})" not in html
 
 
 def test_the_all_chip_highlights_without_hiding_anything(config):
@@ -608,3 +631,167 @@ def test_soft_green_is_defined_in_every_palette(config):
     misses it — light, system-dark, and both explicit data-theme overrides."""
     html = render([row()], config)
     assert html.count("--green-soft:") == 4
+
+
+# ------------------------------------------- the stocks / crypto split
+
+
+from screener.drawdown import Highs
+
+
+def coin(symbol="BTC", price=50_000.0, all_time=120_000.0, recent=90_000.0,
+         fired=True, horizon=None, **kw):
+    """An unvalued row with highs on record and a buy pattern by default.
+
+    Mirrors `row()` but for the other half of the page: no fair value, a
+    drawdown gate instead, and a series whose last close is what both clocks
+    are measured against.
+
+    Dated from today rather than a fixed date because freshness is measured
+    against the wall clock as well as against the series -- a pattern at the
+    end of a month-old series is stale however fresh it looks from inside it,
+    which is exactly the stalled-feed guard `signal_is_fresh` exists for.
+    """
+    import datetime as _dt
+
+    highs = Highs(symbol=symbol, all_time=all_time, recent=recent, recent_bars=180)
+    from screener.drawdown import gate as _gate
+    today = _dt.date.today()
+    yesterday = (today - _dt.timedelta(days=1)).isoformat()
+    base = dict(
+        symbol=symbol,
+        morningstar_url="",
+        tradingview_url=f"https://www.tradingview.com/symbols/BINANCE-{symbol}USDT/technicals/",
+        series=[RsiPoint(symbol, yesterday, price, 28.0, "live:tradingview"),
+                RsiPoint(symbol, today.isoformat(), price, 33.0, "live:tradingview")],
+        crosses=[],
+        valuation=None,
+        signals=[signal(symbol=symbol, up2=today.isoformat(), fired=fired)],
+        currency="USD",
+        markets=("crypto",),
+        valued=False,
+        horizon=horizon,
+        highs=highs,
+        drawdown_gate=_gate(price, highs, 0.30, 0.50, 120),
+    )
+    base.update(kw)
+    return Row(**base)
+
+
+def test_the_two_asset_classes_render_as_separate_sections(config):
+    """The ask: stocks and crypto were interleaved in one grid under one set of
+    counts, and the two are graded by rules that have nothing in common."""
+    html = render([row(markets=("sp500",)), coin()], config)
+    assert 'class="book book-stocks"' in html
+    assert 'class="book book-crypto"' in html
+
+    stocks = html.index("book book-stocks")
+    crypto = html.index("book book-crypto")
+    assert html[stocks:crypto].count("<article class=") == 1
+    assert html[crypto:].count("<article class=") == 1
+
+
+def test_the_asset_switch_is_pure_css(config):
+    """Same constraint as the market filter: the page has to work from a
+    file:// URL and with JavaScript off."""
+    html = render([row(markets=("sp500",)), coin()], config)
+    assert "<script" not in html.lower()
+    assert 'input type="radio" name="asset" id="as-stocks" checked' in html
+    assert "#as-crypto:checked ~ .sheet .book-stocks { display: none; }" in html
+    assert "#as-stocks:checked ~ .sheet .book-crypto { display: none; }" in html
+
+
+def test_stocks_are_the_default_view(config):
+    html = render([row(markets=("sp500",)), coin()], config)
+    assert 'id="as-stocks" checked' in html
+    assert 'id="as-crypto" checked' not in html
+
+
+def test_crypto_is_no_longer_a_market_chip(config):
+    """It was one filter among six, which is exactly what made the two halves
+    interleave — "All" meant Bitcoin next to Unilever under one set of counts.
+    It is a different kind of asset, not a different region."""
+    html = render([row(markets=("sp500",)), coin()], config)
+    tabs = html[html.index('class="market-tabs"'):html.index("</nav>", html.index('class="market-tabs"'))]
+    assert 'for="mk-crypto"' not in tabs
+    assert '<input type="radio" name="mk" id="mk-crypto">' not in html
+
+
+def test_a_page_with_no_crypto_has_no_switch(config):
+    """Nothing to switch between, so the control would be a dead half-tab."""
+    html = render([row(markets=("sp500",))], config)
+    assert 'input type="radio" name="asset"' not in html
+    assert '<nav class="asset-tabs"' not in html
+    assert 'class="book book-stocks"' in html
+
+
+def test_each_book_counts_only_its_own_rows(config):
+    """A single "Strong 🚀 3" over both halves cannot be acted on: the two earn
+    that rocket by different rules and the reader cannot tell which kind."""
+    rows = [
+        row(markets=("sp500",), signals=[signal(known=True, confirms=True, fired=True)]),
+        row(symbol="IBM", markets=("sp500",)),
+        coin(),
+    ]
+    html = render(rows, config)
+    stocks = html[html.index("book book-stocks"):html.index("book book-crypto")]
+    crypto = html[html.index("book book-crypto"):]
+    assert "<dt>Tracked</dt><dd>2</dd>" in stocks
+    assert "<dt>Tracked</dt><dd>1</dd>" in crypto
+
+
+def test_the_crypto_book_has_no_conviction_tile(config):
+    """`_conviction` returns None for anything unvalued, so the tile would read
+    a permanent 0 — which says "none of these is any good" rather than "the
+    question was never asked"."""
+    html = render([row(markets=("sp500",)), coin()], config)
+    crypto = html[html.index("book book-crypto"):]
+    assert "Conviction" not in crypto
+
+
+def test_each_book_states_the_rule_it_grades_by(config):
+    html = render([row(markets=("sp500",)), coin()], config)
+    stocks = html[html.index("book book-stocks"):html.index("book book-crypto")]
+    crypto = html[html.index("book book-crypto"):]
+    assert "Morningstar's fair value" in stocks
+    assert "No analyst fair value exists for these" in crypto
+    assert "all-time high" in crypto
+
+
+def test_the_crypto_lead_ranks_by_distance_below_the_six_month_high(config):
+    """The all-time leg barely moves week to week, so ranking on it would
+    produce the same order every day. The recent leg is the one that varies."""
+    h = config.horizon("1d")
+    shallow = coin(symbol="ETH", price=85_000.0, horizon=h)   # 5.6% below its 6m high
+    deep = coin(symbol="BCH", price=45_000.0, horizon=h)      # 50% below it
+    html = render([deep, shallow], config)
+    start = html.index('class="lead lead-crypto"')
+    lead = html[start:html.index("</section>", start)]
+    assert "Furthest below its highs" in lead
+    assert "BCH" in lead and "ETH" not in lead
+
+
+def test_a_crypto_asset_at_its_high_never_leads(config):
+    """`drawdown` floors at zero, so an asset sitting on its high reads 0.0 —
+    which must not win the ranking by default when nothing else fired."""
+    assert coin(price=90_000.0, horizon=config.horizon("1d")).crypto_dip is None
+
+
+def test_an_equity_is_never_ranked_by_drawdown(config):
+    r = row(signals=[signal(fired=True)], horizon=config.horizon("1d"))
+    assert r.crypto_dip is None
+
+
+def test_the_crypto_lead_says_whether_the_gate_actually_passed(config):
+    """Like the deal of the day, it is the pick of what fired rather than a
+    second list of the rockets — so it has to say whether the pick clears."""
+    h = config.horizon("1d")
+    passes = render([coin(symbol="BCH", price=45_000.0, horizon=h)], config)
+    assert "Both clocks agree" in passes
+
+    # 50% below its 6-month high but only 25% below its all-time high, so the
+    # global floor refuses it.
+    fails = render(
+        [coin(symbol="BCH", price=45_000.0, all_time=60_000.0, horizon=h)], config
+    )
+    assert "does not clear both clocks yet" in fails

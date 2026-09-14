@@ -794,6 +794,66 @@ tickers:
   - {symbol: KRMN, tradingview: "NYSE:KRMN",     morningstar: xnys/krmn,  markets: [sp500]}   # RSI 21 · Electronic Technology
   - {symbol: ADSK, tradingview: "NASDAQ:ADSK",   morningstar: xnas/adsk,  markets: [sp500, nasdaq]}   # RSI 31 · Technology Services
 
+  # --- Near RSI 30, weighted towards Asia -------------------------------
+  # Twenty names sitting between RSI 23 and 33 on 2026-09-14. Every one was
+  # checked on both feeds before it went in: TradingView resolves it, Yahoo
+  # returns a month of bars, and the two prices agree to better than 1% --
+  # which is what proves it is the same listing rather than a same-named
+  # symbol on another venue. Descriptions were normalised and compared against
+  # all 471 existing entries, so none of these is a second line of a company
+  # already held (that check is what has repeatedly caught ADRs of European
+  # names, and here it caught Trip.com: HKEX:9961 is the TCOM already tracked).
+  #
+  # Six go to Asia deliberately. It was the thinnest market filter on the page
+  # by a wide margin -- six tickers against 355 in the S&P group -- so the
+  # `asia` chip was barely worth pressing. This takes it to twelve.
+  #
+  # Two identifier conventions matter here and neither is guessable:
+  #
+  #   Tokyo   TSE:7741 / 7741.T  / xtks/7741   -- quoted in YEN, four-digit
+  #                                               codes, no alphabetic ticker
+  #   HK      HKEX:1024 / 1024.HK / xhkg/01024 -- Morningstar pads the code to
+  #                                               five digits; TradingView and
+  #                                               Yahoo do not
+  #
+  # The Morningstar slugs follow the MIC convention used everywhere else in
+  # this file and are unverifiable from a script (their CDN returns HTTP 202
+  # with an empty body for valid and bogus URLs alike). xhkg is proven by BYD
+  # and Xiaomi above; xtks is new and unproven, so a wrong Tokyo slug means a
+  # dead "Check fair value" button and nothing worse.
+  #
+  # Currency is far from the dollar on both, which the units check exists for:
+  # a yen price against a fair value Morningstar happens to quote in dollars is
+  # ~150x apart and `check_units` rejects the pair rather than grading on it.
+
+  # Japan
+  - {symbol: HOYA,     tradingview: "TSE:7741",     morningstar: xtks/7741,   yahoo: 7741.T,   currency: JPY, markets: [asia]}   # RSI 24 · Health Technology
+  - {symbol: FASTRET,  tradingview: "TSE:9983",     morningstar: xtks/9983,   yahoo: 9983.T,   currency: JPY, markets: [asia]}   # RSI 28 · Fast Retailing (Uniqlo)
+  - {symbol: CHUGAI,   tradingview: "TSE:4519",     morningstar: xtks/4519,   yahoo: 4519.T,   currency: JPY, markets: [asia]}   # RSI 31 · Health Technology
+
+  # Hong Kong
+  - {symbol: KUAISHOU, tradingview: "HKEX:1024",    morningstar: xhkg/01024,  yahoo: 1024.HK,  currency: HKD, markets: [asia]}   # RSI 27 · Commercial Services
+  - {symbol: SFHOLD,   tradingview: "HKEX:6936",    morningstar: xhkg/06936,  yahoo: 6936.HK,  currency: HKD, markets: [asia]}   # RSI 27 · S.F. Holding, logistics
+  - {symbol: SANDS,    tradingview: "HKEX:1928",    morningstar: xhkg/01928,  yahoo: 1928.HK,  currency: HKD, markets: [asia]}   # RSI 29 · Sands China
+
+  # Europe
+  - {symbol: LAND,     tradingview: "LSE:LAND",     morningstar: xlon/land,   yahoo: LAND.L,   currency: GBX, markets: [europe]}  # RSI 25 · Land Securities, REIT
+  - {symbol: SGO,      tradingview: "EURONEXT:SGO", morningstar: xpar/sgo,    yahoo: SGO.PA,   currency: EUR, markets: [europe]}  # RSI 27 · Saint-Gobain
+  - {symbol: VNA,      tradingview: "XETR:VNA",     morningstar: xetr/vna,    yahoo: VNA.DE,   currency: EUR, markets: [europe]}  # RSI 27 · Vonovia, residential
+  - {symbol: ABF,      tradingview: "LSE:ABF",      morningstar: xlon/abf,    yahoo: ABF.L,    currency: GBX, markets: [europe]}  # RSI 29 · Associated British Foods
+  - {symbol: ADS,      tradingview: "XETR:ADS",     morningstar: xetr/ads,    yahoo: ADS.DE,   currency: EUR, markets: [europe]}  # RSI 30 · adidas
+  - {symbol: MC,       tradingview: "EURONEXT:MC",  morningstar: xpar/mc,     yahoo: MC.PA,    currency: EUR, markets: [europe]}  # RSI 32 · LVMH
+
+  # US
+  - {symbol: INVH,     tradingview: "NYSE:INVH",    morningstar: xnys/invh,   markets: [sp500]}   # RSI 24 · single-family rental REIT
+  - {symbol: LHX,      tradingview: "NYSE:LHX",     morningstar: xnys/lhx,    markets: [sp500]}   # RSI 25 · L3Harris, defence
+  - {symbol: BN,       tradingview: "NYSE:BN",      morningstar: xnys/bn,     markets: [sp500]}   # RSI 27 · Brookfield Corporation
+  - {symbol: WY,       tradingview: "NYSE:WY",      morningstar: xnys/wy,     markets: [sp500]}   # RSI 27 · Weyerhaeuser, timber REIT
+  - {symbol: ENB,      tradingview: "NYSE:ENB",     morningstar: xnys/enb,    markets: [sp500]}   # RSI 28 · Enbridge, pipelines
+  - {symbol: AON,      tradingview: "NYSE:AON",     morningstar: xnys/aon,    markets: [sp500]}   # RSI 29 · insurance broking
+  - {symbol: FTV,      tradingview: "NYSE:FTV",     morningstar: xnys/ftv,    markets: [sp500]}   # RSI 30 · Fortive
+  - {symbol: BBIO,     tradingview: "NASDAQ:BBIO",  morningstar: xnas/bbio,   markets: [nasdaq]}  # RSI 30 · BridgeBio Pharma
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data

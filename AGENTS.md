@@ -393,11 +393,42 @@ value with no price beside it and then divides by None, and `TypeError` is not
 a `MorningstarError`, so nothing catches it.
 
 **The dashboard's market filter is pure CSS, and must stay that way.** Hidden
-radio inputs sit before `.sheet`, and `#mk-x:checked ~ .sheet .card:not(.in-x)`
-hides the rest. That keeps the page working from `file://` and with JS off. The
-timeframe selector can't work the same way — each horizon has different data —
-so it's links between four separately-built pages. Adding a market means adding
-it to `config.MARKETS` and `MARKET_LABELS`; the CSS rules generate from there.
+radio inputs sit before `.sheet`, and
+`#mk-x:checked ~ .sheet .book-stocks .card:not(.in-x)` hides the rest. That
+keeps the page working from `file://` and with JS off. The timeframe selector
+can't work the same way — each horizon has different data — so it's links
+between four separately-built pages. Adding a market means adding it to
+`config.MARKETS` and `MARKET_LABELS`; the CSS rules generate from there.
+
+**Stocks and crypto are two books, not two markets, and crypto is not a chip.**
+The page splits on `row.valued` into `.book-stocks` and `.book-crypto`,
+switched by a second radio group (`name="asset"`) on the same pure-CSS
+mechanism. Crypto used to be the sixth market chip, which is what made the two
+halves interleave: "All" put Bitcoin next to Unilever under one set of counts,
+and a single `Strong 🚀 3` spanned two groups that earn the rocket by completely
+unrelated rules — an analyst's fair value on one side, a two-clock drawdown on
+the other. Each book now carries its own rule paragraph, tile strip and lead.
+
+Three things about that are load-bearing:
+
+- **Split on `valued`, not on the `crypto` tag.** `Row._grade`, `_conviction`
+  and the card's own branches all key on `valued`, so using it here means the
+  section a card is filed under cannot disagree with the rule it is graded by.
+- **The market hide rules are scoped to `.book-stocks`.** Unscoped,
+  `.card:not(.in-europe)` hides every crypto card too — and the chip that did
+  it sits in the other section, out of sight, so Crypto just looks broken.
+- **Crypto is still a market everywhere else.** `MARKETS`, `Ticker.markets` and
+  `notify.push_markets` are unchanged; only the dashboard chips dropped it.
+  `config.active_markets` no longer drives those chips — the dashboard derives
+  them from the rows it is actually rendering, so a chip exists if and only if
+  a visible card carries it.
+
+The crypto book's lead (`_deepest_dip`) ranks by distance below the *six-month*
+high, not the all-time one. The all-time leg barely moves week to week — an
+asset 74% below its record is still 74% below it a fortnight later — so ranking
+on it would print the same order every day. Like the deal of the day it is the
+pick of what *fired*, not a second list of the rockets, so it is not gated on
+the drawdown passing; the line underneath says whether the pick clears.
 
 **Currency is not always dollars, and identifiers differ per venue.** Every
 non-US listing needs its own `tradingview` / `yahoo` / `morningstar` /

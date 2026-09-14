@@ -444,8 +444,16 @@ class Config:
     def active_markets(self) -> tuple[str, ...]:
         """Markets that actually have tickers, in MARKETS order.
 
-        Filtered rather than hardcoded so an empty group never renders a
-        dashboard tab that shows nothing when clicked.
+        Filtered rather than hardcoded so an empty group never names a group
+        that turns out to be empty.
+
+        NOTE this no longer decides the dashboard's filter chips. Since the
+        page split into a stocks book and a crypto one, the chips are derived
+        from the rows actually being rendered -- a chip exists if and only if a
+        visible card carries it, which this cannot promise, because `render`
+        is handed a list of rows and not the whole config. Crypto is the reason
+        the two now differ: it is still a market here and is deliberately not a
+        chip there.
         """
         return tuple(m for m in MARKETS if self.tickers_in(m))
 

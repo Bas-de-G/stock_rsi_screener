@@ -333,8 +333,8 @@ def test_a_crypto_signal_clearing_both_legs_is_a_strong_buy(tmp_path):
     assert row.strong, "93% below its record and 49% below its 6-month high"
     assert row.state == "strong"
     card = _card(row, config, horizon)
-    assert "Below all-time" in card and "Below 6-month" in card
-    assert "drawdown confirms" in card
+    assert "Below ATH" in card and "Below 6-mo" in card
+    assert "<dd>confirms</dd>" in card
     assert "Not a valuation" in card, "the card must not call this a fair value"
 
 
