@@ -82,6 +82,33 @@ cleared from the database on the next run.
 only on `main` (see the branch guard in `.github/workflows/daily.yml`). A human
 committing it will collide with the bot.
 
+**One unreadable ticker must never stop the run.** Every per-symbol
+`MarketDataError` used to set `exit_code = 1`, and `run` is the second step in
+`daily.yml` — so a single symbol TradingView stopped serving skipped evaluate,
+prune, dashboard, the commit and the Pages deploy behind it. Nothing was
+published at all while 470 tickers were being read perfectly. That happened
+three times; the last, FER, cost three days.
+
+`cli._report_unresolved` collects them instead and fails only when more than
+`UNRESOLVED_TOLERANCE` (10%) of the watchlist is unreadable, which is what an
+outage looks like from inside the loop — the genuinely global case never gets
+there, because `fetch_live_batch` raising already returns 1. Keyed by symbol,
+not by (symbol, horizon): four horizons would otherwise count one dead listing
+as four failures and trip a 20-ticker tolerance on its own. Tolerated is not
+silent — the block naming every symbol always prints, and under Actions a
+`::warning::` annotation puts it on the run summary without reddening it.
+
+**A vendor symbol going quiet is not a corporate action.** BME:FER began
+returning `symbol_not_exists` while EURONEXT:FER quoted a sensible price, which
+reads exactly like a completed relisting; it was repointed to Amsterdam on that
+basis and the reasoning was written up in `config.yaml`. It was wrong. Madrid
+came back four days later, and it is the *Amsterdam* line whose Yahoo history
+stops on the day of the switch. Nothing available at the time distinguished an
+outage from a move — the deciding evidence was which line kept printing, which
+only existed days later. Confirm a venue change against a second source
+(Yahoo's history for both lines is enough) before editing, and note that with
+the tolerance above the question is no longer urgent.
+
 **The watchlist only ever grows.** `screener universe` proposes additions and
 nothing else. A ticker that has left an index, been renamed, or gone quiet
 keeps its entry, its history and its card — dropping it would take its chart

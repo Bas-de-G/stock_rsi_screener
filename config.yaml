@@ -362,17 +362,26 @@ tickers:
 
   # Madrid
   - {symbol: ACS,    tradingview: "BME:ACS",               morningstar: xmad/acs,       yahoo: ACS.MC,      currency: EUR, markets: [europe]}   # RSI 33
-  # Ferrovial left Madrid. BME:FER stopped resolving on 2026-09-10 and took
-  # the whole screener run down with it; the company now trades as Ferrovial
-  # N.V. on Euronext Amsterdam and Nasdaq. Repointed rather than deleted, so
-  # its year of history and its recorded patterns survive -- they are keyed on
-  # `symbol`, not on the exchange. The two lines are continuous in price
-  # (EUR 48.84 Amsterdam against EUR 48.67 Madrid on the last day both quoted).
+  # Ferrovial is back on BME:FER, and the four days it spent pointed at
+  # Amsterdam are worth recording, because the evidence for moving it looked
+  # conclusive and was not.
   #
-  # Note this reverses an earlier call: BME:FER was chosen over the Amsterdam
-  # line because Madrid carried 112x the volume. That is no longer true, and
-  # was never going to stay true through a relisting.
-  - {symbol: FER,    tradingview: "EURONEXT:FER",         morningstar: xams/fer,       yahoo: FER.AS,      currency: EUR, markets: [europe]}   # RSI 29
+  # On 2026-09-10 BME:FER began returning `symbol_not_exists` from TradingView
+  # while EURONEXT:FER quoted EUR 48.84 -- so it read exactly like a completed
+  # relisting, and it was repointed to Amsterdam. It was not one. BME:FER came
+  # back four days later, and it is the AMSTERDAM line whose history stops on
+  # 2026-09-10: Yahoo has FER.MC trading through today and FER.AS ending that
+  # afternoon. Madrid never went anywhere; TradingView dropped it for a while.
+  #
+  # The lesson is about the inference, not the ticker. "One venue 404s while
+  # another quotes" is equally consistent with a relisting and with a feed
+  # outage, and nothing available at that moment distinguishes them -- the
+  # deciding evidence was which line kept printing, which only existed days
+  # later. A vendor symbol going quiet is not a corporate action until a
+  # second source says so, and a broken symbol should not be urgent enough to
+  # need the guess: see the unresolved-ticker tolerance in `cli.cmd_run`,
+  # which is what stops one of these taking the screener down at all.
+  - {symbol: FER,    tradingview: "BME:FER",               morningstar: xmad/fer,       yahoo: FER.MC,      currency: EUR, markets: [europe]}   # RSI 22
 
   # Zurich (SIX)
   - {symbol: ARYN,   tradingview: "SIX:ARYN",              morningstar: xswx/aryn,      yahoo: ARYN.SW,     currency: CHF, markets: [europe]}   # RSI 24
