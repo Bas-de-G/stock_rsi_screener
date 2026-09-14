@@ -129,6 +129,34 @@ rising sample — including entries picked by a coin. `outcomes.baseline_outcome
 is that coin, and the only number worth reading is the gap. A cohort table
 without it will be believed, and it should not be.
 
+**The drawn paths must be spread across the record, or the picture contradicts
+the number beside it.** On a fast horizon dozens of patterns complete in a day,
+so "the newest 24 that have matured" are all from the same few sessions —
+`historical._drawable` once drew the 1h strong-buy panel from **three days** out
+of a two-year pool. That is one market moment sampled 24 times, and if that week
+was a bad entry nearly every line is red: the panel showed 8 green against 16
+red under a headline hit rate of 62.5%, and the 1h buy panel 4 against 20 under
+56.4%. A reader trusting their eyes over the number was being misled by the
+chart and was right to distrust it. `_spread` samples evenly over the
+date-ordered pool; `_named` spreads again over the drawn set, because taking the
+first twelve of twenty-four date-ordered lines re-clusters exactly the ones
+anybody reads. Expect the drawn hit rate to sit within ~10pt of the cohort's —
+that is sampling noise at n=24, and a gap much larger than that is this bug
+coming back.
+
+**The y-axis is trimmed to the paths, never to the extremes.** Fitting it to
+min and max hands the whole vertical scale to one runaway: a path reaching 628
+on the hourly strong-sell panel squeezed the mean, the baseline and 23 other
+paths into the bottom fifth of the frame. `_bounds` fits at least `_AXIS_FIT`
+(90%) of *paths* and lets the rest clip — measured per path, not over the
+pooled points, because a path is 61 points and one runaway is ~5% of the values
+on a 24-path panel, comfortably inside a 2% tail. One path, one vote. The 100
+line, the cohort mean and the baseline are always inside the frame whatever the
+trimming says, the traces sit in a `clipPath` (SVG does not crop to the
+viewBox, so an unclipped outlier draws over the panel below), and the caption
+says how many were cut off — a line stopping at the top edge otherwise reads as
+a line that ended.
+
 **A forward return is only measurable where the daily history reaches back to
 the signal.** Each horizon is backfilled to its own depth — five years of weekly
 bars against two of daily ones — so a 2023 weekly pattern sits years before the

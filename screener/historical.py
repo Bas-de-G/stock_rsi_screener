@@ -290,17 +290,52 @@ def _stats(returns) -> dict:
 # ------------------------------------------------------------- drawing
 
 
+# The share of drawn *paths* the y-axis is guaranteed to fit whole. The rest --
+# up to one in ten at each end -- may run outside the frame and be clipped.
+#
+# Measured per path rather than over the pooled points, which was the first
+# attempt and does not work: a path is sixty-one points, so one runaway
+# contributes ~5% of all the values on a 24-path panel and sits comfortably
+# inside a 2% tail. Trimming by value therefore kept the very outlier it was
+# meant to exclude. One path is one vote.
+_AXIS_FIT = 0.90
+
+
 def _bounds(panel: Panel) -> tuple[float, float]:
-    # Over the entries actually drawn, not the newest ones -- otherwise the
-    # y-axis is scaled to paths the reader cannot see.
-    values = [v for e in _drawable(panel)[:MAX_PATHS] for v in e.path]
-    values += panel.mean + panel.base
-    if not values:
+    """The y-range, scaled to the bulk of the paths rather than to the extremes.
+
+    Fitting the axis to min and max hands the whole vertical scale to a single
+    runaway: one path reaching 628 on the hourly strong-sell panel squeezed
+    everything else -- the mean, the baseline, and twenty-three other paths --
+    into the bottom fifth of the frame. The middle 96% of drawn values used
+    22% of the height on `sell/1h`, so the chart was mostly empty space above a
+    stripe nobody could read.
+
+    So the axis fits at least nine paths in ten and the rest run off the edge,
+    clipped by the frame and declared in the caption. Three things are always
+    inside it whatever the trimming says: the 100 line, the cohort mean and the
+    baseline. Those are the lines the page is *about*, and an axis that cropped
+    one of them to make room for the paths would have the priority exactly
+    backwards.
+    """
+    paths = [e.path for e in _drawable(panel) if e.path]
+    if not paths and not panel.mean:
         return 90.0, 110.0
-    lo, hi = min(values), max(values)
-    # Always show the 100 line with room either side, and never a band so tight
-    # that a half-percent wobble reads as a crash.
-    lo, hi = min(lo, 97.0), max(hi, 103.0)
+
+    if paths:
+        tops = sorted(max(p) for p in paths)
+        bottoms = sorted(min(p) for p in paths)
+        # index of the highest path still required to fit, counting from each end
+        keep = max(0, min(len(paths) - 1, int(_AXIS_FIT * len(paths))))
+        lo, hi = bottoms[len(paths) - 1 - keep], tops[keep]
+    else:
+        lo = hi = 100.0
+
+    # The lines that must never be cropped, and the 100 line they are read
+    # against. A band tighter than 97-103 makes a half-percent wobble look like
+    # a crash, so that is the floor on the range either way.
+    anchors = panel.mean + panel.base + [97.0, 103.0]
+    lo, hi = min([lo] + anchors), max([hi] + anchors)
     pad = (hi - lo) * 0.06
     return lo - pad, hi + pad
 
@@ -329,19 +364,52 @@ def _drawable(panel: Panel) -> list[Entry]:
     sixty-day paths across 96 symbols; the chart was drawing 24 one-day stubs
     instead.
 
-    So matured paths come first, still newest-first among themselves, and the
-    longest of the rest only top up a panel too young to fill the key -- which
-    is the two 1w strong cohorts and nothing else. Selecting on maturity is a
-    *recency* bias, not a performance one: it cannot prefer winners, because
-    age is not an outcome. It does mean the drawn lines skip the most recent
-    weeks, so `_running` names those underneath and every statistic on the page
-    still runs over the full sample.
+    So matured paths come first and the longest of the rest only top up a panel
+    too young to fill the key -- which is the two 1w strong cohorts and nothing
+    else. Selecting on maturity is a *recency* bias, not a performance one: it
+    cannot prefer winners, because age is not an outcome. It does mean the
+    drawn lines skip the most recent weeks, so `_running` names those
+    underneath and every statistic on the page still runs over the full sample.
+
+    **And they are spread across the pool, not taken off the front of it.**
+    Taking the newest 24 matured entries looks like a recency preference and is
+    really a *market-timing* one: on a fast horizon dozens of patterns complete
+    in a day, so the newest 24 all fired within the same few sessions. Measured
+    before this was fixed, the 24 lines on the 1h strong-buy panel came from
+    three days -- 10th to 12th June -- out of a pool spanning two years. That
+    is one market moment sampled 24 times, and it showed: the panel drew 8 green
+    against 16 red, a 33% hit rate, under a headline reading 62.5%. The 1h buy
+    panel was worse at 4 green against 20 red versus a 56.4% headline. A reader
+    trusting their eyes over the number was being misled by the chart, and was
+    right to distrust it.
+
+    Spreading evenly over the date-ordered pool costs nothing -- the same 24
+    lines, drawn from across the record instead of from one week -- and it is
+    the difference between a sample and an anecdote.
+
+    Returns at most `MAX_PATHS`, which is the whole drawn set rather than a
+    pool for callers to slice. `_named` picks the numbered lines out of exactly
+    this list: when it was free to reach past the slice, a numbered line could
+    land outside the drawn 24 and the chart rendered 25.
     """
     matured, young = [], []
     for e in panel.entries:                 # already newest-first
         (matured if _matured(e) else young).append(e)
     young.sort(key=lambda e: len(e.path), reverse=True)
-    return matured + young
+    drawn = _spread(matured, MAX_PATHS)
+    return drawn + young[:MAX_PATHS - len(drawn)]
+
+
+def _spread(entries: list[Entry], want: int) -> list[Entry]:
+    """`want` entries taken evenly across the list, keeping its order.
+
+    The list is in date order, so this samples the whole record rather than one
+    end of it. Returns everything when there is not enough to thin.
+    """
+    if len(entries) <= want or want <= 0:
+        return list(entries)
+    step = len(entries) / want
+    return [entries[int(i * step)] for i in range(want)]
 
 
 def _named(panel: Panel) -> list[Entry]:
@@ -354,11 +422,18 @@ def _named(panel: Panel) -> list[Entry]:
     companies -- repeats of one name teach nothing about the cohort and waste
     half the key.
 
+    Spread across the drawn set for the same reason the drawn set is spread
+    across the pool: taking the first twelve of twenty-four date-ordered lines
+    would re-cluster the *numbered* ones into the recent half, and those are
+    the twelve a reader actually looks at. Anything the dedupe drops is topped
+    up from the rest of the drawn set afterwards.
+
     Only the named subset is deduplicated. The context paths and every
     statistic on the page still run over the full sample.
     """
+    drawn = _drawable(panel)
     out, seen = [], set()
-    for e in _drawable(panel):
+    for e in _spread(drawn, NAMED_PATHS) + drawn:
         if e.symbol in seen:
             continue
         seen.add(e.symbol)
@@ -446,8 +521,13 @@ def _plot(panel: Panel) -> str:
             + "</title></polyline>"
         )
 
+    # Clipped, because the axis now covers the middle 96% of values and lets the
+    # outliers leave the frame. Unclipped they would draw over the date ticks,
+    # the y labels and the panel below -- SVG does not crop to the viewBox.
+    clip = f"clip-{panel.cohort}-{panel.horizon}"
     lines = "".join(trace(e, "trace ctx") for e in context)
     lines += "".join(trace(e, "trace") for e in named)
+    lines = (f'<g clip-path="url(#{clip})">{lines}</g>')
     lines += _end_numbers(named, x, y)
 
     # Horizontal rules every 5 index points, labelled — the graph-paper squares
@@ -497,13 +577,20 @@ def _plot(panel: Panel) -> str:
     # paths alone.
     short = sum(1 for e in drawn if not _matured(e))
     if not short:
-        selection = (f"the most recent that have run the full {CHART_DAYS} days")
+        selection = (f"spread evenly across every one that has run the full "
+                     f"{CHART_DAYS} days")
     else:
         matured_drawn = shown - short
         selection = (
             f"every one that has run the full {CHART_DAYS} days "
             f"({matured_drawn}), plus the {short} longest of the rest"
         )
+    # The axis covers the middle 96%, so say when something left the frame --
+    # a line that stops at the top edge otherwise reads as a line that ended.
+    escaped = sum(1 for e in drawn if any(v > hi or v < lo for v in e.path))
+    if escaped:
+        selection += (f" · {escaped} run past the top or bottom of the frame "
+                      f"and are clipped")
     mean_key = (
         '<span class="k mean-k">Cohort mean</span>' if panel.mean
         else f'<span class="k count">too few signals to average '
@@ -522,6 +609,8 @@ def _plot(panel: Panel) -> str:
      aria-label="Price paths after {panel.stats.get('n', 0)} signals, rebased to 100
                  on the signal day; cohort mean ends at
                  {panel.mean[-1] - 100 if panel.mean else 0:+.1f} percent">
+  <defs><clipPath id="{clip}"><rect x="{_PAD_L:.1f}" y="{_PAD_T:.1f}"
+    width="{_W - _PAD_L - _PAD_R:.1f}" height="{_H - _PAD_T - _PAD_B:.1f}"/></clipPath></defs>
   <text class="xtick left" x="{_PAD_L:.1f}" y="{_H - 9:.1f}">signal</text>
   {rules}{marks}
   {lines}
