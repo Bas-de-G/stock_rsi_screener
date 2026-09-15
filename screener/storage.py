@@ -434,14 +434,29 @@ class Store:
           An intraday bar older than the symbol's first daily bar therefore
           prices a pattern whose outcome is unknowable.
 
-        So a bar that is both older than the chart window and older than the
-        first daily bar is one no reader can reach. Deleting 283,005 of them
-        left every dashboard page byte-identical and every one of the 17,828
-        measured outcomes unchanged, and took the file to 46 MB.
+        The original rule added a second test -- older than the symbol's first
+        *daily* bar -- on the reasoning that a pattern the daily series cannot
+        reach is unmeasurable anyway. That test has quietly stopped doing
+        anything and has to go. Daily and intraday history are now both seeded
+        from the same date (2024-08-23 on the live database), so no intraday bar
+        is older than the first daily one and the delete matched nothing at all.
+        Two years of hourly bars accumulated behind it and the file reached
+        103 MB -- past GitHub's **hard** 100 MB limit, not the 50 MB warning --
+        and the push was rejected outright, which took the weekly snapshot and
+        every dispatched run down with it.
 
-        The floor is not redundant with the daily test. SPCX listed recently
-        enough that its 4h history predates its daily history, so the daily
-        test alone shortened its chart from 90 bars to 76.
+        What replaces it is narrower and says what it means: a bar older than
+        the window survives only if a recorded pattern actually completed on
+        it. That is the one thing outside the chart window that still reads an
+        intraday bar -- `cmd_evaluate` and `historical.collect_panels` both
+        look up `signal.up2_date` to price the pattern at the moment it fired.
+        There are 12,096 such bars against 589,604 intraday rows, so protecting
+        them costs 2% and keeps every historical cohort intact.
+
+        Deliberately *not* also requiring daily coverage of the signal. An
+        uncoverable pattern's bar is dead weight too, but it is a handful of
+        rows, and the version of this test that tried to be clever is precisely
+        the one that silently stopped working. One rule, one reason.
         """
         placeholders = ",".join("?" for _ in horizons)
         # The floor is the date of the `keep_bars`-th newest bar; anything
@@ -461,10 +476,12 @@ class Store:
                 f"""DELETE FROM rsi_history WHERE rowid IN (
                       SELECT r.rowid FROM rsi_history r
                       WHERE r.horizon IN ({placeholders})
-                        AND r.date < COALESCE((
-                              SELECT MIN(substr(d.date, 1, 10)) FROM rsi_history d
-                              WHERE d.symbol = r.symbol AND d.horizon = '1d'
-                            ), '9999-99-99')
+                        AND NOT EXISTS (
+                              SELECT 1 FROM signals s
+                              WHERE s.symbol = r.symbol
+                                AND s.horizon = r.horizon
+                                AND s.up2_date = r.date
+                            )
                         {floor}
                     )""",
                 params,

@@ -1651,7 +1651,14 @@ def cmd_prune(config: Config, args) -> int:
     path = config.storage.database
     before = path.stat().st_size if path.exists() else 0
     with Store(path) as store:
-        removed = store.prune_unmeasurable_intraday(config.dashboard.chart_days)
+        # chart_days + 1, not chart_days. `dashboard._visible_crosses` detects
+        # over `window + 1` bars and shifts the indices back, because a cross
+        # is a bar compared against its predecessor and the first bar of the
+        # visible window has had its predecessor sliced off. Pruning to exactly
+        # the window would throw that lead-in away and undercount a cross
+        # landing on the left edge -- the same bug that once printed "1 upward
+        # cross of 30" above a completed double-cross.
+        removed = store.prune_unmeasurable_intraday(config.dashboard.chart_days + 1)
     after = path.stat().st_size if path.exists() else 0
     if not removed:
         print("Nothing to prune — every intraday bar on file is still readable.")
