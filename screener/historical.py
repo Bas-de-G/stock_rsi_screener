@@ -225,10 +225,21 @@ def collect_panels(store: Store, config: Config) -> dict[tuple[str, str], Panel]
                         keys = [base]
                         if strong_now:
                             keys.append("strong" if base == BUY else "sell_strong")
+                        # Carries its conviction too. These are the freshest
+                        # calls on the site and the score is the one thing a
+                        # reader wants beside them -- see `_running`, which
+                        # lists them. Appended after the two fields the older
+                        # callers unpack, so those keep working.
+                        pending_score = convictions.get(
+                            (ticker.symbol, horizon.key,
+                             signal.direction, signal.up2_date)
+                        )
                         for key in keys:
-                            panels[(key, horizon.key)].pending.append(
-                                (ticker.symbol, signal.up2_date)
-                            )
+                            panels[(key, horizon.key)].pending.append((
+                                ticker.symbol, signal.up2_date,
+                                pending_score[0] if pending_score else None,
+                                pending_score[1] if pending_score else "",
+                            ))
                     continue
                 outcome = outcomes.get(
                     (ticker.symbol, horizon.key, signal.direction, signal.up2_date)
@@ -767,12 +778,20 @@ def _pending(panel: Panel) -> str:
     conclusion about the freshest and most actionable signals on the site. So
     they are named here, with the reason, until the next daily close brings
     them onto the chart.
+
+    Kept as a one-liner rather than folded into `_running`'s table. These have
+    no return at all yet -- not a small one, none -- and a row with two empty
+    cells invites the reader to compare it with the rows above that have
+    numbers in them.
     """
     if not panel.pending:
         return ""
     names = ", ".join(
-        f"<strong>{html.escape(sym)}</strong> <span class=\"when\">{html.escape(date[:16])}</span>"
-        for sym, date in panel.pending[:12]
+        f'<strong>{html.escape(p[0])}</strong> '
+        f'<span class="when">{html.escape(p[1][:16])}</span>'
+        + (f' <span class="cvchip cv-{html.escape(p[3])}">{p[2]}</span>'
+           if len(p) > 2 and p[2] is not None else "")
+        for p in panel.pending[:12]
     )
     more = (f" and {len(panel.pending) - 12} more"
             if len(panel.pending) > 12 else "")
@@ -783,19 +802,31 @@ def _pending(panel: Panel) -> str:
     )
 
 
+# Rows in the latest-recommendations table.
+RUNNING_ROWS = 10
+
+
 def _running(panel: Panel) -> str:
-    """The newest signals that have started but not finished.
+    """The latest recommendations: fired, started, not yet finished.
 
-    These used to be the chart's numbered lines, which is what broke it: they
-    are the shortest paths on the page, so drawing them showed nothing and
-    crowded out the trades that had actually run. Now the chart draws matured
-    paths and these are named here instead, with how far through each one is.
+    This is the part of the page that answers "what has the screener said
+    lately, and how is it doing" -- and it is a table rather than the inline
+    list it started as, because the answer has four fields per row and an
+    eight-item run-on sentence could carry two.
 
-    Left out entirely they would simply vanish -- too old for "just fired",
-    too young to be drawn -- and the freshest calls the screener has made are
-    the last thing this page should lose. The progress figure is the honest
-    version of what the old table column said: a partial return with the
-    number of days behind it, never dressed up as a result.
+    It exists as a separate block because the numbered table above cannot do
+    this job any more, and the conviction column is the proof. Conviction is
+    read from `recommendations.csv`, which starts on 2026-06-01; a path only
+    matures after sixty trading days. Those two windows do not yet overlap, so
+    *every* numbered row shows a dash and will keep doing so until the
+    September signals mature around December. Meanwhile the scores exist and
+    are worth reading -- ONON 9/green, DECK 8/green -- they are simply on
+    signals too young to draw. A page that had the numbers and showed a column
+    of dashes would be the wrong way round.
+
+    The progress column is the honest version of what the numbered table's
+    outcome column said: a partial return with the number of days behind it,
+    never dressed up as a result.
     """
     # Deduplicated by symbol for the same reason `_named` is: an intraday
     # pattern completes on almost every run, so the eight newest 1h entries
@@ -810,19 +841,40 @@ def _running(panel: Panel) -> str:
         young.append(e)
     if not young:
         return ""
-    names = ", ".join(
-        f'<strong>{html.escape(e.symbol)}</strong> '
-        f'<span class="when">{e.path[-1] - 100:+.1f}% · day {len(e.path) - 1}'
-        f'/{CHART_DAYS}</span>'
-        for e in young[:8]
-    )
-    more = f" and {len(young) - 8} more" if len(young) > 8 else ""
-    return (
-        f'<p class="pending running"><span class="tag">Still running</span>{names}'
-        f'{more} — too young to have run the full {CHART_DAYS} days, so they are '
-        f'not drawn above. Their returns so far are not results, and they are in '
-        f'the cohort statistics only once past +{HEADLINE_BARS}d.</p>'
-    )
+
+    body = ""
+    for e in young[:RUNNING_ROWS]:
+        if e.conviction is None:
+            score = ('<td class="num cv-na" title="No conviction recorded — '
+                     'published before the score existed, or before the '
+                     'journal started on 2026-06-01">—</td>')
+        else:
+            score = (f'<td class="num cvcell cv-{html.escape(e.conviction_band)}" '
+                     f'title="The conviction this went out with, from the '
+                     f'journal — not recomputed today">{e.conviction}</td>')
+        done = len(e.path) - 1
+        so_far = e.path[-1] - 100
+        tone = "good" if so_far > 0 else "bad" if so_far < 0 else ""
+        body += (
+            f'<tr><th scope="row">{html.escape(e.symbol)}</th>'
+            f'<td class="num date">{html.escape(e.up2_date[:10])}</td>'
+            f'{score}'
+            f'<td class="num {tone}">{so_far:+.1f}%</td>'
+            f'<td class="num open" title="Measured over {CHART_DAYS} trading '
+            f'days; this one is {done} in">day {done}'
+            f'<span class="of">/{CHART_DAYS}</span></td></tr>'
+        )
+    more = (f" · {len(young) - RUNNING_ROWS} more not shown"
+            if len(young) > RUNNING_ROWS else "")
+    return f"""<table class="names latest">
+  <caption>Latest recommendations — too young to have run {CHART_DAYS} days, so
+    they are not drawn above. The return so far is not a result, and they enter
+    the cohort figures only once past +{HEADLINE_BARS}d{more}</caption>
+  <thead><tr><th scope="col">Symbol</th><th scope="col">Signal</th>
+    <th scope="col" title="The weighted conviction score this went out with">Conv.</th>
+    <th scope="col">So far</th><th scope="col">Progress</th></tr></thead>
+  <tbody>{body}</tbody>
+</table>"""
 
 
 # -------------------------------------------------------------- page
@@ -1421,6 +1473,36 @@ table.board .down { color: var(--crimson); }
 .names .cv-red   { color: var(--crimson); }
 .names .cv-na    { color: var(--ink-3); cursor: help; }
 .names .open .of { opacity: .6; font-size: 10px; }
+
+/* The latest-recommendations table. Same shape as the numbered key so the two
+   read as one family, with a left rule and a tinted caption to mark that these
+   rows are NOT the lines on the chart above — the numbered table has an index
+   column and this one deliberately has none, because a number here would
+   promise a curve that is not drawn. */
+/* `border-left` and `padding-left` do nothing on a `border-collapse: collapse`
+   table, so the accent rides on the caption, which is also where the reader
+   looks first. */
+.names.latest caption {
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 88ch;
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 6px 10px;
+}
+/* The conviction score beside a just-fired name. A chip rather than a table
+   cell because that block is a sentence, not a row. */
+.cvchip {
+  display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 2px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; font-weight: 700; text-align: center;
+  border: 1px solid currentColor;
+}
+.cvchip.cv-green { color: var(--green); }
+.cvchip.cv-amber { color: var(--warn); }
+.cvchip.cv-red   { color: var(--crimson); }
 /* Visually hidden: "Line #" for a screen reader, "#" on the page. */
 .vh {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
