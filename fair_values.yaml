@@ -140,6 +140,10 @@ AMGN:
   fair_value: 342.0
   checked: '2026-08-19'
   source: scraped
+AMRZ:
+  fair_value: 59.0
+  checked: '2026-09-15'
+  source: scraped
 AMT:
   fair_value: 225.0
   checked: '2026-08-05'
@@ -279,6 +283,10 @@ BLNK:
 BMY:
   fair_value: 70.0
   checked: '2026-08-20'
+  source: scraped
+BN:
+  fair_value: 41.53
+  checked: '2026-09-15'
   source: scraped
 BNTX:
   fair_value: 76.0
@@ -1219,6 +1227,10 @@ NSC:
 NTES:
   fair_value: 21.0
   checked: '2026-08-27'
+  source: scraped
+NTR:
+  fair_value: 80.0
+  checked: '2026-09-15'
   source: scraped
 NUE:
   fair_value: 206.89
