@@ -703,8 +703,8 @@ def test_the_running_list_is_one_per_company(config):
         ("AAA", "2026-09-10T20:00", [100.0, 101.0], None),
         ("BBB", "2026-09-10T19:00", [100.0, 102.0], None),
     ]))
-    assert html.count("<strong>AAA</strong>") == 1
-    assert "<strong>BBB</strong>" in html
+    assert html.count('<th scope="row">AAA</th>') == 1
+    assert '<th scope="row">BBB</th>' in html
 
 
 def test_nothing_running_renders_nothing(config):
@@ -839,3 +839,110 @@ def test_a_tidy_panel_says_nothing_about_clipping(tmp_path):
     svg = _plot(_panel_with([(f"S{i:02d}", f"2026-0{(i % 9) + 1}-01", _full(), 0.2)
                              for i in range(20)]))
     assert "run past the top" not in svg
+
+
+# ------------------------- the latest recommendations, with their conviction
+
+
+def _scored(symbol, up2, path, conviction, band):
+    from screener.historical import Entry
+
+    return Entry(symbol=symbol, up2_date=up2, path=path, ret=None, right=None,
+                 conviction=conviction, conviction_band=band)
+
+
+def test_the_latest_recommendations_show_their_conviction(tmp_path):
+    """What the chart fix cost, and what this puts back.
+
+    Conviction is read from `recommendations.csv`, which starts on 2026-06-01;
+    a path matures only after sixty trading days. Those two windows do not yet
+    overlap, so every numbered row shows a dash and will until the September
+    signals mature around December. The scores exist — they are just on signals
+    too young to draw, which is exactly where this table looks.
+    """
+    from screener.historical import Panel, _running
+
+    panel = Panel("strong", "1d")
+    panel.entries = [
+        _scored("ONON", "2026-09-09", [100.0, 99.7, 99.7], 9, "green"),
+        _scored("DECK", "2026-09-11", [100.0, 99.6], 8, "green"),
+    ]
+    html = _running(panel)
+    assert '<th scope="row">ONON</th>' in html
+    assert ">9<" in html and "cv-green" in html
+    assert ">8<" in html
+    assert "2026-09-09" in html, "the signal date, not just the symbol"
+
+
+def test_the_latest_table_is_a_table_not_a_run_on_sentence(tmp_path):
+    """It carries four fields a row; an eight-item inline list could carry two."""
+    from screener.historical import _running
+
+    html = _running(_panel_with([("AAA", "2026-09-10", [100.0, 102.0], None)]))
+    assert '<table class="names latest">' in html
+    for column in ("Symbol", "Signal", "Conv.", "So far", "Progress"):
+        assert f">{column}<" in html
+
+
+def test_the_latest_table_has_no_index_column(tmp_path):
+    """These rows are not the lines on the chart. A number here would promise a
+    curve that is not drawn."""
+    from screener.historical import _running
+
+    html = _running(_panel_with([("AAA", "2026-09-10", [100.0, 102.0], None)]))
+    assert 'class="num idx"' not in html
+
+
+def test_an_unscored_recent_recommendation_says_so(tmp_path):
+    """A dash reads differently from a zero: "we did not score this" is not
+    "this scored nothing"."""
+    from screener.historical import _running
+
+    html = _running(_panel_with([("AAA", "2026-09-10", [100.0, 102.0], None)]))
+    assert "cv-na" in html and "—" in html
+
+
+def test_the_progress_column_never_looks_like_a_result(tmp_path):
+    """A partial return with the number of days behind it, and the caption
+    saying it is not a result."""
+    from screener.historical import CHART_DAYS, HEADLINE_BARS, _running
+
+    html = _running(_panel_with([("AAA", "2026-09-10", [100.0, 103.0], None)]))
+    assert "+3.0%" in html
+    assert f"day 1<span class=\"of\">/{CHART_DAYS}</span>" in html
+    assert "not a result" in html
+    assert f"+{HEADLINE_BARS}d" in html
+
+
+def test_a_just_fired_signal_carries_its_conviction_too(tmp_path):
+    """The freshest calls on the site, and the score is the one thing a reader
+    wants beside them."""
+    from screener.historical import Panel, _pending
+
+    panel = Panel("strong", "1d")
+    panel.pending = [("ONON", "2026-09-15T09:28", 9, "green")]
+    html = _pending(panel)
+    assert "ONON" in html
+    assert 'class="cvchip cv-green">9<' in html
+
+
+def test_a_just_fired_signal_without_a_score_renders_plainly(tmp_path):
+    """The older two-field shape still has to work — several callers unpack
+    exactly `(symbol, date)`."""
+    from screener.historical import Panel, _pending
+
+    panel = Panel("strong", "1d")
+    panel.pending = [("AAA", "2026-09-15T09:28")]
+    html = _pending(panel)
+    assert "AAA" in html and "cvchip" not in html
+
+
+def test_pending_keeps_its_first_two_fields(config):
+    """`collect_panels` grew the tuple rather than replacing it, so anything
+    reading p[0] and p[1] keeps working."""
+    with Store(config.storage.database) as store:
+        dates = seed(store, "AAA", days=90, signal_on=89)
+        panels = collect_panels(store, config)
+    pending = panels[("buy", "1d")].pending
+    assert pending and pending[0][0] == "AAA"
+    assert pending[0][1] == dates[89]
