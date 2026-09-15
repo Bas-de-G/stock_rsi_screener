@@ -332,17 +332,43 @@ journalled with the weights that produced it, so it can be measured against the
 existing rule before replacing it. Don't wire it into a verdict until the
 journal says it beats what's there.
 
-**`rsi_history` only ever grew, and had to be pruned.** Bars are upserted and
-never removed, so three years of hourly history accumulated behind a dashboard
-that draws ninety bars — 78 MB, past the 50 MB where GitHub starts warning.
-`screener prune` (in `daily.yml`, unconditional) drops intraday bars older than
-*both* the chart window and the symbol's first daily bar. Those are unreadable,
-not merely old: the chart never plots that far back, and `forward_outcomes`
-already refuses to measure a signal the daily series doesn't cover. Both halves
-of the test are needed — SPCX's 4h history predates its daily history, and the
-daily test alone shortened its chart from 90 bars to 76. Verified by replaying
-a copy of the live database: 283,005 bars removed, every page byte-identical,
-all 17,828 outcomes unchanged, 78 MB → 46 MB.
+**`rsi_history` only ever grew, and the prune rule that held it back stopped
+working silently.** Bars are upserted and never removed. `screener prune` (in
+`daily.yml`, unconditional) used to drop intraday bars older than *both* the
+chart window and the symbol's first daily bar — and that second test quietly
+became a no-op once daily and intraday history were seeded from the same date
+(2024-08-23 live). Nothing matched, two years of hourly bars piled up, and the
+file hit **103 MB — past GitHub's hard 100 MB limit**, not the 50 MB warning.
+The push was rejected at the pre-receive hook, which failed the commit step and
+skipped the Pages deploy behind it, so every dispatched run published nothing.
+
+The rule is now: **drop an intraday bar older than the window unless a recorded
+pattern completed on it.** That signal bar is the one thing outside the chart
+window still reading intraday history — `cmd_evaluate` and
+`historical.collect_panels` both look up `signal.up2_date` to price a pattern at
+the moment it fired, and losing it doesn't shorten a chart, it drops the signal
+out of every historical cohort. 12,096 such bars against 589,604 intraday rows,
+so protecting them costs 2%.
+
+Two things that bite:
+
+- **Prune to `chart_days + 1`, never `chart_days`.** `dashboard._visible_crosses`
+  detects over `window + 1` bars because a cross compares a bar with its
+  predecessor; pruning to exactly the window throws that lead-in away and
+  undercounts a cross on the left edge.
+- **Daily and weekly bars are never pruned.** `trajectory` and
+  `forward_outcomes` walk the *daily* series from a signal forward, so it has to
+  reach back to the oldest signal on the page — currently 2024-08.
+
+Verified the way the original was: replayed against a copy of the live database,
+490,950 bars removed, **all five pages byte-identical**, all 35,890 outcomes and
+93,964 strategy trades unchanged after re-running `evaluate`, 103.1 MB → 53.9 MB.
+
+`daily.yml` also now skips the snapshot (with a `::warning::`) rather than
+letting an oversized file fail the job — the database is regenerable and the
+published page is not, so it must never be the thing that stops publishing.
+With intraday bounded, daily bars are the growth driver: ~180k rows a year,
+roughly 27 MB, so expect to revisit this around 2028.
 
 **Running the screener locally modifies a tracked file, which blocks `git
 pull`.** `data/screener.db` (and the CSVs) are force-added by CI, so they stay

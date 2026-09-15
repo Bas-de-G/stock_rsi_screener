@@ -265,7 +265,26 @@ jobs:
           else
             # data/ is gitignored so local runs stay clean; CI force-adds it
             # because this is where the shared history lives.
-            git add -f data/screener.db data/latest.csv data/signals.csv 2>/dev/null || true
+            git add -f data/latest.csv data/signals.csv 2>/dev/null || true
+
+            # GitHub rejects a file over 100 MB at the pre-receive hook, and
+            # the rejection fails this step -- which skips the Pages deploy
+            # below it, so an oversized database stops the site publishing
+            # rather than merely skipping a snapshot. That happened on
+            # 2026-09-15 at 103.36 MB.
+            #
+            # `prune` runs earlier in this job and holds the intraday tables
+            # flat, so this should never fire. It is here because the failure
+            # mode is silent until it is total, and because the snapshot is the
+            # one thing in this job that is genuinely optional: everything in
+            # the database is refetched or re-derived by the next run.
+            size=$(stat -c%s data/screener.db 2>/dev/null || echo 0)
+            if [ "$size" -gt 99000000 ]; then
+              mb=$((size / 1000000))
+              echo "::warning title=Database too large to commit::data/screener.db is ${mb} MB, past GitHub's 100 MB file limit. Skipping the snapshot so the dashboard still publishes — check that 'screener prune' is working."
+            else
+              git add -f data/screener.db 2>/dev/null || true
+            fi
           fi
 
           if git diff --staged --quiet; then

@@ -337,17 +337,22 @@ def _hourly(store, symbol, days, per_day=7, horizon="1h"):
             )
 
 
+def _dates_for(days, per_day=7):
+    """The timestamps `_hourly` lays down, so a test can name one of them."""
+    return [f"{day}T{hour:02d}:30" for day in days for hour in range(13, 13 + per_day)]
+
+
 def _dates(store, symbol, horizon):
     return [p.date for p in store.rsi_series(symbol, horizon)]
 
 
-def test_intraday_older_than_the_daily_history_goes(store):
+def test_intraday_older_than_the_chart_window_goes(store):
     """The bars nothing can reach.
 
-    `forward_outcomes` refuses to measure a signal the daily series doesn't
-    reach back to, so an intraday bar from before the first daily bar prices a
-    pattern whose outcome is unknowable -- and the chart never plots back that
-    far either.
+    The chart draws the newest `keep_bars` of a series and never plots further
+    back, and the only other reader of an intraday bar looks up the one a
+    pattern completed on. Anything that is neither is unreadable, not merely
+    old.
     """
     _hourly(store, "NVDA", ["2024-01-02", "2024-01-03", "2026-01-05"])
     for day in ("2026-01-05", "2026-01-06"):
@@ -393,25 +398,65 @@ def test_pruning_twice_removes_nothing_the_second_time(store):
     assert store.prune_unmeasurable_intraday(keep_bars=7) == 0
 
 
-def test_a_bar_on_the_first_daily_day_survives(store):
-    """The boundary. The daily series covers that day, so the outcome of a
-    pattern completing on it is measurable."""
-    _hourly(store, "NVDA", ["2026-01-05"])
-    store.upsert_rsi_point(RsiPoint("NVDA", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
-    assert store.prune_unmeasurable_intraday(keep_bars=0) == 0
-    assert len(_dates(store, "NVDA", "1h")) == 7
+def test_the_bar_a_pattern_fired_on_is_never_pruned(store):
+    """The one thing outside the chart window that still reads an intraday bar.
+
+    `cmd_evaluate` and `historical.collect_panels` both look up
+    `signal.up2_date` to price a pattern at the moment it fired. Losing that
+    bar does not shorten a chart -- it silently drops the signal out of every
+    historical cohort, because `trajectory` has nothing to rebase from.
+    """
+    dates = _dates_for(["2024-01-02"])
+    _hourly(store, "NVDA", ["2024-01-02"])
+    kept = dates[3]
+    store.record_signal(Signal(
+        "NVDA", dates[0], dates[1], kept, 100.0, None, False, False, True,
+        "now", horizon="1h", direction="buy",
+    ))
+    assert store.prune_unmeasurable_intraday(keep_bars=0) == 6
+    assert _dates(store, "NVDA", "1h") == [kept]
 
 
-def test_one_symbol_does_not_set_the_line_for_another(store):
-    """The daily line is per symbol -- a long-listed name must not license
-    pruning a young one's history."""
-    _hourly(store, "OLD", ["2024-01-02"])
-    _hourly(store, "NEW", ["2024-01-02"])
-    store.upsert_rsi_point(RsiPoint("OLD", "2026-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
-    store.upsert_rsi_point(RsiPoint("NEW", "2023-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+def test_a_signal_on_another_horizon_does_not_protect_the_bar(store):
+    """Everything here is keyed by (symbol, horizon); a 4h pattern is no reason
+    to keep an hourly bar that happens to share its timestamp."""
+    dates = _dates_for(["2024-01-02"])
+    _hourly(store, "NVDA", ["2024-01-02"])
+    store.record_signal(Signal(
+        "NVDA", dates[0], dates[1], dates[3], 100.0, None, False, False, True,
+        "now", horizon="4h", direction="buy",
+    ))
     assert store.prune_unmeasurable_intraday(keep_bars=0) == 7
-    assert len(_dates(store, "NEW", "1h")) == 7
-    assert _dates(store, "OLD", "1h") == []
+    assert _dates(store, "NVDA", "1h") == []
+
+
+def test_a_signal_on_another_symbol_does_not_protect_the_bar(store):
+    dates = _dates_for(["2024-01-02"])
+    _hourly(store, "NVDA", ["2024-01-02"])
+    _hourly(store, "AMD", ["2024-01-02"])
+    store.record_signal(Signal(
+        "AMD", dates[0], dates[1], dates[3], 100.0, None, False, False, True,
+        "now", horizon="1h", direction="buy",
+    ))
+    assert store.prune_unmeasurable_intraday(keep_bars=0) == 13
+    assert _dates(store, "NVDA", "1h") == []
+    assert _dates(store, "AMD", "1h") == [dates[3]]
+
+
+def test_daily_history_no_longer_licenses_keeping_everything(store):
+    """The rule this replaces, and why it had to go.
+
+    It kept any intraday bar newer than the symbol's first *daily* bar. Once
+    both series were seeded from the same date that matched nothing at all, two
+    years of hourly bars piled up behind it, and the file passed GitHub's hard
+    100 MB limit -- so the push was rejected and the weekly snapshot stopped.
+    """
+    _hourly(store, "NVDA", ["2024-01-02", "2024-01-03"])
+    # Daily history reaching back *before* the intraday bars: under the old
+    # rule nothing was prunable. Now the window alone decides.
+    store.upsert_rsi_point(RsiPoint("NVDA", "2023-01-05", 100.0, 50.0, "live:tradingview", horizon="1d"))
+    assert store.prune_unmeasurable_intraday(keep_bars=7) == 7
+    assert len(_dates(store, "NVDA", "1h")) == 7
 
 
 def test_the_floor_keeps_exactly_the_bars_it_says(store):
