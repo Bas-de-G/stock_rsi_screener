@@ -578,7 +578,7 @@ DTE:
   source: scraped
 DUK:
   fair_value: 131.0
-  checked: '2026-08-05'
+  checked: '2026-09-17'
   source: scraped
 DVA:
   fair_value: 165.0
@@ -1184,6 +1184,10 @@ NCLH:
   fair_value: 25.0
   checked: '2026-09-08'
   source: scraped
+NEE:
+  fair_value: 88.0
+  checked: '2026-09-17'
+  source: scraped
 NEM:
   fair_value: 67.0
   checked: '2026-08-19'
@@ -1604,6 +1608,10 @@ SRE:
   fair_value: 93.0
   checked: '2026-08-26'
   source: scraped
+STE:
+  fair_value: 244.0
+  checked: '2026-09-17'
+  source: scraped
 STLA:
   fair_value: 10.0
   checked: '2026-08-31'
@@ -1843,6 +1851,10 @@ WY:
 WYNN:
   fair_value: 118.0
   checked: '2026-09-08'
+  source: scraped
+XEL:
+  fair_value: 74.0
+  checked: '2026-09-17'
   source: scraped
 XIAOMI:
   fair_value: 33.0
