@@ -720,6 +720,10 @@ FLOW:
   fair_value: 29.79
   checked: '2026-08-19'
   source: scraped
+FME:
+  fair_value: 67.0
+  checked: '2026-09-19'
+  source: scraped
 FND:
   fair_value: 73.59
   checked: '2026-09-01'
@@ -1726,7 +1730,7 @@ UAL:
   source: scraped
 UBER:
   fair_value: 76.0
-  checked: '2026-08-10'
+  checked: '2026-09-19'
   source: scraped
 UHS:
   fair_value: 212.0
