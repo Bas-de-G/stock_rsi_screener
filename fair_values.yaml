@@ -146,7 +146,7 @@ AMRZ:
   source: scraped
 AMT:
   fair_value: 225.0
-  checked: '2026-08-05'
+  checked: '2026-09-25'
   source: scraped
 AMX:
   fair_value: 22.0
