@@ -69,8 +69,8 @@ AD:
   checked: '2026-08-18'
   source: scraped
 ADBE:
-  fair_value: 380.0
-  checked: '2026-08-18'
+  fair_value: 344.0
+  checked: '2026-09-27'
   source: scraped
 ADI:
   fair_value: 380.0
@@ -94,7 +94,7 @@ ADSK:
   source: scraped
 ADYEN:
   fair_value: 1620.0
-  checked: '2026-08-18'
+  checked: '2026-09-27'
   source: scraped
 AEM:
   fair_value: 87.0
@@ -570,7 +570,7 @@ DRS:
   source: scraped
 DSFIR:
   fair_value: 103.0
-  checked: '2026-08-18'
+  checked: '2026-09-27'
   source: scraped
 DTE:
   fair_value: 38.0
@@ -806,7 +806,7 @@ HCA:
   source: scraped
 HD:
   fair_value: 325.0
-  checked: '2026-08-18'
+  checked: '2026-09-27'
   source: scraped
 HEI:
   fair_value: 294.0
@@ -882,7 +882,7 @@ INGA:
   source: scraped
 INTC:
   fair_value: 105.0
-  checked: '2026-08-18'
+  checked: '2026-09-27'
   source: scraped
 INTU:
   fair_value: 455.0
