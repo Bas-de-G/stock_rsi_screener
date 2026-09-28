@@ -134,7 +134,7 @@ AMAT:
   source: scraped
 AMD:
   fair_value: 530.0
-  checked: '2026-08-19'
+  checked: '2026-09-28'
   source: scraped
 AMGN:
   fair_value: 342.0
@@ -305,8 +305,8 @@ BROS:
   checked: '2026-09-08'
   source: scraped
 BSP:
-  fair_value: 45.81
-  checked: '2026-08-19'
+  fair_value: 40.59
+  checked: '2026-09-28'
   source: scraped
 BX:
   fair_value: 140.0
@@ -398,7 +398,7 @@ CLX:
   source: scraped
 CMCSA:
   fair_value: 36.0
-  checked: '2026-08-19'
+  checked: '2026-09-28'
   source: scraped
 CME:
   fair_value: 285.0
@@ -626,7 +626,7 @@ ELV:
   source: scraped
 EMR:
   fair_value: 104.0
-  checked: '2026-08-19'
+  checked: '2026-09-28'
   source: scraped
 EN:
   fair_value: 60.0
@@ -1878,7 +1878,7 @@ XPLRA:
   source: scraped
 XYL:
   fair_value: 129.0
-  checked: '2026-08-19'
+  checked: '2026-09-28'
   source: scraped
 YUM:
   fair_value: 155.0
