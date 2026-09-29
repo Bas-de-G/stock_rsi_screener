@@ -209,8 +209,8 @@ AVT:
   checked: '2026-08-31'
   source: scraped
 AXP:
-  fair_value: 335.0
-  checked: '2026-08-19'
+  fair_value: 341.0
+  checked: '2026-09-29'
   source: scraped
 BA:
   fair_value: 246.0
@@ -262,7 +262,7 @@ BILI:
   source: scraped
 BKNG:
   fair_value: 217.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 BKR:
   fair_value: 28.0
@@ -313,8 +313,8 @@ BX:
   checked: '2026-08-19'
   source: scraped
 BYD:
-  fair_value: 107.0
-  checked: '2026-08-19'
+  fair_value: 105.0
+  checked: '2026-09-29'
   source: scraped
 BYND:
   fair_value: 20.32
@@ -366,15 +366,15 @@ CCL:
   source: scraped
 CDNS:
   fair_value: 350.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 CEG:
   fair_value: 332.09
   checked: '2026-09-08'
   source: scraped
 CHPT:
-  fair_value: 7.66
-  checked: '2026-08-18'
+  fair_value: 11.9
+  checked: '2026-09-29'
   source: scraped
 CHUGAI:
   fair_value: 8700.0
@@ -425,8 +425,8 @@ COCO:
   checked: '2026-09-08'
   source: scraped
 COF:
-  fair_value: 214.0
-  checked: '2026-08-20'
+  fair_value: 225.0
+  checked: '2026-09-29'
   source: scraped
 COO:
   fair_value: 87.0
@@ -461,8 +461,8 @@ CRH:
   checked: '2026-08-27'
   source: scraped
 CRM:
-  fair_value: 280.0
-  checked: '2026-08-20'
+  fair_value: 270.0
+  checked: '2026-09-29'
   source: scraped
 CRS:
   fair_value: 429.26
@@ -702,7 +702,7 @@ FCX:
   source: scraped
 FDX:
   fair_value: 257.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 FER:
   fair_value: 80.0
@@ -717,8 +717,8 @@ FISV:
   checked: '2026-08-19'
   source: scraped
 FLOW:
-  fair_value: 29.79
-  checked: '2026-08-19'
+  fair_value: 28.85
+  checked: '2026-09-29'
   source: scraped
 FME:
   fair_value: 67.0
@@ -786,7 +786,7 @@ GPC:
   source: scraped
 GRAB:
   fair_value: 5.6
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 GS:
   fair_value: 730.0
@@ -830,7 +830,7 @@ HLT:
   source: scraped
 HON:
   fair_value: 186.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 HOOD:
   fair_value: 57.0
@@ -1110,11 +1110,11 @@ MDT:
   source: scraped
 MELI:
   fair_value: 2250.0
-  checked: '2026-08-20'
+  checked: '2026-09-29'
   source: scraped
 META:
   fair_value: 850.0
-  checked: '2026-08-20'
+  checked: '2026-09-29'
   source: scraped
 MGM:
   fair_value: 48.0
@@ -1149,8 +1149,8 @@ MPC:
   checked: '2026-08-19'
   source: scraped
 MRK:
-  fair_value: 111.0
-  checked: '2026-08-19'
+  fair_value: 143.0
+  checked: '2026-09-29'
   source: scraped
 MRSH:
   fair_value: 191.0
@@ -1205,8 +1205,8 @@ NGG:
   checked: '2026-08-26'
   source: scraped
 NIO:
-  fair_value: 6.5
-  checked: '2026-08-18'
+  fair_value: 6.0
+  checked: '2026-09-29'
   source: scraped
 NKE:
   fair_value: 94.0
@@ -1305,8 +1305,8 @@ OXY:
   checked: '2026-08-27'
   source: scraped
 PANW:
-  fair_value: 285.0
-  checked: '2026-08-19'
+  fair_value: 300.0
+  checked: '2026-09-29'
   source: scraped
 PATH:
   fair_value: 16.95
@@ -1334,7 +1334,7 @@ PG:
   source: scraped
 PGR:
   fair_value: 198.0
-  checked: '2026-08-20'
+  checked: '2026-09-29'
   source: scraped
 PH:
   fair_value: 680.0
@@ -1413,8 +1413,8 @@ PRX:
   checked: '2026-08-18'
   source: scraped
 PSX:
-  fair_value: 160.0
-  checked: '2026-08-20'
+  fair_value: 188.0
+  checked: '2026-09-29'
   source: scraped
 PTON:
   fair_value: 6.32
@@ -1454,7 +1454,7 @@ RCI:
   source: scraped
 RCL:
   fair_value: 262.0
-  checked: '2026-08-20'
+  checked: '2026-09-29'
   source: scraped
 REGN:
   fair_value: 730.0
@@ -1498,7 +1498,7 @@ RTO:
   source: scraped
 RTX:
   fair_value: 214.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 SANDS:
   fair_value: 23.0
@@ -1522,7 +1522,7 @@ SCCO:
   source: scraped
 SCHW:
   fair_value: 124.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 SESG:
   fair_value: 5.38
@@ -1649,8 +1649,8 @@ TCOM:
   checked: '2026-08-27'
   source: scraped
 TGT:
-  fair_value: 121.0
-  checked: '2026-08-19'
+  fair_value: 131.0
+  checked: '2026-09-29'
   source: scraped
 TGYM:
   fair_value: 12.07
@@ -1750,7 +1750,7 @@ UNP:
   source: scraped
 UPS:
   fair_value: 109.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 UPST:
   fair_value: 34.54
@@ -1814,7 +1814,7 @@ VVV:
   source: scraped
 VZ:
   fair_value: 54.0
-  checked: '2026-08-19'
+  checked: '2026-09-29'
   source: scraped
 WDC:
   fair_value: 420.0
@@ -1838,7 +1838,7 @@ WKL:
   source: scraped
 WM:
   fair_value: 220.0
-  checked: '2026-08-20'
+  checked: '2026-09-29'
   source: scraped
 WMB:
   fair_value: 69.0
