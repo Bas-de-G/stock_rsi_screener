@@ -435,3 +435,26 @@ def test_a_crypto_strong_buy_reaches_the_phone_as_a_strong_buy(tmp_path, monkeyp
     assert sent == 1
     assert "STRONG BUY" in pushed[0]
     assert "PATTERN" not in pushed[0]
+
+
+def test_a_wrapped_copy_cannot_overwrite_the_real_all_time_high(tmp_path, monkeypatch):
+    """Symbols are not unique: a wrapped or bridged token can share its parent's
+    ticker. The lookup walks CoinGecko's table in rank order and used to let a
+    later match overwrite an earlier one, so a wrapped "BTC" ranked far below
+    real Bitcoin would have handed it a different all-time high. The real asset
+    always outranks its copy, so the first match is the right one."""
+    from screener import cli
+    from screener.coingecko import Asset
+    from screener.storage import Store
+
+    config = crypto_config(tmp_path)
+    real = Asset(rank=1, coingecko_id="bitcoin", symbol="BTC", name="Bitcoin",
+                 market_cap=1.0e12, price=80_000.0, ath=126_000.0,
+                 ath_change_pct=-36.5)
+    copy = Asset(rank=100, coingecko_id="mezo-wrapped-btc", symbol="BTC",
+                 name="Mezo Wrapped BTC", market_cap=1.0e8, price=1.0, ath=3.0,
+                 ath_change_pct=-66.7)
+    monkeypatch.setattr("screener.coingecko.top_assets", lambda limit=120: [real, copy])
+    with Store(config.storage.database) as store:
+        cli._record_crypto_highs(store, config)
+        assert store.crypto_highs()["BTC"].all_time == 126_000.0

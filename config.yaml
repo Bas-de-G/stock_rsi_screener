@@ -854,6 +854,52 @@ tickers:
   - {symbol: FTV,      tradingview: "NYSE:FTV",     morningstar: xnys/ftv,    markets: [sp500]}   # RSI 30 · Fortive
   - {symbol: BBIO,     tradingview: "NASDAQ:BBIO",  morningstar: xnas/bbio,   markets: [nasdaq]}  # RSI 30 · BridgeBio Pharma
 
+  # --- Near RSI 30, October 2026 -----------------------------------------
+  # Twenty names between RSI 22 and 34 on 2026-10-10, each checked on both
+  # feeds before going in: TradingView resolves it, Yahoo returns a year of
+  # bars, the two prices agree, and the company is not already held under
+  # another listing. That last check removed three that looked new:
+  #
+  #   * NYSE:DB is Deutsche Bank's ADR and HKEX:5 is HSBC's Hong Kong line --
+  #     one listing each, the primary (XETR:DBK, LSE:HSBA).
+  #   * SIX:AMRZE is Amrize, already held as AMRZ under a different
+  #     description, so the name-based check alone missed it.
+  #   * NASDAQ:QNT is Quantinuum, whose symbol collides with the QNT crypto
+  #     added below. Symbols key every table here, so two tickers cannot share
+  #     one.
+  #
+  # Asia gets six again: it was still the thinnest group at twelve. Hong Kong
+  # codes follow the BYD/Xiaomi convention -- four digits on Yahoo (0981.HK),
+  # five on Morningstar (xhkg/00981), bare on TradingView (HKEX:981).
+
+  # Japan
+  - {symbol: AEON,     tradingview: "TSE:8267",     morningstar: xtks/8267,   yahoo: 8267.T,   currency: JPY, markets: [asia]}    # RSI 32 · AEON, retail
+  - {symbol: NIDEC,    tradingview: "TSE:6594",     morningstar: xtks/6594,   yahoo: 6594.T,   currency: JPY, markets: [asia]}    # RSI 31 · Nidec, motors
+  - {symbol: PPIH,     tradingview: "TSE:7532",     morningstar: xtks/7532,   yahoo: 7532.T,   currency: JPY, markets: [asia]}    # RSI 27 · Pan Pacific (Don Quijote)
+
+  # Hong Kong
+  - {symbol: CHLIFE,   tradingview: "HKEX:2628",    morningstar: xhkg/02628,  yahoo: 2628.HK,  currency: HKD, markets: [asia]}    # RSI 32 · China Life Insurance
+  - {symbol: SMIC,     tradingview: "HKEX:981",     morningstar: xhkg/00981,  yahoo: 0981.HK,  currency: HKD, markets: [asia]}    # RSI 34 · SMIC, semiconductors
+  - {symbol: ZTE,      tradingview: "HKEX:763",     morningstar: xhkg/00763,  yahoo: 0763.HK,  currency: HKD, markets: [asia]}    # RSI 29 · ZTE, telecoms equipment
+
+  # Europe
+  - {symbol: ACA,      tradingview: "EURONEXT:ACA", morningstar: xpar/aca,    yahoo: ACA.PA,   currency: EUR, markets: [europe]}  # RSI 25 · Crédit Agricole
+  - {symbol: BNP,      tradingview: "EURONEXT:BNP", morningstar: xpar/bnp,    yahoo: BNP.PA,   currency: EUR, markets: [europe]}  # RSI 30 · BNP Paribas
+  - {symbol: MBG,      tradingview: "XETR:MBG",     morningstar: xetr/mbg,    yahoo: MBG.DE,   currency: EUR, markets: [europe]}  # RSI 31 · Mercedes-Benz
+  - {symbol: BARC,     tradingview: "LSE:BARC",     morningstar: xlon/barc,   yahoo: BARC.L,   currency: GBX, markets: [europe]}  # RSI 31 · Barclays
+  - {symbol: BMW,      tradingview: "XETR:BMW",     morningstar: xetr/bmw,    yahoo: BMW.DE,   currency: EUR, markets: [europe]}  # RSI 32 · BMW
+  - {symbol: DBK,      tradingview: "XETR:DBK",     morningstar: xetr/dbk,    yahoo: DBK.DE,   currency: EUR, markets: [europe]}  # RSI 33 · Deutsche Bank
+
+  # US
+  - {symbol: NLY,      tradingview: "NYSE:NLY",     morningstar: xnys/nly,    markets: [sp500]}   # RSI 22 · Annaly, mortgage REIT
+  - {symbol: CHTR,     tradingview: "NASDAQ:CHTR",  morningstar: xnas/chtr,   markets: [sp500, nasdaq]}  # RSI 28 · Charter, cable
+  - {symbol: WPC,      tradingview: "NYSE:WPC",     morningstar: xnys/wpc,    markets: [sp500]}   # RSI 29 · W. P. Carey, net-lease REIT
+  - {symbol: PCAR,     tradingview: "NASDAQ:PCAR",  morningstar: xnas/pcar,   markets: [sp500, nasdaq]}  # RSI 29 · PACCAR, trucks
+  - {symbol: INSM,     tradingview: "NASDAQ:INSM",  morningstar: xnas/insm,   markets: [nasdaq]}  # RSI 30 · Insmed, biotech
+  - {symbol: ALLY,     tradingview: "NYSE:ALLY",    morningstar: xnys/ally,   markets: [sp500]}   # RSI 30 · Ally Financial
+  - {symbol: FICO,     tradingview: "NYSE:FICO",    morningstar: xnys/fico,   markets: [sp500]}   # RSI 31 · Fair Isaac
+  - {symbol: INCY,     tradingview: "NASDAQ:INCY",  morningstar: xnas/incy,   markets: [sp500, nasdaq]}  # RSI 31 · Incyte, biotech
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data
@@ -890,6 +936,36 @@ tickers:
   - {symbol: SHIB, tradingview: "BINANCE:SHIBUSDT",   yahoo: SHIB-USD,      markets: [crypto]}   # Shiba Inu
   - {symbol: UNI,  tradingview: "BINANCE:UNIUSDT",    yahoo: UNI7083-USD,   markets: [crypto]}   # Uniswap   # bare UNI-USD/SUI-USD return a malformed chart
   - {symbol: SUI,  tradingview: "BINANCE:SUIUSDT",    yahoo: SUI20947-USD,  markets: [crypto]}   # Sui   # bare UNI-USD/SUI-USD return a malformed chart
+
+  # Ten more, October 2026 -- the next largest by CoinGecko market cap that
+  # pass both feeds with a year of history. The ranking itself needed
+  # filtering by hand, because CoinGecko's three exclusion categories do not
+  # catch everything whose price is designed not to move: XAUT and PAXG are
+  # gold, BUIDL, USYC, USDY and EURSAFO are tokenised money-market funds, and
+  # FIGR_HELOC is tokenised loans. All sat in the top 70; none is here.
+  #
+  # Three real assets failed verification and were skipped:
+  #   * ARB -- Yahoo's ARB-USD is a DIFFERENT asset, priced at 0.0006 against
+  #     Arbitrum's 0.19. The same trap as UNI and SUI above, caught by
+  #     comparing the two prices rather than trusting the symbol.
+  #   * TAO, POL -- no usable Yahoo history under any symbol.
+  #
+  # Two identifier exceptions, both verified against the TradingView close:
+  #   * HYPE is HYPE32196-USD on Yahoo; the bare form is not Hyperliquid.
+  #   * XMR is not on Binance at all (delisted 2024), so it reads from Kraken.
+  #
+  # The `symbol` must match CoinGecko's own ticker, because that is how the
+  # all-time high is looked up -- see `cli._record_crypto_highs`.
+  - {symbol: HYPE, tradingview: "BINANCE:HYPEUSDT",   yahoo: HYPE32196-USD, markets: [crypto]}   # Hyperliquid
+  - {symbol: XMR,  tradingview: "KRAKEN:XMRUSDT",     yahoo: XMR-USD,       markets: [crypto]}   # Monero   # not listed on Binance
+  - {symbol: NEAR, tradingview: "BINANCE:NEARUSDT",   yahoo: NEAR-USD,      markets: [crypto]}   # NEAR Protocol
+  - {symbol: QNT,  tradingview: "BINANCE:QNTUSDT",    yahoo: QNT-USD,       markets: [crypto]}   # Quant
+  - {symbol: ENA,  tradingview: "BINANCE:ENAUSDT",    yahoo: ENA-USD,       markets: [crypto]}   # Ethena
+  - {symbol: AAVE, tradingview: "BINANCE:AAVEUSDT",   yahoo: AAVE-USD,      markets: [crypto]}   # Aave
+  - {symbol: ONDO, tradingview: "BINANCE:ONDOUSDT",   yahoo: ONDO-USD,      markets: [crypto]}   # Ondo
+  - {symbol: DOT,  tradingview: "BINANCE:DOTUSDT",    yahoo: DOT-USD,       markets: [crypto]}   # Polkadot
+  - {symbol: WLD,  tradingview: "BINANCE:WLDUSDT",    yahoo: WLD-USD,       markets: [crypto]}   # Worldcoin
+  - {symbol: ICP,  tradingview: "BINANCE:ICPUSDT",    yahoo: ICP-USD,       markets: [crypto]}   # Internet Computer
 
 # Each RSI timeframe, and the three things that scale with holding period.
 # The interval codes themselves aren't configurable -- they're what TradingView

@@ -778,7 +778,12 @@ def _record_crypto_highs(store: Store, config: Config) -> int:
         # Deep enough to cover the watchlist, which is drawn from the top of
         # the same table; anything that has fallen out of it keeps its old high.
         for asset in top_assets(limit=120):
-            if asset.symbol in wanted:
+            # First match wins, and the table is in rank order. Symbols are not
+            # unique -- a wrapped or bridged copy can share its parent's ticker
+            # -- and a later match used to overwrite an earlier one, so a
+            # wrapped "BTC" ranked 100th would silently hand Bitcoin its
+            # all-time high. The real asset always outranks its copy.
+            if asset.symbol in wanted and asset.symbol not in ath:
                 ath[asset.symbol] = (asset.ath, "")
     except MarketDataError as exc:
         print(f"  ! all-time highs unavailable ({exc}) — keeping the stored ones")
