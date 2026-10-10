@@ -242,17 +242,27 @@ def published_convictions(path: Path | str) -> dict[tuple[str, str, str, str], t
     return out
 
 
-def verdict_for(signal, direction: str, strong: bool, suspended: bool) -> str:
+def verdict_for(signal, direction: str, strong: bool, suspended: bool,
+                deep: bool = False) -> str:
     """The label this pattern was published under.
 
     Per signal rather than per card. A ticker can carry a live buy and a live
     sell at once on different horizons, and "what did we say about this
     pattern" has to survive that.
+
+    "deep" is a subset of "strong" -- every deep-value row is also a strong buy
+    -- so anything counting strong buys in this file wants
+    `verdict in ("strong", "deep")`. Recorded as its own value rather than as a
+    flag beside "strong" because the record has to say what the page said, and
+    the page says "Deep value 💎". Journalled from the day the tier existed;
+    rows before it read "strong" for the same patterns, which is true of them.
     """
     if suspended:
         return "suspended"
     if direction == "sell":
         return "sell_strong" if strong else "sell"
+    if deep and strong:
+        return "deep"
     return "strong" if strong else "signal"
 
 
@@ -284,7 +294,10 @@ def recommendation_from(row, signal, horizon, now: dt.datetime | None = None) ->
         horizon=horizon.key,
         direction=signal.direction,
         up2_date=signal.up2_date,
-        verdict=verdict_for(signal, signal.direction, strong, row.suspended),
+        verdict=verdict_for(
+            signal, signal.direction, strong, row.suspended,
+            deep=signal.up2_date in getattr(row, "deep_dates", frozenset()),
+        ),
         fresh=int(signal_is_fresh(signal, row.series, horizon)),
         price=signal.price if signal.price is not None else (
             row.latest.close if row.latest else None

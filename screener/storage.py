@@ -157,6 +157,8 @@ CREATE TABLE IF NOT EXISTS strategy_trades (
     -- Whether the signal was strong when it fired, so the leaderboard can
     -- filter on the entry bar without re-deriving it per strategy.
     strong       INTEGER NOT NULL DEFAULT 0,
+    -- And whether it cleared the deep-value bar as well; implies `strong`.
+    deep         INTEGER NOT NULL DEFAULT 0,
     evaluated_at TEXT NOT NULL,
     PRIMARY KEY (symbol, horizon, direction, up2_date, strategy)
 );
@@ -334,6 +336,13 @@ class Store:
             if trade_columns and "strong" not in trade_columns:
                 cur.execute(
                     "ALTER TABLE strategy_trades ADD COLUMN strong "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            # Same reasoning for the deep-value flag. Existing rows read 0
+            # until the next `evaluate` re-derives them, which is every run.
+            if trade_columns and "deep" not in trade_columns:
+                cur.execute(
+                    "ALTER TABLE strategy_trades ADD COLUMN deep "
                     "INTEGER NOT NULL DEFAULT 0"
                 )
 
@@ -729,7 +738,8 @@ class Store:
         stamp = _dt.datetime.now().isoformat(timespec="seconds")
         rows = [
             (t.symbol, t.horizon, t.direction, t.up2_date, t.strategy, t.entry,
-             t.exit, t.return_pct, t.bars_held, t.outcome, int(t.strong), stamp)
+             t.exit, t.return_pct, t.bars_held, t.outcome, int(t.strong),
+             int(getattr(t, "deep", False)), stamp)
             for t in trades
         ]
         if not rows:
@@ -738,14 +748,15 @@ class Store:
             cur.executemany(
                 """INSERT INTO strategy_trades (symbol, horizon, direction, up2_date,
                                                 strategy, entry, exit, return_pct,
-                                                bars_held, outcome, strong, evaluated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                bars_held, outcome, strong, deep,
+                                                evaluated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol, horizon, direction, up2_date, strategy)
                    DO UPDATE SET
                        entry=excluded.entry, exit=excluded.exit,
                        return_pct=excluded.return_pct, bars_held=excluded.bars_held,
                        outcome=excluded.outcome, strong=excluded.strong,
-                       evaluated_at=excluded.evaluated_at""",
+                       deep=excluded.deep, evaluated_at=excluded.evaluated_at""",
                 rows,
             )
         self._conn.commit()
@@ -757,7 +768,8 @@ class Store:
         from .strategies import Trade
 
         sql = ("SELECT symbol, horizon, direction, up2_date, strategy, entry,"
-               " exit, return_pct, bars_held, outcome, strong FROM strategy_trades")
+               " exit, return_pct, bars_held, outcome, strong, deep"
+               " FROM strategy_trades")
         clauses, params = [], []
         for column, value in (("strategy", strategy), ("horizon", horizon),
                               ("direction", direction)):
@@ -768,7 +780,8 @@ class Store:
             sql += " WHERE " + " AND ".join(clauses)
         with closing(self._conn.cursor()) as cur:
             cur.execute(sql, params)
-            return [Trade(*row[:10], bool(row[10])) for row in cur.fetchall()]
+            return [Trade(*row[:10], bool(row[10]), bool(row[11]))
+                    for row in cur.fetchall()]
 
     def all_outcomes(self, bars: int | None = None, horizon: str | None = None):
         """Measured outcomes, optionally for one window or one timeframe."""

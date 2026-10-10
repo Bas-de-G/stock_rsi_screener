@@ -134,6 +134,24 @@ def _retrospective_strong(signal, price_then, fair_value, config, margin) -> boo
     )
 
 
+def _retrospective_deep(signal, price_then, fair_value, config, horizon) -> bool:
+    """Whether this pattern would have been deep value at the price it fired at.
+
+    Literally the strong-buy test at the deep-value margin. `margin_for` takes
+    the larger of that and the horizon's own, so this can never be true of a
+    pattern `_retrospective_strong` rejects -- the tier is a subset, and the
+    leaderboard's three selections nest because of it. Carries the same
+    hindsight caveat as strong, more so: "half price against today's fair
+    value" is a stronger claim to be making with today's fair value.
+    """
+    if not config.deep_value.enabled or signal.direction != BUY:
+        return False
+    return _retrospective_strong(
+        signal, price_then, fair_value, config,
+        config.deep_value.margin_for(horizon),
+    )
+
+
 def collect_panels(store: Store, config: Config) -> dict[tuple[str, str], Panel]:
     """Build every (cohort, horizon) panel in one pass over the history."""
     from .journal import published_convictions
@@ -948,7 +966,7 @@ def _strategies_section(store: Store, config: Config) -> str:
     )
     picks = "".join(
         f'<div class="def"><dt>{html.escape(sel.label)}</dt>'
-        f'<dd>{html.escape(_selection_sentence(sel))}</dd></div>'
+        f'<dd>{html.escape(_selection_sentence(sel, config.deep_value.margin_pct))}</dd></div>'
         for sel in config.strategies.selections
     )
 
@@ -1061,21 +1079,31 @@ def _exit_sentence(rule) -> str:
             f"{rule.max_bars} trading days.{tail}")
 
 
-def _selection_sentence(selection) -> str:
+def _selection_sentence(selection, deep_margin_pct: str = "50%") -> str:
     """The legend line for one selection."""
-    from .strategies import STRONG_ONLY
+    from .strategies import DEEP_ONLY, STRONG_ONLY
 
     many = len(selection.horizons) > 1
     charts = (
         ", ".join(selection.horizons[:-1]) + " and " + selection.horizons[-1]
         if many else selection.horizons[0]
     )
-    bar = (
-        "only signals that also cleared the valuation gate with nothing "
-        "vetoing them — the rocket on the cards above"
-        if selection.entry == STRONG_ONLY
-        else "every fired buy pattern, whether or not a fair value confirmed it"
-    )
+    bar = {
+        DEEP_ONLY: (
+            f"only deep value — a strong buy whose fair value also sits at least "
+            f"{deep_margin_pct} above the price, the diamond on the cards above. "
+            f"Read its rows with more suspicion than any other: membership is "
+            f"judged against today's fair value, and analysts tend to raise a fair "
+            f"value after a stock has rallied, which makes the entries that went "
+            f"on to win look the most discounted in hindsight. The clean test is "
+            f"the journal, which records the tier as it stood from now on"
+        ),
+        STRONG_ONLY: (
+            "only signals that also cleared the valuation gate with nothing "
+            "vetoing them — the rocket on the cards above"
+        ),
+    }.get(selection.entry,
+          "every fired buy pattern, whether or not a fair value confirmed it")
     return f"Takes {bar}, on the {charts} chart" + ("s." if many else ".")
 
 
