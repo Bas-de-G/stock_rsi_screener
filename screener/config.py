@@ -272,6 +272,29 @@ class NotifyConfig:
     # which is what the file said before this existed -- so an unset block
     # keeps the old behaviour rather than silently muting anything.
     push_markets: tuple[str, ...] = ()
+    # Which verdict is worth interrupting someone for. "strong" is every strong
+    # buy, plus a fired crypto pattern -- the behaviour before this existed, so
+    # an unset key changes nothing. "deep" is deep value alone: the strong buys
+    # that also clear `deep_value.margin`.
+    #
+    # Deliberately the phone only. The GitHub issue and the webhook still carry
+    # every strong buy, and the ledger still records them, so raising the bar
+    # here makes the phone quieter without making anything disappear.
+    #
+    # Note what "deep" does to crypto: nothing unvalued can ever be deep value,
+    # because the tier is defined by a fair value and crypto has none. So under
+    # "deep" crypto stops ringing the phone altogether. That is the rule doing
+    # what it says, not an oversight -- see `DeepValueConfig`.
+    push_tier: str = "strong"
+
+    def rings_for(self, kind: str) -> bool:
+        """Whether this verdict clears the phone's bar at all.
+
+        `kind` is the notifier's ledger kind: "deep", "strong" or "pattern".
+        Under "deep" only deep value rings; under "strong" everything that was
+        announced before the tier existed still does.
+        """
+        return self.push_tier != "deep" or kind == "deep"
 
     def pushes(self, horizon_key: str, markets: tuple[str, ...] = ()) -> bool:
         """Whether this signal may interrupt someone.
@@ -286,6 +309,44 @@ class NotifyConfig:
         if not self.push_markets:
             return True
         return any(m in self.push_markets for m in markets)
+
+
+PUSH_TIERS = ("strong", "deep")
+
+
+@dataclass(frozen=True)
+class DeepValueConfig:
+    """The tier above strong buy: a strong buy with far more headroom.
+
+    Measured exactly the way every horizon's margin already is --
+    `price * (1 + margin) < fair_value` -- so 0.50 means fair value at least 50%
+    above the price, the same reading as the "30% clear" the daily chart
+    prints. Not "price at half of fair value", which would be a margin of 1.00.
+    The two were measured before choosing and differ by a factor of ten on the
+    daily chart (69 historical strong buys against 5), so the convention is
+    stated here rather than left to be guessed from the number.
+
+    Applied as `max(horizon.margin, margin)`, so deep value can never be looser
+    than the strong buy it is a subset of. One consequence follows directly:
+    the weekly chart's own margin is already 0.50, so on 1w every strong buy is
+    also deep value. That is the rule doing what it says.
+
+    Equities only. The tier is defined by a fair value, and an unvalued ticker
+    has none -- crypto is graded on a drawdown that is not a valuation, and
+    stretching "50% below fair value" over it would make the badge mean two
+    unrelated things.
+    """
+
+    enabled: bool = True
+    margin: float = 0.50
+
+    @property
+    def margin_pct(self) -> str:
+        return f"{self.margin:.0%}"
+
+    def margin_for(self, horizon) -> float:
+        """The bar this horizon's deep value has to clear."""
+        return max(horizon.margin, self.margin)
 
 
 @dataclass(frozen=True)
@@ -406,6 +467,7 @@ DEFAULT_SELECTIONS = (
     dict(key="4d-all",     label="4h+1d · Every buy",      entry="all",    horizons=["4h", "1d"]),
     dict(key="14d-strong", label="1h+4h+1d · Strong only", entry="strong", horizons=["1h", "4h", "1d"]),
     dict(key="14d-all",    label="1h+4h+1d · Every buy",   entry="all",    horizons=["1h", "4h", "1d"]),
+    dict(key="4d-deep",    label="4h+1d · Deep value only", entry="deep",  horizons=["4h", "1d"]),
 )
 
 
@@ -422,6 +484,7 @@ class Config:
     notify: NotifyConfig = field(default_factory=lambda: NotifyConfig())
     strategies: StrategiesConfig = field(default_factory=lambda: StrategiesConfig())
     crypto: CryptoConfig = field(default_factory=lambda: CryptoConfig())
+    deep_value: DeepValueConfig = field(default_factory=lambda: DeepValueConfig())
     source_path: Path = field(default=DEFAULT_CONFIG)
 
     def ticker(self, symbol: str) -> Ticker:
@@ -585,6 +648,7 @@ def load_config(path: str | Path | None = None) -> Config:
     notify = _load_notify(raw.get("notify", {}) or {}, horizons)
     strategies = _load_strategies(raw.get("strategies", None))
     crypto = _load_crypto(raw.get("crypto", {}) or {})
+    deep_value = _load_deep_value(raw.get("deep_value", {}) or {})
 
     return Config(
         tickers=tickers,
@@ -592,6 +656,7 @@ def load_config(path: str | Path | None = None) -> Config:
         notify=notify,
         strategies=strategies,
         crypto=crypto,
+        deep_value=deep_value,
         rsi=rsi,
         signal=signal,
         storage=storage,
@@ -608,7 +673,7 @@ def _load_strategies(raw) -> StrategiesConfig:
     An omitted block gives the defaults; an explicitly empty one gives none,
     which is how the leaderboard is turned off without deleting the code.
     """
-    from .strategies import ALL_BUYS, STRONG_ONLY, ExitRule, Selection
+    from .strategies import ALL_BUYS, DEEP_ONLY, STRONG_ONLY, ExitRule, Selection
 
     if raw is None:
         raw = {"exits": DEFAULT_EXITS, "selections": DEFAULT_SELECTIONS}
@@ -676,10 +741,10 @@ def _load_strategies(raw) -> StrategiesConfig:
             raise ValueError(f"duplicate selection key {key!r}")
         seen.add(key)
         entry = str(item["entry"])
-        if entry not in (STRONG_ONLY, ALL_BUYS):
+        if entry not in (DEEP_ONLY, STRONG_ONLY, ALL_BUYS):
             raise ValueError(
-                f"selection {key!r}: entry is {STRONG_ONLY!r} or {ALL_BUYS!r}, "
-                f"got {entry!r}"
+                f"selection {key!r}: entry is {DEEP_ONLY!r}, {STRONG_ONLY!r} or "
+                f"{ALL_BUYS!r}, got {entry!r}"
             )
         horizons = tuple(str(h) for h in (item["horizons"] or ()))
         if not horizons:
@@ -771,10 +836,41 @@ def _load_notify(raw: dict, horizons) -> NotifyConfig:
                 f"{', '.join(MARKETS)}"
             )
 
+    # And again: a typo like `push_tier: deeep` must not quietly fall back to
+    # ringing for every strong buy, which is the thing it was set to stop.
+    tier = str(raw.get("push_tier", "strong")).strip().lower()
+    if tier not in PUSH_TIERS:
+        raise ValueError(
+            f"notify.push_tier is {tier!r} — expected one of {', '.join(PUSH_TIERS)}"
+        )
+
     return NotifyConfig(
         push_horizons=tuple(dict.fromkeys(keys)),
         push_markets=tuple(dict.fromkeys(markets)),
+        push_tier=tier,
     )
+
+
+def _load_deep_value(raw: dict) -> DeepValueConfig:
+    """Read the `deep_value:` block.
+
+    Unknown keys are refused for the reason every other block refuses them: a
+    `margin_pct: 50` would leave the default in force while the file appeared
+    to say something else, and this number decides what rings a phone.
+    """
+    unknown = set(raw) - {"enabled", "margin"}
+    if unknown:
+        raise ValueError(
+            f"deep_value has unknown key(s) {', '.join(sorted(unknown))} — "
+            f"valid: enabled, margin"
+        )
+    margin = float(raw.get("margin", DeepValueConfig.margin))
+    if not 0 < margin < 10:
+        raise ValueError(
+            f"deep_value.margin is {margin} — a fraction, so 0.50 for "
+            f"fair value 50% above the price"
+        )
+    return DeepValueConfig(enabled=bool(raw.get("enabled", True)), margin=margin)
 
 
 def _load_scoring(raw: dict) -> ScoringConfig:

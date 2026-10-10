@@ -65,17 +65,23 @@ def send_webhook(message: str) -> bool:
 
 
 def format_strong_buy(symbol: str, discount,  price, fair_value, currency: str,
-                horizon, threshold: float, url: str) -> str:
+                horizon, threshold: float, url: str, deep: bool = False) -> str:
     """A newly fired strong buy, as a line worth interrupting someone for.
 
     Kept short on purpose. This is a push notification, not the dashboard --
     it needs to say which stock, how cheap, and where to look.
+
+    `deep` swaps the headline for the tier above. The phone is where the two
+    must not blur: a push is read in three seconds, so if it said "strong buy"
+    for both, the one tier that is allowed to ring would look like the one
+    that is not.
     """
     money = f"{price:,.2f}" if price is not None else "?"
     fair = f"{fair_value:,.2f}" if fair_value is not None else "?"
     ccy = "" if currency == "USD" else f" {currency}"
+    headline = "DEEP VALUE 💎" if deep else "STRONG BUY 🚀"
     return "\n".join([
-        f"STRONG BUY 🚀 — {symbol}"
+        f"{headline} — {symbol}"
         + (f"  ({discount * 100:.0f}% below fair value)" if discount is not None else ""),
         f"  Second cross of {threshold:g} within the last {horizon.fresh_label}"
         f" on the {horizon.label} chart",
@@ -112,9 +118,11 @@ def format_pattern_buy(symbol: str, price, currency: str, horizon,
     ])
 
 
-def issue_title(symbol: str, discount, horizon) -> str:
+def issue_title(symbol: str, discount, horizon, deep: bool = False) -> str:
     """One line, because this is what lands in the email subject."""
     gap = f" — {discount * 100:.0f}% below fair value" if discount is not None else ""
+    if deep:
+        return f"💎 {symbol} deep value on the {horizon.label} chart{gap}"
     return f"🚀 {symbol} strong buy on the {horizon.label} chart{gap}"
 
 

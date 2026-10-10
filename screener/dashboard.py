@@ -75,6 +75,12 @@ class Row:
     # Shadow only: it ranks and explains, and decides nothing -- see
     # `screener.scoring.SHADOW`.
     conviction: object | None = None
+    # The up2 dates of buy patterns that are deep value: strong, and with fair
+    # value at least `deep_value.margin` above the price. Computed in `_collect`,
+    # which holds the config this needs, rather than here, which does not -- and
+    # a set rather than a flag so the notifier can tell *which* fresh pattern
+    # qualified. Empty for crypto, which has no fair value to be deep against.
+    deep_dates: frozenset = frozenset()
 
     @property
     def suspended(self) -> bool:
@@ -240,6 +246,17 @@ class Row:
         return self.drawdown_gate
 
     @property
+    def deep(self) -> bool:
+        """A live strong buy with far more headroom than the horizon demands.
+
+        The tier above the rocket. See `config.DeepValueConfig` for how the
+        margin is measured and why crypto can never earn it.
+        """
+        return bool(self.deep_dates) and any(
+            s.fired and s.up2_date in self.deep_dates for s in self.buys
+        )
+
+    @property
     def strong(self) -> bool:
         """Pattern fired and every known grading factor backs it up.
 
@@ -269,6 +286,8 @@ class Row:
         # enough that acting on it is a coin flip rather than the model's edge.
         if self.suspended:
             return "suspended"
+        if self.deep:
+            return "deep"
         if self.strong:
             return "strong"
         if self.fired:
@@ -488,6 +507,7 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
                 horizon=horizon,
                 earnings=_window_for(ticker.symbol, releases, sessions),
                 rule_one=readings.get(ticker.symbol),
+                deep_dates=_deep_dates(sigs, ticker, config, horizon),
             )
         )
         rows[-1] = replace(rows[-1], conviction=_conviction(rows[-1], config, horizon))
@@ -498,9 +518,9 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
     # interesting: it is a real pattern you are being told to wait on, so it
     # should be findable without being led with.
     order = {
-        "strong": 0, "signal": 1, "signal_checked": 2,
-        "sell_strong": 3, "sell": 4, "suspended": 5, "rejected": 6,
-        "oversold": 7, "watch": 8, "neutral": 9, "nodata": 10,
+        "deep": 0, "strong": 1, "signal": 2, "signal_checked": 3,
+        "sell_strong": 4, "sell": 5, "suspended": 6, "rejected": 7,
+        "oversold": 8, "watch": 9, "neutral": 10, "nodata": 11,
     }
     # Within a state, the second valuation ranks but never gates. The rocket
     # category currently holds Rule #1 scores from 2 to 10 and treats them
@@ -512,6 +532,28 @@ def _collect(store: Store, config: Config, horizon=None) -> list[Row]:
         r.rsi if r.rsi is not None else 999,
     ))
     return rows
+
+
+def _deep_dates(signals, ticker, config: Config, horizon) -> frozenset:
+    """The up2 dates of this ticker's live buys that are deep value.
+
+    The strong-buy test, re-run at `deep_value.margin_for(horizon)` against the
+    price and fair value stored on the signal -- which `_rescore_signals` keeps
+    current, so this judges exactly what the strong verdict on the same card
+    judges, with a wider margin. Earnings growth still vetoes, because deep
+    value is a strong buy first.
+    """
+    if not ticker.valued or not config.deep_value.enabled:
+        return frozenset()
+    margin = config.deep_value.margin_for(horizon)
+    return frozenset(
+        s.up2_date for s in signals
+        if s.direction == BUY and s.fired
+        and is_strong(
+            valuation_passes(s.price, s.fair_value, config.signal, margin),
+            (s.earnings_growth_known, s.earnings_growth_pass),
+        )
+    )
 
 
 def _rule_one_rank(row: Row) -> int:
@@ -746,6 +788,7 @@ def _card(row: Row, config: Config, horizon) -> str:
     ccy = "" if row.currency == "USD" else f' <span class="ccy">{html.escape(row.currency)}</span>' 
 
     pill_label = {
+        "deep": "Deep value 💎",
         "strong": "Strong buy 🚀",
         "signal": "Buy signal",
         "signal_checked": "Buy signal",
@@ -804,6 +847,11 @@ def _card(row: Row, config: Config, horizon) -> str:
         verdict = f"{upside:+.0f}% to fair value"
         gate_class = "pass" if passed else "fail"
         age_text, age_class = _freshness(val)
+        deep_note = (
+            f", and clears the "
+            f"{config.deep_value.margin_for(horizon):.0%} deep-value bar"
+            if row.deep else ""
+        )
         valuation_block = f"""
         <dl class="valuation {gate_class}">
           <div><dt>Fair value</dt><dd>{val.fair_value:,.2f}</dd></div>
@@ -811,7 +859,7 @@ def _card(row: Row, config: Config, horizon) -> str:
           <div><dt>Verdict</dt><dd>{verdict}</dd></div>
         </dl>
         <p class="provenance{age_class}">{age_text} · needs {horizon.margin_pct}
-           headroom on the {horizon.label} chart.</p>"""
+           headroom on the {horizon.label} chart{deep_note}.</p>"""
     elif row.fired or row.sell_fired:
         side = "sell" if row.sell_fired and not row.fired else "buy"
         valuation_block = f"""
@@ -1142,6 +1190,12 @@ def _aggregates(rows: list[Row], horizon, threshold: float, conviction: bool) ->
         f"<dd class=\"{'hot' if sells else ''}\">{sells}</dd></div>",
     ]
     if conviction:
+        # Only where it can be non-zero: deep value needs a fair value, so on
+        # the crypto book the tile would read a permanent 0 -- the same reason
+        # the conviction tile is withheld there.
+        deep = sum(1 for r in rows if r.deep)
+        tiles.insert(4, f"<div><dt>Deep 💎</dt>"
+                        f"<dd class=\"{'deep' if deep else ''}\">{deep}</dd></div>")
         patterns = sum(len(r.signals) for r in rows)
         high = sum(1 for r in rows
                    if r.conviction is not None and r.conviction.score >= GREEN_AT)
@@ -1158,6 +1212,7 @@ def _aggregates(rows: list[Row], horizon, threshold: float, conviction: bool) ->
 def _stock_book(rows: list[Row], config: Config, horizon) -> str:
     """Everything with a fair value behind it, and the rules that grade it."""
     threshold = config.rsi.threshold
+    deep_pct = f"{config.deep_value.margin_for(horizon):.0%}"
     markets = tuple(m for m in MARKETS if any(m in r.markets for r in rows))
     tabs = '<label for="mk-all">All</label>' + "".join(
         f'<label for="mk-{m}">{html.escape(MARKET_LABELS[m])}</label>'
@@ -1169,8 +1224,9 @@ def _stock_book(rows: list[Row], config: Config, horizon) -> str:
     <h2 class="book-title">Stocks</h2>
     <p class="book-rule">Graded against <strong>Morningstar's fair value</strong>.
        A price at least {horizon.margin_pct} below it confirms the pattern and
-       earns the rocket; shrinking earnings veto it. {len(rows)} names, and this
-       timeframe suggests {horizon.leverage}x.</p>
+       earns the rocket 🚀; at {deep_pct} it is <strong>deep value 💎</strong>,
+       the only tier that rings the phone. Shrinking earnings veto both.
+       {len(rows)} names, and this timeframe suggests {horizon.leverage}x.</p>
   </div>
   {_aggregates(rows, horizon, threshold, conviction=True)}
   {_deal_of_the_day(rows, horizon, threshold)}
@@ -1392,6 +1448,7 @@ _CSS = """
   --crimson:    #A8231B;
   --green:      #14624A;
   --green-soft: #3F9A72;
+  --deep:       #0A5C6B;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
   --warn:       #8A6100;
@@ -1412,6 +1469,7 @@ _CSS = """
     --crimson:    #E0736A;
     --green:      #4FBE92;
     --green-soft: #8FD9B6;
+    --deep:       #5CC8D6;
     --line:       #6FB3E0;
     --band:       rgba(224, 115, 106, .10);
   --warn:       #D9A441;
@@ -1432,6 +1490,7 @@ _CSS = """
   --crimson:    #E0736A;
   --green:      #4FBE92;
   --green-soft: #8FD9B6;
+  --deep:       #5CC8D6;
   --line:       #6FB3E0;
   --band:       rgba(224, 115, 106, .10);
   --warn:       #D9A441;
@@ -1451,6 +1510,7 @@ _CSS = """
   --crimson:    #A8231B;
   --green:      #14624A;
   --green-soft: #3F9A72;
+  --deep:       #0A5C6B;
   --line:       #0E4C75;
   --band:       rgba(168, 35, 27, .07);
   --warn:       #8A6100;
@@ -1593,6 +1653,20 @@ h1 {
 }
 
 .card.state-strong   { border-top: 3px solid var(--green); }
+/* Deep value: the tier above the rocket. A heavier rule and a filled pill in
+   its own colour, so it reads as a different verdict rather than a stronger
+   shade of the same one -- the reader should not have to compare two greens
+   to know which card is the rare one. */
+.card.state-deep {
+  border-top: 4px solid var(--deep);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--deep) 35%, transparent), var(--shadow);
+}
+.state-deep .pill {
+  color: var(--card);
+  background: var(--deep);
+  border-color: var(--deep);
+}
+.aggregates dd.deep { color: var(--deep); font-weight: 700; }
 /* Buy signals are the lighter green; a confirmed one (state-strong, above)
    keeps the dark saturated green. Same colour family on purpose -- the two
    differ in conviction, not in kind, and blue read as a third category. */
@@ -2097,8 +2171,13 @@ input[name="asset"] { position: absolute; opacity: 0; pointer-events: none; }
   .book .aggregates { grid-template-columns: repeat(3, 1fr); }
   .asset-tabs { max-width: none; }
 }
+/* Nine tiles on the stocks book and six on the crypto one: both divide by
+   three and only one divides by two, so the strip stays three wide on a phone
+   rather than stranding a tile on a row of its own. */
 @media (max-width: 480px) {
-  .book .aggregates { grid-template-columns: repeat(2, 1fr); }
+  .book .aggregates { grid-template-columns: repeat(3, 1fr); }
+  .book .aggregates > div { padding: 7px 8px; }
+  .book .aggregates dt { font-size: 9px; letter-spacing: .06em; }
 }
 
 .market-tabs {

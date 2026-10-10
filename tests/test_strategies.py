@@ -199,7 +199,7 @@ def test_compare_orders_by_mean_not_hit_rate():
 def test_the_defaults_cross_every_exit_with_every_selection():
     config = _load_strategies(None)
     assert len(config.variants) == len(config.exits) * len(config.selections)
-    assert len(config.variants) == 42, "7 exit rules x 6 selections"
+    assert len(config.variants) == 49, "7 exit rules x 7 selections"
 
 
 def test_an_empty_block_turns_the_leaderboard_off():

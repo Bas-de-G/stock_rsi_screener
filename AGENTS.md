@@ -320,6 +320,40 @@ current header on open and recovers the values positionally — which works only
 because every column ever added went in *before* `schema` and `extra`. Keep
 those two last.
 
+**Deep value 💎 is a strong buy with a wider margin, and nothing more.** The
+test is `is_strong` re-run at `deep_value.margin_for(horizon)`, which is
+`max(horizon.margin, deep_value.margin)` — so it can never be looser than the
+strong buy it extends, and the three entry bars (every buy ⊃ strong ⊃ deep)
+nest. The margin is measured the way every horizon margin already is,
+`price × (1 + margin) < fair_value`: 0.50 means fair value 50% *above* the price,
+not "price at half of fair value" (that would be 1.00). The two readings were
+measured before choosing and differ tenfold on the daily chart — 69 historical
+strong buys against 5 — so if you change the number, check which one you mean.
+
+Consequences worth knowing:
+
+- **On 1w deep value equals strong buy.** The weekly margin is already 0.50.
+- **Crypto can never be deep value.** The tier is defined by a fair value and
+  an unvalued ticker has none; `_deep_dates` returns empty for it.
+- **It is the only thing that rings the phone** under `notify.push_tier: deep`.
+  Strong buys still open the GitHub issue and hit the webhook, and the ledger
+  still records them — only the phone is quieter. Crypto stops ringing under
+  `deep`, because it cannot qualify; `push_tier: strong` restores the old
+  behaviour exactly.
+- **Its own ledger kind, `deep`.** A strong buy that later becomes deep value
+  (a fair value re-scraped higher) is announced again as deep. That escalation
+  is news, and under `deep` it is the only version of the news that rings.
+- **Its own journal verdict.** `verdict_for` records `deep`, because the record
+  must say what the page said. `deep` ⊂ `strong`, so anything counting strong
+  buys in `recommendations.csv` wants `verdict in ("strong", "deep")`.
+- **Its historical leaderboard rows are the most hindsight-prone on the page.**
+  Membership is judged against today's fair value, and analysts tend to raise a
+  fair value after a rally — so the entries that went on to win look the most
+  discounted in hindsight. When the tier shipped, `Hold 60d · 4h+1d · Deep value
+  only` ranked first of 49 at +15.6% over 280 trades while plain strong buys on
+  the same charts were negative on every exit rule. That gap is the kind of
+  result to distrust until `recommendations.csv` confirms it.
+
 **The phone filter is not the dedupe.** `notify.push_horizons` gates the ntfy
 push only; the webhook and the GitHub issue still carry every timeframe, and a
 held signal is still written to `notifications.json`. The ledger tracks the

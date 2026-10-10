@@ -995,6 +995,30 @@ notify:
   # the once-per-pattern ledger both still apply.
   push_markets: [sp500, nasdaq, europe, asia, penny, crypto]
 
+  # Which verdict rings the phone at all. `deep` = deep value 💎 only — the
+  # strong buys whose fair value also sits at least `deep_value.margin` above
+  # the price. `strong` = every strong buy plus crypto patterns, which is what
+  # this file did before the setting existed.
+  #
+  # Phone only, like the two filters above: the GitHub issue and the webhook
+  # still carry every strong buy, so a quieter phone loses nothing.
+  #
+  # Under `deep`, crypto no longer rings, because an asset with no fair value
+  # can never be deep value. The `crypto` entry in push_markets above is left in
+  # so that switching back to `strong` restores the old behaviour unchanged.
+  push_tier: deep
+
+# The tier above strong buy: a strong buy with far more headroom.
+#
+# Measured exactly like every horizon's margin below — fair value at least
+# this far ABOVE the price — so 0.50 here is the same reading as the "30%" the
+# daily chart prints, just wider. On the weekly chart the margin is already
+# 0.50, so there every strong buy is also deep value.
+#
+# Equities only: the tier is defined by a fair value, and crypto has none.
+deep_value:
+  margin: 0.50
+
 # How a crypto signal is graded, in place of the fair value an equity gets.
 #
 # Two legs, and they must BOTH pass. That is the point: a single "how far below
@@ -1071,6 +1095,9 @@ strategies:
     - {key: 4d-all,     label: "4h+1d · Every buy",      entry: all,    horizons: [4h, 1d]}
     - {key: 14d-strong, label: "1h+4h+1d · Strong only", entry: strong, horizons: [1h, 4h, 1d]}
     - {key: 14d-all,    label: "1h+4h+1d · Every buy",   entry: all,    horizons: [1h, 4h, 1d]}
+    # Only deep value, on exactly the timeframes that ring the phone — so this
+    # row answers "what if I had bought every deep value I was alerted to".
+    - {key: 4d-deep,    label: "4h+1d · Deep value only", entry: deep,  horizons: [4h, 1d]}
 
 scoring:
   # How much each factor counts towards the 1–10 conviction score on each card.

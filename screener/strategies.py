@@ -61,7 +61,9 @@ TARGET = "target"      # take-profit hit first
 STOPPED = "stopped"    # stop-loss hit first
 TIMEOUT = "timeout"    # neither, closed at the end of the window
 
-# Entry filters.
+# Entry filters, strictest first. Deep value is a subset of strong, which is a
+# subset of every buy, so the three selections nest rather than overlap.
+DEEP_ONLY = "deep"
 STRONG_ONLY = "strong"
 ALL_BUYS = "all"
 
@@ -116,13 +118,15 @@ class Selection:
 
     key: str
     label: str
-    entry: str                      # STRONG_ONLY | ALL_BUYS
+    entry: str                      # DEEP_ONLY | STRONG_ONLY | ALL_BUYS
     horizons: tuple[str, ...]
 
     def takes(self, trade) -> bool:
         if trade.horizon not in self.horizons:
             return False
         if self.entry == STRONG_ONLY and not trade.strong:
+            return False
+        if self.entry == DEEP_ONLY and not trade.deep:
             return False
         return True
 
@@ -164,6 +168,10 @@ class Trade:
     # on its own bar rather than read from the stored flag -- see
     # `historical._retrospective_strong`.
     strong: bool = False
+    # And whether it cleared the deep-value bar too. Implies `strong`; kept as
+    # its own flag rather than recomputed so the leaderboard filters without
+    # needing a fair value in hand.
+    deep: bool = False
 
     @property
     def won(self) -> bool:
@@ -179,6 +187,7 @@ def walk(
     daily_closes,
     rule: ExitRule,
     strong: bool = False,
+    deep: bool = False,
 ) -> Trade | None:
     """Take one signal to its exit, bar by bar, in date order.
 
@@ -209,15 +218,15 @@ def walk(
         ret = _signed(entry, close, direction)
         if stop is not None and ret <= -stop:
             return Trade(symbol, horizon, direction, up2_date, rule.key,
-                         entry, close, ret, held, STOPPED, strong)
+                         entry, close, ret, held, STOPPED, strong, deep)
         if take is not None and ret >= take:
             return Trade(symbol, horizon, direction, up2_date, rule.key,
-                         entry, close, ret, held, TARGET, strong)
+                         entry, close, ret, held, TARGET, strong, deep)
 
     close = window[-1][1]
     return Trade(symbol, horizon, direction, up2_date, rule.key,
                  entry, close, _signed(entry, close, direction),
-                 len(window), TIMEOUT, strong)
+                 len(window), TIMEOUT, strong, deep)
 
 
 def summarise(trades) -> dict:

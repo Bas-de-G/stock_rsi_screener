@@ -412,11 +412,17 @@ dashboard: {{output: "{tmp_path / 't.html'}", chart_days: 90}}
     return load_config(path)
 
 
-def _seed_signal(store, symbol, fair_value=1000.0, confirms=True):
+def _seed_signal(store, symbol, fair_value=70.0, confirms=True):
     """A fired buy on the daily chart, with the valuation gate set explicitly.
 
     `confirms` is passed rather than derived so a test can produce the case
     that matters here: a fired pattern whose Morningstar gate *failed*.
+
+    Priced at 50 against a fair value of 70: 40% headroom, which clears the
+    daily chart's 30% strong-buy margin and stops short of the 50% deep-value
+    one. These tests are about Rule #1 never changing a verdict, so the verdict
+    they start from has to be plain "strong" -- the old default of 1000 was a
+    20x discount and quietly made every one of them deep value instead.
     """
     import datetime as dt
 

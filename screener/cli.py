@@ -1508,7 +1508,15 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
                     (s.earnings_growth_known, s.earnings_growth_pass),
                 )
             ]
-            if strong:
+            # Deep value first: the strong buys that also clear the wider
+            # margin. Its own ledger kind, so a strong buy that later *becomes*
+            # deep value -- a fair value re-scraped higher, say -- is announced
+            # again as deep. That escalation is news, and with the phone set to
+            # ring for deep value alone it is the only announcement that rings.
+            deep = [s for s in strong if s.up2_date in row.deep_dates]
+            if deep:
+                kind, fresh = "deep", deep
+            elif strong:
                 kind, fresh = "strong", strong
             elif not row.valued:
                 # A crypto pattern that fired without clearing the drawdown
@@ -1549,12 +1557,13 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             )
             page = "index.html" if horizon.key == DEFAULT_HORIZON else f"{horizon.key}.html"
             url = f"{config.dashboard.site_url}/{page}" if config.dashboard.site_url else page
-            if kind == "strong":
+            if kind in ("deep", "strong"):
                 message = format_strong_buy(
                     row.symbol, discount, best.price, best.fair_value,
                     row.currency, horizon, config.rsi.threshold, url,
+                    deep=kind == "deep",
                 )
-                title = issue_title(row.symbol, discount, horizon)
+                title = issue_title(row.symbol, discount, horizon, deep=kind == "deep")
             else:
                 message = format_pattern_buy(
                     row.symbol, best.price, row.currency, horizon,
@@ -1570,7 +1579,12 @@ def _notify_new_strong_buys(store: Store, config: Config) -> int:
             # only one that interrupts. The issue and the webhook still carry
             # every horizon and every market, so nothing is lost -- it just
             # waits to be read. See `NotifyConfig`.
-            if config.notify.pushes(horizon.key, row.markets):
+            if not config.notify.rings_for(kind):
+                # The issue and the webhook below still carry it, and the
+                # ledger still records it -- only the phone stays quiet.
+                print(f"  (no push — {kind.replace('pattern', 'crypto pattern')}, "
+                      f"and the phone only rings for deep value)")
+            elif config.notify.pushes(horizon.key, row.markets):
                 if send_push(title, message, url):
                     print("  (pushed to phones)")
             elif horizon.key not in config.notify.push_horizons:
@@ -1676,7 +1690,7 @@ def cmd_evaluate(config: Config, args) -> int:
     whole back catalogue -- there is no need to have been collecting anything
     special, because the prices were always there.
     """
-    from .historical import _retrospective_strong
+    from .historical import _retrospective_deep, _retrospective_strong
     from .outcomes import FORWARD_BARS, forward_outcomes
     from .strategies import walk
 
@@ -1734,6 +1748,12 @@ def cmd_evaluate(config: Config, args) -> int:
                         valuation.fair_value if valuation else None,
                         config, horizon.margin,
                     )
+                    # The tier above it, judged the same way at a wider margin.
+                    deep = strong and _retrospective_deep(
+                        signal, entry,
+                        valuation.fair_value if valuation else None,
+                        config, horizon,
+                    )
 
                     # The same signal under each exit rule. Walked here rather
                     # than derived later from max_gain/max_drawdown, which
@@ -1742,7 +1762,7 @@ def cmd_evaluate(config: Config, args) -> int:
                         trade = walk(
                             ticker.symbol, horizon.key, signal.direction,
                             signal.up2_date, entry, daily[ticker.symbol], rule,
-                            strong=strong,
+                            strong=strong, deep=deep,
                         )
                         if trade is not None:
                             trades.append(trade)
