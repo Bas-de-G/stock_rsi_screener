@@ -229,8 +229,8 @@ BA:
   checked: '2026-10-12'
   source: scraped
 BAB:
-  fair_value: 1085.0
-  checked: '2026-09-03'
+  fair_value: 991.0
+  checked: '2026-10-13'
   source: scraped
 BAC:
   fair_value: 66.0
@@ -893,8 +893,8 @@ HSIC:
   checked: '2026-08-28'
   source: scraped
 HUBN:
-  fair_value: 152.97
-  checked: '2026-08-26'
+  fair_value: 155.15
+  checked: '2026-10-13'
   source: scraped
 HUM:
   fair_value: 350.0
@@ -1450,7 +1450,7 @@ PLX:
   source: scraped
 PM:
   fair_value: 185.0
-  checked: '2026-08-26'
+  checked: '2026-10-13'
   source: scraped
 PNC:
   fair_value: 253.0
@@ -1967,6 +1967,10 @@ YUM:
 YUMC:
   fair_value: 77.0
   checked: '2026-09-10'
+  source: scraped
+ZTE:
+  fair_value: 24.41
+  checked: '2026-10-13'
   source: scraped
 ZTO:
   fair_value: 23.0
