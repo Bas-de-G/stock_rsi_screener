@@ -718,7 +718,7 @@ F:
   source: scraped
 FANG:
   fair_value: 220.0
-  checked: '2026-08-28'
+  checked: '2026-10-14'
   source: scraped
 FAST:
   fair_value: 39.9
@@ -818,7 +818,7 @@ GLW:
   source: scraped
 GM:
   fair_value: 86.0
-  checked: '2026-08-26'
+  checked: '2026-10-14'
   source: scraped
 GOOGL:
   fair_value: 433.0
@@ -858,7 +858,7 @@ HEI:
   source: scraped
 HEIA:
   fair_value: 86.0
-  checked: '2026-08-18'
+  checked: '2026-10-14'
   source: scraped
 HFG:
   fair_value: 5.24
@@ -1685,8 +1685,8 @@ SPIE:
   checked: '2026-10-05'
   source: scraped
 SRE:
-  fair_value: 93.0
-  checked: '2026-08-26'
+  fair_value: 90.0
+  checked: '2026-10-14'
   source: scraped
 STE:
   fair_value: 244.0
