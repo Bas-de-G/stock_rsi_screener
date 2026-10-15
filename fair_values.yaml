@@ -396,6 +396,10 @@ CEG:
   fair_value: 332.09
   checked: '2026-09-08'
   source: scraped
+CHLIFE:
+  fair_value: 38.0
+  checked: '2026-10-15'
+  source: scraped
 CHPT:
   fair_value: 11.9
   checked: '2026-09-29'
@@ -466,7 +470,7 @@ COP:
   source: scraped
 COR:
   fair_value: 360.0
-  checked: '2026-08-26'
+  checked: '2026-10-15'
   source: scraped
 COST:
   fair_value: 770.0
@@ -846,7 +850,7 @@ H:
   source: scraped
 HCA:
   fair_value: 413.0
-  checked: '2026-08-20'
+  checked: '2026-10-15'
   source: scraped
 HD:
   fair_value: 325.0
@@ -1098,7 +1102,7 @@ LPX:
   source: scraped
 LRCX:
   fair_value: 310.0
-  checked: '2026-08-19'
+  checked: '2026-10-15'
   source: scraped
 LULU:
   fair_value: 255.0
@@ -1237,8 +1241,8 @@ MTZ:
   checked: '2026-09-01'
   source: scraped
 MU:
-  fair_value: 850.0
-  checked: '2026-08-19'
+  fair_value: 700.0
+  checked: '2026-10-15'
   source: scraped
 NCLH:
   fair_value: 25.0
