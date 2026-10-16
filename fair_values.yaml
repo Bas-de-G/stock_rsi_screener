@@ -806,7 +806,7 @@ GEHC:
   source: scraped
 GEV:
   fair_value: 1050.0
-  checked: '2026-08-19'
+  checked: '2026-10-16'
   source: scraped
 GILD:
   fair_value: 131.0
@@ -1178,11 +1178,11 @@ META:
   source: scraped
 MGM:
   fair_value: 48.0
-  checked: '2026-09-01'
+  checked: '2026-10-16'
   source: scraped
 MLM:
-  fair_value: 440.0
-  checked: '2026-08-28'
+  fair_value: 496.0
+  checked: '2026-10-16'
   source: scraped
 MLP:
   fair_value: 11.09
@@ -1273,8 +1273,8 @@ NIO:
   checked: '2026-09-29'
   source: scraped
 NKE:
-  fair_value: 94.0
-  checked: '2026-08-19'
+  fair_value: 44.0
+  checked: '2026-10-16'
   source: scraped
 NLY:
   fair_value: 20.66
@@ -1898,7 +1898,7 @@ VZ:
   source: scraped
 WDC:
   fair_value: 420.0
-  checked: '2026-08-19'
+  checked: '2026-10-16'
   source: scraped
 WELL:
   fair_value: 219.0
