@@ -166,7 +166,7 @@ AMX:
   source: scraped
 AMZN:
   fair_value: 300.0
-  checked: '2026-08-18'
+  checked: '2026-10-17'
   source: scraped
 ANET:
   fair_value: 230.0
@@ -577,8 +577,8 @@ DEZ:
   checked: '2026-10-12'
   source: scraped
 DG:
-  fair_value: 126.0
-  checked: '2026-08-27'
+  fair_value: 131.0
+  checked: '2026-10-17'
   source: scraped
 DGX:
   fair_value: 204.0
@@ -594,7 +594,7 @@ DHR:
   source: scraped
 DIS:
   fair_value: 125.0
-  checked: '2026-08-24'
+  checked: '2026-10-17'
   source: scraped
 DKS:
   fair_value: 200.0
@@ -1402,7 +1402,7 @@ PFGC:
   source: scraped
 PG:
   fair_value: 155.0
-  checked: '2026-08-04'
+  checked: '2026-10-17'
   source: scraped
 PGR:
   fair_value: 198.0
@@ -1715,6 +1715,10 @@ SW:
 SWK:
   fair_value: 121.54
   checked: '2026-10-12'
+  source: scraped
+SYK:
+  fair_value: 316.0
+  checked: '2026-10-17'
   source: scraped
 SYY:
   fair_value: 86.0
