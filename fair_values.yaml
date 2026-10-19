@@ -414,7 +414,7 @@ CHUGAI:
   source: scraped
 CI:
   fair_value: 354.0
-  checked: '2026-09-09'
+  checked: '2026-10-19'
   source: scraped
 CL:
   fair_value: 88.0
@@ -1246,7 +1246,7 @@ MU:
   source: scraped
 NCLH:
   fair_value: 25.0
-  checked: '2026-09-08'
+  checked: '2026-10-19'
   source: scraped
 NEE:
   fair_value: 88.0
@@ -1321,8 +1321,8 @@ NVO:
   checked: '2026-10-05'
   source: scraped
 NVS:
-  fair_value: 140.0
-  checked: '2026-09-08'
+  fair_value: 130.0
+  checked: '2026-10-19'
   source: scraped
 NXPI:
   fair_value: 310.0
@@ -1561,8 +1561,8 @@ RR:
   checked: '2026-10-10'
   source: scraped
 RRR:
-  fair_value: 57.62
-  checked: '2026-09-08'
+  fair_value: 55.52
+  checked: '2026-10-19'
   source: scraped
 RSG:
   fair_value: 208.0
@@ -1806,7 +1806,7 @@ TXN:
   source: scraped
 TXRH:
   fair_value: 133.0
-  checked: '2026-09-08'
+  checked: '2026-10-19'
   source: scraped
 UAL:
   fair_value: 102.0
