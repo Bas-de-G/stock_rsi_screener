@@ -461,8 +461,8 @@ COF:
   checked: '2026-09-29'
   source: scraped
 COO:
-  fair_value: 87.0
-  checked: '2026-09-08'
+  fair_value: 71.0
+  checked: '2026-10-27'
   source: scraped
 COP:
   fair_value: 126.0
@@ -514,7 +514,7 @@ CSX:
   source: scraped
 CTAS:
   fair_value: 200.0
-  checked: '2026-08-20'
+  checked: '2026-10-27'
   source: scraped
 CTPNV:
   fair_value: 17.03
@@ -554,7 +554,7 @@ DBK:
   source: scraped
 DD:
   fair_value: 165.0
-  checked: '2026-09-08'
+  checked: '2026-10-27'
   source: scraped
 DDOG:
   fair_value: 200.0
@@ -586,7 +586,7 @@ DGX:
   source: scraped
 DHI:
   fair_value: 150.0
-  checked: '2026-08-31'
+  checked: '2026-10-27'
   source: scraped
 DHR:
   fair_value: 247.0
@@ -599,6 +599,10 @@ DIS:
 DKS:
   fair_value: 192.0
   checked: '2026-10-19'
+  source: scraped
+DOV:
+  fair_value: 178.0
+  checked: '2026-10-27'
   source: scraped
 DOW:
   fair_value: 32.0
@@ -618,7 +622,7 @@ DTE:
   source: scraped
 DUK:
   fair_value: 131.0
-  checked: '2026-09-17'
+  checked: '2026-10-27'
   source: scraped
 DVA:
   fair_value: 165.0
@@ -645,8 +649,8 @@ EFX:
   checked: '2026-10-11'
   source: scraped
 EHC:
-  fair_value: 131.94
-  checked: '2026-08-27'
+  fair_value: 133.91
+  checked: '2026-10-27'
   source: scraped
 EIX:
   fair_value: 81.0
@@ -1054,7 +1058,7 @@ LCID:
   source: scraped
 LEN:
   fair_value: 120.0
-  checked: '2026-09-14'
+  checked: '2026-10-27'
   source: scraped
 LEVI:
   fair_value: 21.23
@@ -1250,7 +1254,7 @@ NCLH:
   source: scraped
 NEE:
   fair_value: 88.0
-  checked: '2026-09-17'
+  checked: '2026-10-27'
   source: scraped
 NEM:
   fair_value: 67.0
@@ -1486,7 +1490,7 @@ PROP:
   source: scraped
 PRX:
   fair_value: 72.0
-  checked: '2026-08-18'
+  checked: '2026-10-27'
   source: scraped
 PSX:
   fair_value: 188.0
@@ -1630,7 +1634,7 @@ SHOP:
   source: scraped
 SHW:
   fair_value: 340.0
-  checked: '2026-08-19'
+  checked: '2026-10-27'
   source: scraped
 SLB:
   fair_value: 55.0
@@ -1694,7 +1698,7 @@ SRE:
   source: scraped
 STE:
   fair_value: 244.0
-  checked: '2026-09-17'
+  checked: '2026-10-27'
   source: scraped
 STLA:
   fair_value: 10.0
@@ -1946,7 +1950,7 @@ WYNN:
   source: scraped
 XEL:
   fair_value: 74.0
-  checked: '2026-09-17'
+  checked: '2026-10-27'
   source: scraped
 XIAOMI:
   fair_value: 33.0
