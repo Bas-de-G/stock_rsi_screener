@@ -770,7 +770,7 @@ FLOW:
   source: scraped
 FME:
   fair_value: 67.0
-  checked: '2026-09-19'
+  checked: '2026-10-30'
   source: scraped
 FND:
   fair_value: 57.9
@@ -1477,8 +1477,8 @@ PONY:
   checked: '2026-10-10'
   source: scraped
 PPG:
-  fair_value: 120.0
-  checked: '2026-09-14'
+  fair_value: 125.0
+  checked: '2026-10-30'
   source: scraped
 PPIH:
   fair_value: 900.0
@@ -1753,8 +1753,8 @@ TJX:
   checked: '2026-10-08'
   source: scraped
 TKC:
-  fair_value: 5.82
-  checked: '2026-09-08'
+  fair_value: 5.68
+  checked: '2026-10-30'
   source: scraped
 TM:
   fair_value: 237.0
@@ -1818,7 +1818,7 @@ UAL:
   source: scraped
 UBER:
   fair_value: 76.0
-  checked: '2026-09-19'
+  checked: '2026-10-30'
   source: scraped
 UHS:
   fair_value: 212.0
