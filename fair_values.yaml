@@ -449,8 +449,8 @@ CNC:
   checked: '2026-10-08'
   source: scraped
 CNM:
-  fair_value: 60.0
-  checked: '2026-09-14'
+  fair_value: 58.13
+  checked: '2026-11-01'
   source: scraped
 COCO:
   fair_value: 53.53
@@ -977,8 +977,8 @@ JBHT:
   checked: '2026-10-08'
   source: scraped
 JCI:
-  fair_value: 129.0
-  checked: '2026-08-20'
+  fair_value: 143.0
+  checked: '2026-11-01'
   source: scraped
 JD:
   fair_value: 36.0
@@ -1337,8 +1337,8 @@ O:
   checked: '2026-10-10'
   source: scraped
 OC:
-  fair_value: 163.44
-  checked: '2026-09-01'
+  fair_value: 140.52
+  checked: '2026-11-01'
   source: scraped
 ODFL:
   fair_value: 156.0
@@ -1670,7 +1670,7 @@ SO:
   source: scraped
 SOLV:
   fair_value: 71.0
-  checked: '2026-08-28'
+  checked: '2026-11-01'
   source: scraped
 SON:
   fair_value: 55.33
