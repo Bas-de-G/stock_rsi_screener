@@ -158,7 +158,7 @@ AMRZ:
   source: scraped
 AMT:
   fair_value: 225.0
-  checked: '2026-09-25'
+  checked: '2026-11-04'
   source: scraped
 AMX:
   fair_value: 24.0
@@ -1418,7 +1418,7 @@ PH:
   source: scraped
 PHIA:
   fair_value: 35.0
-  checked: '2026-09-24'
+  checked: '2026-11-04'
   source: scraped
 PHM:
   fair_value: 126.88
