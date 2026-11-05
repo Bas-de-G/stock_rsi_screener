@@ -374,7 +374,7 @@ CAT:
   source: scraped
 CAVA:
   fair_value: 18.0
-  checked: '2026-09-10'
+  checked: '2026-11-05'
   source: scraped
 CB:
   fair_value: 314.0
@@ -722,7 +722,7 @@ EXO:
   source: scraped
 F:
   fair_value: 19.0
-  checked: '2026-09-14'
+  checked: '2026-11-05'
   source: scraped
 FANG:
   fair_value: 220.0
@@ -829,8 +829,8 @@ GM:
   checked: '2026-10-14'
   source: scraped
 GOOGL:
-  fair_value: 433.0
-  checked: '2026-08-18'
+  fair_value: 450.0
+  checked: '2026-11-05'
   source: scraped
 GPC:
   fair_value: 165.49
