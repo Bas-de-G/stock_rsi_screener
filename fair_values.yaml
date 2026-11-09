@@ -1497,8 +1497,8 @@ PSX:
   checked: '2026-11-09'
   source: scraped
 PTON:
-  fair_value: 6.32
-  checked: '2026-08-19'
+  fair_value: 7.88
+  checked: '2026-11-09'
   source: scraped
 PUM:
   fair_value: 40.5
