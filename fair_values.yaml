@@ -302,7 +302,7 @@ BMW:
   source: scraped
 BMY:
   fair_value: 70.0
-  checked: '2026-10-01'
+  checked: '2026-11-10'
   source: scraped
 BN:
   fair_value: 39.39
@@ -438,7 +438,7 @@ CME:
   source: scraped
 CMI:
   fair_value: 530.0
-  checked: '2026-10-01'
+  checked: '2026-11-10'
   source: scraped
 CMS:
   fair_value: 68.0
@@ -545,8 +545,8 @@ DAL:
   checked: '2026-10-19'
   source: scraped
 DASH:
-  fair_value: 205.0
-  checked: '2026-10-01'
+  fair_value: 228.0
+  checked: '2026-11-10'
   source: scraped
 DBK:
   fair_value: 25.5
@@ -797,8 +797,8 @@ GBLB:
   checked: '2026-10-08'
   source: scraped
 GD:
-  fair_value: 407.0
-  checked: '2026-10-01'
+  fair_value: 438.0
+  checked: '2026-11-10'
   source: scraped
 GE:
   fair_value: 347.0
@@ -1154,7 +1154,7 @@ MC:
   source: scraped
 MCD:
   fair_value: 270.0
-  checked: '2026-10-01'
+  checked: '2026-11-10'
   source: scraped
 MCK:
   fair_value: 930.0
@@ -1210,7 +1210,7 @@ MOZN:
   source: scraped
 MPC:
   fair_value: 236.0
-  checked: '2026-10-01'
+  checked: '2026-11-10'
   source: scraped
 MRK:
   fair_value: 143.0
@@ -1257,8 +1257,8 @@ NEE:
   checked: '2026-10-27'
   source: scraped
 NEM:
-  fair_value: 67.0
-  checked: '2026-10-01'
+  fair_value: 70.0
+  checked: '2026-11-10'
   source: scraped
 NFLX:
   fair_value: 80.0
@@ -1365,8 +1365,8 @@ ORA:
   checked: '2026-10-11'
   source: scraped
 ORCL:
-  fair_value: 220.0
-  checked: '2026-10-01'
+  fair_value: 195.0
+  checked: '2026-11-10'
   source: scraped
 ORK:
   fair_value: 105.18
@@ -1449,8 +1449,8 @@ PLTR:
   checked: '2026-10-10'
   source: scraped
 PLUG:
-  fair_value: 2.24
-  checked: '2026-10-01'
+  fair_value: 2.12
+  checked: '2026-11-10'
   source: scraped
 PLX:
   fair_value: 16.9
@@ -1761,8 +1761,8 @@ TM:
   checked: '2026-10-05'
   source: scraped
 TMO:
-  fair_value: 560.0
-  checked: '2026-10-01'
+  fair_value: 590.0
+  checked: '2026-11-10'
   source: scraped
 TMUS:
   fair_value: 235.0
