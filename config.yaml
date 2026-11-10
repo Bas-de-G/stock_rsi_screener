@@ -901,17 +901,11 @@ tickers:
   - {symbol: INCY,     tradingview: "NASDAQ:INCY",  morningstar: xnas/incy,   markets: [sp500, nasdaq]}  # RSI 31 · Incyte, biotech
 
   # --- Near RSI 30, November 2026 ----------------------------------------
-  # Thirty names between RSI 25 and 35 on 2026-11-10, same checks as the
+  # Seventeen names between RSI 25 and 35 on 2026-11-10, same checks as the
   # October batch: TradingView resolves it, Yahoo returns a year of bars, the
-  # two prices agree, and the company is not already held. Europe had almost
-  # nothing new near 30 -- the UK, French and Dutch names there are all held
-  # already -- so the batch leans US and Asia.
-  #
-  # Eight Tokyo and Hong Kong names looked 3-9% apart on the price check. That
-  # was the clock, not the listing: Yahoo's daily series had not yet added the
-  # session that closed hours earlier, and its hourly bars matched TradingView
-  # to the yen. Japan Tobacco's RSI 28 is real too -- it fell from 7,769 to
-  # 5,269 over two sessions, on both feeds.
+  # two prices agree, and the company is not already held. US and Europe only,
+  # by choice. Europe had almost nothing new near 30 -- the UK, French and
+  # Dutch names there are all held already -- so the batch is mostly US.
   #
   # Skipped on purpose: GOOGN/GOOGM (Alphabet depositary shares, already held
   # as GOOGL), SMCIP (the same for Super Micro), WES and PAA (partnerships),
@@ -937,23 +931,6 @@ tickers:
 
   # Europe
   - {symbol: RHM,      tradingview: "XETR:RHM",     morningstar: xetr/rhm,    yahoo: RHM.DE,   currency: EUR, markets: [europe]}  # RSI 34 · Rheinmetall, defence
-
-  # Japan
-  - {symbol: JT,       tradingview: "TSE:2914",     morningstar: xtks/2914,   yahoo: 2914.T,   currency: JPY, markets: [asia]}    # RSI 28 · Japan Tobacco
-  - {symbol: MURATA,   tradingview: "TSE:6981",     morningstar: xtks/6981,   yahoo: 6981.T,   currency: JPY, markets: [asia]}    # RSI 33 · Murata, components
-  - {symbol: ORIX,     tradingview: "TSE:8591",     morningstar: xtks/8591,   yahoo: 8591.T,   currency: JPY, markets: [asia]}    # RSI 32 · ORIX, financial services
-  - {symbol: FUJIKURA, tradingview: "TSE:5803",     morningstar: xtks/5803,   yahoo: 5803.T,   currency: JPY, markets: [asia]}    # RSI 26 · Fujikura, cables and fibre
-  - {symbol: SUMELEC,  tradingview: "TSE:5802",     morningstar: xtks/5802,   yahoo: 5802.T,   currency: JPY, markets: [asia]}    # RSI 31 · Sumitomo Electric
-  - {symbol: AJINOMOTO, tradingview: "TSE:2802",    morningstar: xtks/2802,   yahoo: 2802.T,   currency: JPY, markets: [asia]}    # RSI 28 · Ajinomoto, food and chip film
-  - {symbol: KYOCERA,  tradingview: "TSE:6971",     morningstar: xtks/6971,   yahoo: 6971.T,   currency: JPY, markets: [asia]}    # RSI 30 · Kyocera
-  - {symbol: KHI,      tradingview: "TSE:7012",     morningstar: xtks/7012,   yahoo: 7012.T,   currency: JPY, markets: [asia]}    # RSI 29 · Kawasaki Heavy Industries
-
-  # Hong Kong
-  - {symbol: LENOVO,   tradingview: "HKEX:992",     morningstar: xhkg/00992,  yahoo: 0992.HK,  currency: HKD, markets: [asia]}    # RSI 32 · Lenovo
-  - {symbol: HUATAI,   tradingview: "HKEX:6886",    morningstar: xhkg/06886,  yahoo: 6886.HK,  currency: HKD, markets: [asia]}    # RSI 33 · Huatai Securities
-  - {symbol: SITC,     tradingview: "HKEX:1308",    morningstar: xhkg/01308,  yahoo: 1308.HK,  currency: HKD, markets: [asia]}    # RSI 31 · SITC, container shipping
-  - {symbol: JXCOPPER, tradingview: "HKEX:358",     morningstar: xhkg/00358,  yahoo: 0358.HK,  currency: HKD, markets: [asia]}    # RSI 31 · Jiangxi Copper
-  - {symbol: ASMPT,    tradingview: "HKEX:522",     morningstar: xhkg/00522,  yahoo: 0522.HK,  currency: HKD, markets: [asia]}    # RSI 30 · ASMPT, chip equipment
 
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
