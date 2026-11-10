@@ -900,6 +900,38 @@ tickers:
   - {symbol: FICO,     tradingview: "NYSE:FICO",    morningstar: xnys/fico,   markets: [sp500]}   # RSI 31 · Fair Isaac
   - {symbol: INCY,     tradingview: "NASDAQ:INCY",  morningstar: xnas/incy,   markets: [sp500, nasdaq]}  # RSI 31 · Incyte, biotech
 
+  # --- Near RSI 30, November 2026 ----------------------------------------
+  # Seventeen names between RSI 25 and 35 on 2026-11-10, same checks as the
+  # October batch: TradingView resolves it, Yahoo returns a year of bars, the
+  # two prices agree, and the company is not already held. US and Europe only,
+  # by choice. Europe had almost nothing new near 30 -- the UK, French and
+  # Dutch names there are all held already -- so the batch is mostly US.
+  #
+  # Skipped on purpose: GOOGN/GOOGM (Alphabet depositary shares, already held
+  # as GOOGL), SMCIP (the same for Super Micro), WES and PAA (partnerships),
+  # and BMNR (an ether treasury, which is crypto exposure with no fair value).
+
+  # US
+  - {symbol: CVE,      tradingview: "NYSE:CVE",     morningstar: xnys/cve,    markets: [sp500]}   # RSI 31 · Cenovus Energy (Canadian, NYSE line)
+  - {symbol: NTRA,     tradingview: "NASDAQ:NTRA",  morningstar: xnas/ntra,   markets: [nasdaq]}  # RSI 31 · Natera, diagnostics
+  - {symbol: TER,      tradingview: "NASDAQ:TER",   morningstar: xnas/ter,    markets: [sp500, nasdaq]}  # RSI 34 · Teradyne, chip testing
+  - {symbol: TEAM,     tradingview: "NASDAQ:TEAM",  morningstar: xnas/team,   markets: [nasdaq]}  # RSI 25 · Atlassian
+  - {symbol: COIN,     tradingview: "NASDAQ:COIN",  morningstar: xnas/coin,   markets: [sp500, nasdaq]}  # RSI 33 · Coinbase
+  - {symbol: NTAP,     tradingview: "NASDAQ:NTAP",  morningstar: xnas/ntap,   markets: [sp500, nasdaq]}  # RSI 35 · NetApp
+  - {symbol: MCHP,     tradingview: "NASDAQ:MCHP",  morningstar: xnas/mchp,   markets: [sp500, nasdaq]}  # RSI 32 · Microchip Technology
+  - {symbol: CRWV,     tradingview: "NASDAQ:CRWV",  morningstar: xnas/crwv,   markets: [nasdaq]}  # RSI 35 · CoreWeave, AI cloud
+  - {symbol: RDDT,     tradingview: "NYSE:RDDT",    morningstar: xnys/rddt,   markets: [sp500]}   # RSI 30 · Reddit
+  - {symbol: SMCI,     tradingview: "NASDAQ:SMCI",  morningstar: xnas/smci,   markets: [sp500, nasdaq]}  # RSI 34 · Super Micro Computer
+  - {symbol: FFIV,     tradingview: "NASDAQ:FFIV",  morningstar: xnas/ffiv,   markets: [sp500, nasdaq]}  # RSI 25 · F5, networking
+  - {symbol: DINO,     tradingview: "NYSE:DINO",    morningstar: xnys/dino,   markets: [sp500]}   # RSI 33 · HF Sinclair, refining
+  - {symbol: CRCL,     tradingview: "NYSE:CRCL",    morningstar: xnys/crcl,   markets: [sp500]}   # RSI 32 · Circle, USDC issuer
+  - {symbol: NTNX,     tradingview: "NASDAQ:NTNX",  morningstar: xnas/ntnx,   markets: [nasdaq]}  # RSI 29 · Nutanix
+  - {symbol: FIS,      tradingview: "NYSE:FIS",     morningstar: xnys/fis,    markets: [sp500]}   # RSI 29 · Fidelity National Information Services
+  - {symbol: HALO,     tradingview: "NASDAQ:HALO",  morningstar: xnas/halo,   markets: [nasdaq]}  # RSI 29 · Halozyme, biotech
+
+  # Europe
+  - {symbol: RHM,      tradingview: "XETR:RHM",     morningstar: xetr/rhm,    yahoo: RHM.DE,   currency: EUR, markets: [europe]}  # RSI 34 · Rheinmetall, defence
+
   # ---- Crypto ---------------------------------------------------------
   # Top assets by market cap, from CoinGecko; RSI still comes from the same
   # TradingView batch request as everything else, so this cost no new data
