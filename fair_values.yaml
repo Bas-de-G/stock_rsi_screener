@@ -41,8 +41,8 @@ ABF:
   checked: '2026-10-26'
   source: scraped
 ABN:
-  fair_value: 39.0
-  checked: '2026-10-05'
+  fair_value: 43.0
+  checked: '2026-11-14'
   source: scraped
 ABNB:
   fair_value: 185.0
@@ -161,8 +161,8 @@ AMT:
   checked: '2026-11-04'
   source: scraped
 AMX:
-  fair_value: 24.0
-  checked: '2026-10-05'
+  fair_value: 25.0
+  checked: '2026-11-14'
   source: scraped
 AMZN:
   fair_value: 300.0
@@ -178,7 +178,7 @@ AON:
   source: scraped
 APD:
   fair_value: 325.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 APG:
   fair_value: 38.46
@@ -186,7 +186,7 @@ APG:
   source: scraped
 APH:
   fair_value: 100.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 APO:
   fair_value: 143.0
@@ -285,8 +285,8 @@ BKR:
   checked: '2026-10-11'
   source: scraped
 BKW:
-  fair_value: 148.26
-  checked: '2026-10-05'
+  fair_value: 150.36
+  checked: '2026-11-14'
   source: scraped
 BLK:
   fair_value: 1280.0
@@ -341,8 +341,8 @@ BYD:
   checked: '2026-11-09'
   source: scraped
 BYND:
-  fair_value: 13.91
-  checked: '2026-10-05'
+  fair_value: 7.32
+  checked: '2026-11-14'
   source: scraped
 C:
   fair_value: 130.0
@@ -418,7 +418,7 @@ CI:
   source: scraped
 CL:
   fair_value: 88.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 CLOV:
   fair_value: 3.97
@@ -458,7 +458,7 @@ COCO:
   source: scraped
 COF:
   fair_value: 225.0
-  checked: '2026-09-29'
+  checked: '2026-11-14'
   source: scraped
 COIN:
   fair_value: 168.0
@@ -529,8 +529,8 @@ CTAS:
   checked: '2026-10-27'
   source: scraped
 CTPNV:
-  fair_value: 17.03
-  checked: '2026-10-05'
+  fair_value: 15.98
+  checked: '2026-11-14'
   source: scraped
 CTVA:
   fair_value: 20.0
@@ -554,7 +554,7 @@ CX:
   source: scraped
 D:
   fair_value: 73.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 DAL:
   fair_value: 53.0
@@ -586,7 +586,7 @@ DECK:
   source: scraped
 DELL:
   fair_value: 490.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 DEZ:
   fair_value: 13.33
@@ -750,7 +750,7 @@ FANG:
   source: scraped
 FAST:
   fair_value: 39.9
-  checked: '2026-08-26'
+  checked: '2026-11-14'
   source: scraped
 FASTRET:
   fair_value: 71400.0
@@ -770,7 +770,7 @@ FDX:
   source: scraped
 FER:
   fair_value: 80.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 FERG:
   fair_value: 235.0
@@ -850,7 +850,7 @@ GLE:
   source: scraped
 GLW:
   fair_value: 155.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 GM:
   fair_value: 86.0
@@ -894,7 +894,7 @@ HD:
   source: scraped
 HEI:
   fair_value: 294.0
-  checked: '2026-09-08'
+  checked: '2026-11-14'
   source: scraped
 HEIA:
   fair_value: 86.0
@@ -917,8 +917,8 @@ HON:
   checked: '2026-11-09'
   source: scraped
 HOOD:
-  fair_value: 57.0
-  checked: '2026-10-05'
+  fair_value: 59.0
+  checked: '2026-11-14'
   source: scraped
 HOYA:
   fair_value: 34000.0
@@ -965,8 +965,8 @@ INDV:
   checked: '2026-10-21'
   source: scraped
 INGA:
-  fair_value: 25.0
-  checked: '2026-10-05'
+  fair_value: 29.0
+  checked: '2026-11-14'
   source: scraped
 INSM:
   fair_value: 117.83
@@ -1057,8 +1057,8 @@ KNF:
   checked: '2026-10-19'
   source: scraped
 KO:
-  fair_value: 75.0
-  checked: '2026-10-05'
+  fair_value: 80.0
+  checked: '2026-11-14'
   source: scraped
 KOS:
   fair_value: 3.29
@@ -1166,7 +1166,7 @@ LYV:
   source: scraped
 MA:
   fair_value: 550.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 MAIRE:
   fair_value: 13.63
@@ -1198,15 +1198,15 @@ MCK:
   source: scraped
 MCO:
   fair_value: 550.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 MDLZ:
   fair_value: 77.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 MDT:
   fair_value: 112.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 MELI:
   fair_value: 2130.0
@@ -1229,8 +1229,8 @@ MLP:
   checked: '2026-10-08'
   source: scraped
 MMM:
-  fair_value: 120.0
-  checked: '2026-10-05'
+  fair_value: 125.0
+  checked: '2026-11-14'
   source: scraped
 MNST:
   fair_value: 35.0
@@ -1326,7 +1326,7 @@ NN:
   source: scraped
 NOC:
   fair_value: 630.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 NOK:
   fair_value: 8.5
@@ -1337,8 +1337,8 @@ NOW:
   checked: '2026-10-11'
   source: scraped
 NSC:
-  fair_value: 340.0
-  checked: '2026-10-05'
+  fair_value: 337.0
+  checked: '2026-11-14'
   source: scraped
 NTAP:
   fair_value: 194.61
@@ -1370,7 +1370,7 @@ NVDA:
   source: scraped
 NVO:
   fair_value: 42.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 NVS:
   fair_value: 130.0
@@ -1405,8 +1405,8 @@ ONON:
   checked: '2026-10-19'
   source: scraped
 OPEN:
-  fair_value: 2.81
-  checked: '2026-10-05'
+  fair_value: 1.95
+  checked: '2026-11-14'
   source: scraped
 ORA:
   fair_value: 16.5
@@ -1442,7 +1442,7 @@ PDD:
   source: scraped
 PEP:
   fair_value: 169.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 PFE:
   fair_value: 32.0
@@ -1513,8 +1513,8 @@ PNC:
   checked: '2026-10-11'
   source: scraped
 PNE3:
-  fair_value: 9.22
-  checked: '2026-10-05'
+  fair_value: 7.04
+  checked: '2026-11-14'
   source: scraped
 PNR:
   fair_value: 91.0
@@ -1553,8 +1553,8 @@ PUM:
   checked: '2026-10-19'
   source: scraped
 PWR:
-  fair_value: 410.0
-  checked: '2026-10-05'
+  fair_value: 440.0
+  checked: '2026-11-14'
   source: scraped
 PYPL:
   fair_value: 80.0
@@ -1601,8 +1601,8 @@ RIG:
   checked: '2026-10-11'
   source: scraped
 RIO:
-  fair_value: 88.0
-  checked: '2026-10-05'
+  fair_value: 91.0
+  checked: '2026-11-14'
   source: scraped
 RL:
   fair_value: 250.0
@@ -1630,7 +1630,7 @@ RSG:
   source: scraped
 RTO:
   fair_value: 510.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 RTX:
   fair_value: 227.0
@@ -1746,11 +1746,11 @@ SPCX:
   source: scraped
 SPGI:
   fair_value: 525.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 SPIE:
-  fair_value: 45.9
-  checked: '2026-10-05'
+  fair_value: 49.25
+  checked: '2026-11-14'
   source: scraped
 SRE:
   fair_value: 90.0
@@ -1789,8 +1789,8 @@ SYY:
   checked: '2026-10-21'
   source: scraped
 T:
-  fair_value: 27.0
-  checked: '2026-10-05'
+  fair_value: 21.0
+  checked: '2026-11-14'
   source: scraped
 TCOM:
   fair_value: 63.0
@@ -1825,8 +1825,8 @@ TKC:
   checked: '2026-10-30'
   source: scraped
 TM:
-  fair_value: 237.0
-  checked: '2026-10-05'
+  fair_value: 253.0
+  checked: '2026-11-14'
   source: scraped
 TMO:
   fair_value: 590.0
@@ -1913,8 +1913,8 @@ UPST:
   checked: '2026-10-06'
   source: scraped
 USB:
-  fair_value: 65.0
-  checked: '2026-10-05'
+  fair_value: 69.0
+  checked: '2026-11-14'
   source: scraped
 USFD:
   fair_value: 65.0
@@ -1938,7 +1938,7 @@ VIPS:
   source: scraped
 VLO:
   fair_value: 238.0
-  checked: '2026-10-05'
+  checked: '2026-11-14'
   source: scraped
 VMC:
   fair_value: 238.0
@@ -1957,8 +1957,8 @@ VRT:
   checked: '2026-10-21'
   source: scraped
 VRTX:
-  fair_value: 450.0
-  checked: '2026-10-05'
+  fair_value: 510.0
+  checked: '2026-11-14'
   source: scraped
 VST:
   fair_value: 106.0
@@ -2033,8 +2033,8 @@ XPEV:
   checked: '2026-10-21'
   source: scraped
 XPLRA:
-  fair_value: 35.88
-  checked: '2026-10-05'
+  fair_value: 35.44
+  checked: '2026-11-14'
   source: scraped
 XYL:
   fair_value: 121.0
