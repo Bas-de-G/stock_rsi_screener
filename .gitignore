@@ -13,6 +13,9 @@ data/*.log
 debug/
 site/
 
+# --- Outside lists with Morningstar values (agreed not to publish) ---
+private/
+
 # --- Python ---
 __pycache__/
 *.py[cod]

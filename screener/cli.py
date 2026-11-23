@@ -1626,6 +1626,127 @@ def _journal_recommendations(store: Store, config: Config) -> int:
     return journal.added
 
 
+def _us_fair_values(config: Config) -> dict[str, tuple[float, str]]:
+    """Fair values on file for US-listed, dollar-quoted tickers, keyed by the
+    exchange symbol an outside list would use (NASDAQ:BRK.B -> BRK.B)."""
+    values = load_fair_values(config.storage.fair_values)
+    out: dict[str, tuple[float, str]] = {}
+    for ticker in config.tickers:
+        exchange, _, name = ticker.tradingview.partition(":")
+        fv = values.get(ticker.symbol)
+        if fv and exchange in ("NASDAQ", "NYSE", "AMEX") and ticker.currency == "USD":
+            out[name.upper()] = (fv.fair_value, fv.checked or "")
+    return out
+
+
+def cmd_watchlist(config: Config, args) -> int:
+    """Fair values for an outside ranked CSV (Fred's Sunrise export), kept private.
+
+    Fills what `fair_values.yaml` already knows, then scrapes the next
+    `--limit` tickers in rank order. Writes a copy of the CSV with fair-value
+    columns added -- never to `fair_values.yaml`, never anywhere git would
+    commit. See `screener/watchlist.py`.
+    """
+    from . import watchlist as wl
+    from .config import Ticker
+    from .tradingview import MarketDataError, existing_closes
+
+    source = Path(args.csv).expanduser()
+    if not source.exists():
+        print(f"  ! {source} not found")
+        return 1
+    output = Path(args.out).expanduser() if args.out else wl.default_output(source)
+    repo_root = Path(__file__).resolve().parent.parent
+    try:
+        wl.assert_private(output, repo_root)
+        columns, rows = wl.read_rows(source)
+    except wl.WatchlistError as exc:
+        print(f"  ! {exc}")
+        return 1
+    if output.exists():
+        _, previous = wl.read_rows(output)
+        wl.merge_previous(rows, previous)
+
+    symbols = [wl.symbol_of(r) for r in rows if wl.symbol_of(r)]
+    try:
+        listings = wl.resolve_listings(symbols, existing_closes)
+    except MarketDataError as exc:
+        print(f"  ! {exc}")
+        return 1
+    today = dt.date.today()
+    for row in rows:
+        if wl.symbol_of(row) not in listings and row.get("Fair Value Status") != wl.COVERED:
+            wl.record(row, wl.UNLISTED, checked=today.isoformat(),
+                      note="no NASDAQ, NYSE or AMEX listing on TradingView")
+
+    filled = wl.fill_from_screener(rows, _us_fair_values(config), listings)
+    wl.mark_unchecked(rows)
+    print(f"{len(rows)} tickers in {source.name}; {len(listings)} on a US exchange; "
+          f"{filled} filled from {config.storage.fair_values.name}")
+
+    todo = [r for r in wl.due(rows, today, args.max_age) if wl.symbol_of(r) in listings]
+    todo = todo[: max(args.limit, 0)]
+    wl.write_rows(output, columns, rows)
+    if not todo:
+        print(f"Nothing to scrape this run → {output}")
+        return 0
+    if args.dry_run:
+        print(f"Would visit {len(todo)}, in this order:")
+        for row in todo:
+            print(f"  {row.get(wl.RANK_COLUMN, ''):>5}  {wl.symbol_of(row)}")
+        return 0
+
+    from .morningstar import scrape_many
+
+    by_symbol = {wl.symbol_of(r): r for r in rows}
+    targets = [
+        Ticker(symbol=s, tradingview=listings[s].tradingview, morningstar=listings[s].morningstar)
+        for s in (wl.symbol_of(r) for r in todo)
+    ]
+    refs = {t.symbol: listings[t.symbol].close for t in targets if listings[t.symbol].close}
+    counts = Counter()
+    print(f"Visiting {len(targets)} Morningstar pages, about "
+          f"{len(targets) * 13 // 60 + 1} min at the usual pace…")
+
+    def report(ticker, result, error):
+        row = by_symbol[ticker.symbol]
+        listing = listings[ticker.symbol]
+        if error:
+            wl.record(row, wl.FAILED, listing=listing, note=error[:200])
+            print(f"  {ticker.symbol}: failed — {error[:120]}")
+        elif result.fair_value is None:
+            wl.record(row, wl.NO_FAIR_VALUE, listing=listing, checked=today.isoformat(),
+                      note="page loaded, signed in, no Fair Value shown")
+            print(f"  {ticker.symbol}: no fair value on Morningstar")
+        else:
+            wl.record(row, wl.COVERED, listing=listing, fair_value=result.fair_value,
+                      checked=today.isoformat(), source="scraped")
+            print(f"  {ticker.symbol}: fair value {result.fair_value:,.2f} "
+                  f"({row['Upside to Fair Value']} upside)")
+        counts[row["Fair Value Status"]] += 1
+        wl.write_rows(output, columns, rows)  # after every page, so a stop loses nothing
+
+    # A page that never offers an estimate is the common case on this list, not
+    # a fault worth an HTML dump and screenshot each.
+    ms_config = replace(config.morningstar, debug_on_failure=False)
+    try:
+        scrape_many(targets, ms_config, on_result=report, reference_prices=refs)
+    except (AuthenticationError, BotChallengeError) as exc:
+        print(f"\n  {exc}\n  Progress so far is saved; re-run to continue.")
+        return 1
+    except MorningstarError as exc:
+        print(f"\n  Scrape failed: {exc}\n  Progress so far is saved; re-run to continue.")
+        return 1
+    finally:
+        wl.write_rows(output, columns, rows)
+
+    left = sum(1 for r in rows if r.get("Fair Value Status") in (wl.PENDING, wl.FAILED))
+    print(f"\n{counts[wl.COVERED]} with a fair value, {counts[wl.NO_FAIR_VALUE]} without, "
+          f"{counts[wl.FAILED]} failed; {left} still to do → {output}")
+    print("  This file stays private: share it with Fred directly, don't commit it.")
+    return 0
+
+
 def cmd_dashboard(config: Config, args) -> int:
     from .dashboard import build_all_dashboards, build_dashboard
 
@@ -2130,6 +2251,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_scrape.add_argument("--date", help="date to record against (default: today)")
     p_scrape.add_argument("--note", help="optional note stored with every value in this run")
     p_scrape.set_defaults(func=cmd_scrape)
+
+    p_wl = sub.add_parser(
+        "watchlist",
+        help="fair values for an outside ranked CSV, written to a private copy (needs `login`)",
+    )
+    p_wl.add_argument("csv", help="the ranked CSV, e.g. Fred's Sunrise export")
+    p_wl.add_argument("--out", help="where to write (default: <csv name>_fair_values.csv beside it)")
+    p_wl.add_argument(
+        "--limit", type=int, default=30, metavar="N",
+        help="Morningstar pages to visit this run, top of the ranking first (default: 30; "
+             "0 only fills from fair_values.yaml)",
+    )
+    p_wl.add_argument(
+        "--max-age", type=int, default=DEFAULT_MAX_FAIR_VALUE_AGE_DAYS, dest="max_age",
+        help=f"days an answer stays fresh (default: {DEFAULT_MAX_FAIR_VALUE_AGE_DAYS})",
+    )
+    p_wl.add_argument("--dry-run", action="store_true", help="list what would be visited")
+    p_wl.set_defaults(func=cmd_watchlist)
 
     p_dash = sub.add_parser("dashboard", help="build the shareable HTML dashboard")
     p_dash.add_argument("--output", help="override the output path")
