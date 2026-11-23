@@ -472,6 +472,15 @@ from `_resolve_scrape_targets`, so "you named a symbol that doesn't exist"
 stays distinguishable from "that one is still fresh" — the first is a non-zero
 exit, the second is the feature working.
 
+**`watchlist` output is private, and the code enforces it.** Fred's ranked
+CSV gets fair values written to a copy beside it, never to `fair_values.yaml`
+-- the agreement is that those values are not published, and this repo is
+public. `watchlist.assert_private` refuses any output path inside the repo
+that git does not ignore (`private/` is ignored for this). Tickers the
+screener already values are filled from the YAML and never revisited by
+`watchlist`: `scrape` keeps them fresh, and Fred's page budget goes to the
+ones nobody has read yet.
+
 **A scrape result can be incomplete without raising.** `_scrape_on_page`
 returns a `ScrapeResult` with `price=None` or `fair_value=None` when the page
 loads fine, isn't a bot challenge and isn't signed out, but extraction still

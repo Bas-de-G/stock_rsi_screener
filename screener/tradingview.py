@@ -245,6 +245,33 @@ DISCOVERY_COLUMNS = (
 )
 
 
+def existing_closes(tv_symbols: list[str]) -> dict[str, float | None]:
+    """Which of these TradingView symbols exist, with their latest close.
+
+    Asking for a symbol that doesn't exist is not an error to the scanner -- it
+    just leaves that row out -- so this doubles as a listing lookup: ask for
+    NASDAQ:X, NYSE:X and AMEX:X, and whichever comes back is where X trades.
+    """
+    out: dict[str, float | None] = {}
+    for start in range(0, len(tv_symbols), SCAN_CHUNK):
+        chunk = tv_symbols[start : start + SCAN_CHUNK]
+        try:
+            resp = requests.post(
+                _SCAN_URL,
+                json={"symbols": {"tickers": chunk, "query": {"types": []}}, "columns": ["close"]},
+                headers={**_HEADERS, "Content-Type": "application/json"},
+                timeout=_TIMEOUT * 3,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise MarketDataError(f"TradingView lookup failed: {exc}") from exc
+        for row in payload.get("data", []) or []:
+            values = row.get("d") or [None]
+            out[row.get("s", "")] = values[0]
+    return out
+
+
 def discover_market(
     market: str,
     min_market_cap: float = 0.0,

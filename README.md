@@ -626,6 +626,36 @@ Add `--push` to commit and push automatically when you trust it. Either way,
 once the file lands on `main` the next scheduled run rebuilds the dashboard —
 which is how the values reach anyone else looking at the page.
 
+### Fair values for Fred's watchlist (kept private)
+
+Fred's Sunrise V2 exports a ranked CSV of US tickers. These values are agreed
+**not** to be published, so they never go into `fair_values.yaml`:
+
+```bash
+python -m screener.cli watchlist ~/Downloads/Sunrise_V2_Recent_Oversold_2026-11-20.csv
+python -m screener.cli watchlist <csv> --limit 0     # only fill what we already know
+python -m screener.cli watchlist <csv> --dry-run     # which tickers it would visit
+```
+
+It writes `<csv name>_fair_values.csv` next to the input: every column of
+Fred's file, plus the fair value, its currency, the upside against his price
+column, a status, the check date, the source and the Morningstar listing.
+
+1. **Fill.** Every ticker the screener already values is copied in from
+   `fair_values.yaml` -- no Morningstar visit.
+2. **Scrape.** The next `--limit` tickers (default 30), top of his ranking
+   first, through the same logged-in browser and pacing as `scrape`.
+
+Each row ends in one status: `covered`, `no fair value` (the page loaded and
+shows no estimate -- Morningstar's analysts don't cover it), `failed` (the note
+says why; retried next run), `not listed in US`, or `not checked yet`. Re-run
+the same command to do the next 30: answers already collected are kept, even
+if Fred sends a re-ranked file, and are re-checked after 40 days.
+
+It refuses to write inside this repo unless the path is gitignored (`private/`
+is), so the file can't be committed by accident. Upload it to Fred's Drive
+folder yourself.
+
 ### Why this runs on your laptop and not in CI
 
 Three reasons, and they compound:
