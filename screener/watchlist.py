@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import glob
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -230,8 +232,45 @@ def write_rows(path: Path, columns: list[str], rows: list[dict]) -> None:
     tmp.replace(path)
 
 
-def default_output(source: Path) -> Path:
-    return source.with_name(f"{source.stem}_fair_values.csv")
+_DATED = re.compile(r"^(?P<base>.+)_\d{4}-\d{2}-\d{2}$")
+
+
+def has_fair_values(path: Path) -> bool:
+    """Whether this CSV is one of our outputs rather than Fred's raw export."""
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        header = next(csv.reader(fh), [])
+    return "Fair Value Status" in header
+
+
+def output_base(source: Path) -> str:
+    """The name outputs are dated from: Fred's file name, as he sent it.
+
+    Feeding an earlier output back in (say, one downloaded again from the
+    Drive folder) strips the date this tool added, so the next run is
+    `<his name>_<today>` and not a growing chain of dates. A raw export keeps
+    its own date -- `..._Oversold_2026-11-20` is Fred's, not ours.
+    """
+    if has_fair_values(source):
+        match = _DATED.match(source.stem)
+        if match:
+            return match.group("base")
+    return source.stem
+
+
+def default_output(source: Path, today: dt.date) -> Path:
+    """`<Fred's file name>_<today>.csv`, beside the input."""
+    return source.with_name(f"{output_base(source)}_{today.isoformat()}.csv")
+
+
+def previous_outputs(source: Path) -> list[Path]:
+    """Earlier dated outputs for this list, oldest first -- what a rerun on a
+    later day resumes from, now that each day writes a new file."""
+    base = output_base(source)
+    found = [
+        p for p in source.parent.glob(f"{glob.escape(base)}_????-??-??.csv")
+        if _DATED.match(p.stem) and _DATED.match(p.stem).group("base") == base
+    ]
+    return sorted(found)
 
 
 def assert_private(path: Path, repo_root: Path) -> None:

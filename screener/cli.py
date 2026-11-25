@@ -1655,7 +1655,8 @@ def cmd_watchlist(config: Config, args) -> int:
     if not source.exists():
         print(f"  ! {source} not found")
         return 1
-    output = Path(args.out).expanduser() if args.out else wl.default_output(source)
+    today = dt.date.today()
+    output = Path(args.out).expanduser() if args.out else wl.default_output(source, today)
     repo_root = Path(__file__).resolve().parent.parent
     try:
         wl.assert_private(output, repo_root)
@@ -1663,8 +1664,13 @@ def cmd_watchlist(config: Config, args) -> int:
     except wl.WatchlistError as exc:
         print(f"  ! {exc}")
         return 1
-    if output.exists():
-        _, previous = wl.read_rows(output)
+    # Each day writes a new dated file, so resume from every earlier one,
+    # oldest first: a later answer for the same ticker overrides an older one.
+    earlier = [p for p in wl.previous_outputs(source) if p != source]
+    if output.exists() and output not in earlier:
+        earlier.append(output)
+    for path in earlier:
+        _, previous = wl.read_rows(path)
         wl.merge_previous(rows, previous)
 
     symbols = [wl.symbol_of(r) for r in rows if wl.symbol_of(r)]
@@ -1673,7 +1679,6 @@ def cmd_watchlist(config: Config, args) -> int:
     except MarketDataError as exc:
         print(f"  ! {exc}")
         return 1
-    today = dt.date.today()
     for row in rows:
         if wl.symbol_of(row) not in listings and row.get("Fair Value Status") != wl.COVERED:
             wl.record(row, wl.UNLISTED, checked=today.isoformat(),
@@ -2257,7 +2262,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="fair values for an outside ranked CSV, written to a private copy (needs `login`)",
     )
     p_wl.add_argument("csv", help="the ranked CSV, e.g. Fred's Sunrise export")
-    p_wl.add_argument("--out", help="where to write (default: <csv name>_fair_values.csv beside it)")
+    p_wl.add_argument("--out", help="where to write (default: <csv name>_<today>.csv beside it)")
     p_wl.add_argument(
         "--limit", type=int, default=30, metavar="N",
         help="Morningstar pages to visit this run, top of the ranking first (default: 30; "

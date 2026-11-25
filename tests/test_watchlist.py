@@ -194,3 +194,58 @@ def test_values_the_screener_holds_are_never_revisited_even_when_old():
     rows = [{"Ticker": "OLD", "Fair Value Status": wl.COVERED,
              "Fair Value Checked": "2025-01-01", "Fair Value Source": "screener"}]
     assert wl.due(rows, dt.date(2026, 11, 23), 40) == []
+
+
+def test_the_output_is_the_input_name_plus_todays_date(tmp_path):
+    src = write_csv(tmp_path / "Sunrise_V2_Recent_Oversold_2026-11-20.csv", ["1,AAA,10"])
+    out = wl.default_output(src, dt.date(2026, 11, 25))
+    # Fred's own date stays: it is part of his file's name, not ours.
+    assert out.name == "Sunrise_V2_Recent_Oversold_2026-11-20_2026-11-25.csv"
+
+
+def test_an_earlier_output_fed_back_in_gets_its_date_replaced_not_stacked(tmp_path):
+    src = write_csv(tmp_path / "fred_2026-11-20.csv", ["1,AAA,10"])
+    columns, rows = wl.read_rows(src)
+    wl.mark_unchecked(rows)
+    earlier = tmp_path / "fred_2026-11-20_2026-11-23.csv"
+    wl.write_rows(earlier, columns, rows)
+    assert wl.default_output(earlier, dt.date(2026, 11, 25)).name == "fred_2026-11-20_2026-11-25.csv"
+
+
+def test_previous_outputs_finds_only_this_lists_dated_files(tmp_path):
+    src = write_csv(tmp_path / "fred.csv", ["1,AAA,10"])
+    for name in ("fred_2026-11-23.csv", "fred_2026-11-21.csv", "fred_extra_2026-11-22.csv",
+                 "other_2026-11-22.csv", "fred_fair_values.csv"):
+        (tmp_path / name).write_text("Ticker\n")
+    assert [p.name for p in wl.previous_outputs(src)] == ["fred_2026-11-21.csv", "fred_2026-11-23.csv"]
+
+
+def test_a_rerun_on_a_later_day_resumes_from_yesterdays_file(tmp_path, monkeypatch):
+    import argparse
+    from screener import cli, morningstar, tradingview
+    from screener.config import load_config
+    from screener.morningstar import ScrapeResult
+
+    src = write_csv(tmp_path / "fred.csv", ["1,AAA,10", "2,BBB,10"])
+    columns, rows = wl.read_rows(src)
+    wl.record(rows[0], wl.NO_FAIR_VALUE, checked=dt.date.today().isoformat())
+    wl.mark_unchecked(rows)
+    wl.write_rows(tmp_path / "fred_2000-01-01.csv", columns, rows)
+
+    monkeypatch.setattr(tradingview, "existing_closes",
+                        fake_scan({"NASDAQ:AAA": 10.0, "NASDAQ:BBB": 10.0}))
+    visits = []
+
+    def fake_scrape(tickers, ms_config, on_result=None, **_):
+        for t in tickers:
+            visits.append(t.symbol)
+            on_result(t, ScrapeResult(t.symbol, 10.0, 12.0), None)
+
+    monkeypatch.setattr(morningstar, "scrape_many", fake_scrape)
+    args = argparse.Namespace(csv=str(src), out=None, limit=30, max_age=40, dry_run=False)
+    assert cli.cmd_watchlist(load_config(), args) == 0
+    assert visits == ["BBB"]  # AAA was answered in the older file
+    out = tmp_path / f"fred_{dt.date.today().isoformat()}.csv"
+    rows = {wl.symbol_of(r): r for r in csv.DictReader(out.open(encoding="utf-8"))}
+    assert rows["AAA"]["Fair Value Status"] == wl.NO_FAIR_VALUE
+    assert rows["BBB"]["Fair Value Status"] == wl.COVERED

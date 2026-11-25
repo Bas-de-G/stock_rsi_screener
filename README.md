@@ -637,9 +637,14 @@ python -m screener.cli watchlist <csv> --limit 0     # only fill what we already
 python -m screener.cli watchlist <csv> --dry-run     # which tickers it would visit
 ```
 
-It writes `<csv name>_fair_values.csv` next to the input: every column of
+It writes `<csv name>_<today>.csv` next to the input -- for
+`Sunrise_V2_Recent_Oversold_2026-11-20.csv` run on 25 November, that is
+`Sunrise_V2_Recent_Oversold_2026-11-20_2026-11-25.csv`: every column of
 Fred's file, plus the fair value, its currency, the upside against his price
 column, a status, the check date, the source and the Morningstar listing.
+Each day gets its own file, and each run picks up the answers in the earlier
+dated files beside it. Feeding one of those dated files back in works too: it
+replaces the date rather than adding a second one.
 
 1. **Fill.** Every ticker the screener already values is copied in from
    `fair_values.yaml` -- no Morningstar visit.
